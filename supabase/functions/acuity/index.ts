@@ -36,9 +36,15 @@ serve(async (req) => {
     switch (action) {
       case 'get-appointments': {
         // Fetch appointments for a specific client
-        const appointmentsUrl = clientEmail 
-          ? `${ACUITY_API_BASE}/appointments?email=${encodeURIComponent(clientEmail)}`
-          : `${ACUITY_API_BASE}/appointments`;
+        // Include minDate to get future appointments (Acuity defaults to past only)
+        const today = new Date();
+        const minDate = new Date(today.getFullYear(), today.getMonth() - 3, 1).toISOString().split('T')[0]; // 3 months ago
+        const maxDate = new Date(today.getFullYear(), today.getMonth() + 6, 0).toISOString().split('T')[0]; // 6 months ahead
+        
+        let appointmentsUrl = `${ACUITY_API_BASE}/appointments?minDate=${minDate}&maxDate=${maxDate}&max=100`;
+        if (clientEmail) {
+          appointmentsUrl += `&email=${encodeURIComponent(clientEmail)}`;
+        }
         
         console.log(`Fetching appointments from: ${appointmentsUrl}`);
         
