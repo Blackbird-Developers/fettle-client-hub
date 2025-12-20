@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.get-payment-history]
 verify_jwt = false
+
+[functions.cancel-session-with-refund]
+verify_jwt = false
