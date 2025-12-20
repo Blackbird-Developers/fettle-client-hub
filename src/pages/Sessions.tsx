@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { BookingModal } from "@/components/booking/BookingModal";
 import { useAcuityAppointments, cancelAppointment, AcuityAppointment } from "@/hooks/useAcuity";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import { Plus, Calendar, Clock, User, Video, MapPin, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -164,7 +165,8 @@ function SessionSkeleton() {
 
 export default function Sessions() {
   const [bookingOpen, setBookingOpen] = useState(false);
-  const { appointments, loading, error, refetch } = useAcuityAppointments();
+  const { user } = useAuth();
+  const { appointments, loading, error, refetch } = useAcuityAppointments(user?.email);
 
   const now = new Date();
   const upcomingSessions = appointments.filter(apt => 
