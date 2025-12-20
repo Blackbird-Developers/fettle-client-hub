@@ -32,8 +32,8 @@ import { Clock, User, Calendar as CalendarIcon, CreditCard, Users, RefreshCw, Lo
 import { cn } from '@/lib/utils';
 
 // Initialize Stripe
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
-
+const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
+const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null;
 interface BookingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -61,6 +61,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
+  const [paymentLivemode, setPaymentLivemode] = useState<boolean | null>(null);
   const [bookingResult, setBookingResult] = useState<{ appointment: any; receiptUrl?: string } | null>(null);
 
   const { toast } = useToast();
@@ -143,6 +144,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
       setClientSecret(data.clientSecret);
       setPaymentIntentId(data.paymentIntentId);
       setPaymentAmount(data.amount);
+      setPaymentLivemode(typeof data.livemode === 'boolean' ? data.livemode : null);
       setStep('payment');
     } catch (error) {
       toast({
@@ -170,6 +172,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
     setClientSecret(null);
     setPaymentIntentId(null);
     setPaymentAmount(0);
+    setPaymentLivemode(null);
     setBookingResult(null);
     onOpenChange(false);
     
@@ -541,13 +544,55 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
           </div>
         );
 
-      case 'payment':
+      case 'payment': {
         if (!clientSecret || !paymentIntentId) return null;
-        
+
+        if (!stripePromise) {
+          return (
+            <div className="space-y-4">
+              <p className="text-sm text-destructive">
+                Payments are not configured: missing Stripe publishable key.
+              </p>
+              <Button variant="ghost" onClick={() => setStep('confirm')} className="w-full">
+                Back
+              </Button>
+            </div>
+          );
+        }
+
+        const publishableMode = stripePublishableKey?.startsWith('pk_live_')
+          ? 'live'
+          : stripePublishableKey?.startsWith('pk_test_')
+            ? 'test'
+            : 'unknown';
+
+        const intentMode = paymentLivemode === null ? 'unknown' : paymentLivemode ? 'live' : 'test';
+        const modeMismatch =
+          publishableMode !== 'unknown' &&
+          intentMode !== 'unknown' &&
+          publishableMode !== intentMode;
+
+        if (modeMismatch) {
+          return (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+                <p className="font-medium text-destructive">Stripe keys mismatch</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Your frontend is using <span className="font-medium">{publishableMode}</span> publishable key, but the payment was created in <span className="font-medium">{intentMode}</span> mode.
+                  Update your backend Stripe secret key to the same mode (test vs live).
+                </p>
+              </div>
+              <Button variant="ghost" onClick={() => setStep('confirm')} className="w-full">
+                Back
+              </Button>
+            </div>
+          );
+        }
+
         return (
-          <Elements 
-            stripe={stripePromise} 
-            options={{ 
+          <Elements
+            stripe={stripePromise}
+            options={{
               clientSecret,
               appearance: {
                 theme: 'stripe',
@@ -566,6 +611,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
             />
           </Elements>
         );
+      }
 
       case 'success':
         return (

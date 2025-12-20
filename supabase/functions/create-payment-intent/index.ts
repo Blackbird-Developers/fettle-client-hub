@@ -105,6 +105,7 @@ serve(async (req) => {
 
     logStep("PaymentIntent created", { 
       paymentIntentId: paymentIntent.id, 
+      livemode: paymentIntent.livemode,
       clientSecret: paymentIntent.client_secret?.slice(0, 20) + "..." 
     });
 
@@ -112,7 +113,8 @@ serve(async (req) => {
       clientSecret: paymentIntent.client_secret,
       paymentIntentId: paymentIntent.id,
       amount: amountInCents,
-      currency: "eur"
+      currency: "eur",
+      livemode: paymentIntent.livemode,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
