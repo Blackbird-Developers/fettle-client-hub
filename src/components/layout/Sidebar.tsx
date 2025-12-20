@@ -1,8 +1,10 @@
-import { Calendar, Home, FileText, User, LogOut, Plus } from "lucide-react";
+import { useState } from "react";
+import { Calendar, Home, FileText, User, LogOut, Plus, Menu, X } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: Home },
@@ -11,7 +13,7 @@ const navigation = [
   { name: "Profile", href: "/profile", icon: User },
 ];
 
-export function Sidebar() {
+function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, signOut } = useAuth();
@@ -26,7 +28,7 @@ export function Sidebar() {
     : profile?.email || 'User';
 
   return (
-    <aside className="flex h-screen w-64 flex-col bg-sidebar border-r border-sidebar-border">
+    <>
       {/* Logo */}
       <div className="flex h-16 items-center px-6 border-b border-sidebar-border">
         <span className="font-heading text-2xl font-bold text-primary">
@@ -43,6 +45,7 @@ export function Sidebar() {
             <NavLink
               key={item.name}
               to={item.href}
+              onClick={onNavigate}
               className={cn(
                 "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200",
                 isActive
@@ -59,7 +62,7 @@ export function Sidebar() {
 
       {/* Book Session CTA */}
       <div className="px-4 pb-4">
-        <Button className="w-full gap-2 shadow-soft" size="lg" asChild>
+        <Button className="w-full gap-2 shadow-soft" size="lg" asChild onClick={onNavigate}>
           <NavLink to="/sessions">
             <Plus className="h-4 w-4" />
             Book Session
@@ -90,6 +93,41 @@ export function Sidebar() {
           </button>
         </div>
       </div>
+    </>
+  );
+}
+
+export function MobileHeader() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <header className="lg:hidden flex items-center justify-between h-16 px-4 border-b border-border bg-sidebar">
+      <div className="flex items-center">
+        <span className="font-heading text-xl font-bold text-primary">fettle</span>
+        <span className="ml-1 text-xs text-muted-foreground">.ie</span>
+      </div>
+      
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetTrigger asChild>
+          <Button variant="ghost" size="icon" className="lg:hidden">
+            <Menu className="h-6 w-6" />
+            <span className="sr-only">Toggle menu</span>
+          </Button>
+        </SheetTrigger>
+        <SheetContent side="left" className="w-72 p-0 bg-sidebar">
+          <div className="flex h-full flex-col">
+            <SidebarContent onNavigate={() => setOpen(false)} />
+          </div>
+        </SheetContent>
+      </Sheet>
+    </header>
+  );
+}
+
+export function Sidebar() {
+  return (
+    <aside className="hidden lg:flex h-screen w-64 flex-col bg-sidebar border-r border-sidebar-border">
+      <SidebarContent />
     </aside>
   );
 }

@@ -29,16 +29,16 @@ export function WelcomeHeader() {
   }
 
   return (
-    <div className="mb-8 animate-fade-in">
-      <div className="flex items-center gap-3 mb-2">
-        <div className="p-2 rounded-xl bg-primary/10">
-          <Icon className="h-6 w-6 text-primary" />
+    <div className="mb-6 sm:mb-8 animate-fade-in">
+      <div className="flex items-center gap-2 sm:gap-3 mb-2">
+        <div className="p-2 rounded-xl bg-primary/10 shrink-0">
+          <Icon className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
         </div>
-        <h1 className="font-heading text-3xl font-bold text-foreground">
+        <h1 className="font-heading text-xl sm:text-2xl lg:text-3xl font-bold text-foreground">
           {greeting.text}, {displayName}
         </h1>
       </div>
-      <p className="text-muted-foreground ml-14">
+      <p className="text-sm sm:text-base text-muted-foreground ml-11 sm:ml-14">
         Here's an overview of your therapy journey
       </p>
     </div>

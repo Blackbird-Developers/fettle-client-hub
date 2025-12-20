@@ -12,12 +12,12 @@ export default function Dashboard() {
       <WelcomeHeader />
       <QuickStats />
       
-      <div className="grid lg:grid-cols-3 gap-6 mt-8">
-        <div className="lg:col-span-2 space-y-6">
+      <div className="grid lg:grid-cols-3 gap-4 sm:gap-6 mt-6 sm:mt-8">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-6">
           <UpcomingSessions />
           <ProgressDashboard />
         </div>
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           <PackagesPromo />
           <RecentActivity />
         </div>
