@@ -1,4 +1,5 @@
 import { Sun, Moon, Cloud } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 function getGreeting(): { text: string; icon: typeof Sun } {
   const hour = new Date().getHours();
@@ -10,6 +11,9 @@ function getGreeting(): { text: string; icon: typeof Sun } {
 export function WelcomeHeader() {
   const greeting = getGreeting();
   const Icon = greeting.icon;
+  const { profile } = useAuth();
+
+  const displayName = profile?.first_name || profile?.email?.split('@')[0] || "there";
 
   return (
     <div className="mb-8 animate-fade-in">
@@ -18,7 +22,7 @@ export function WelcomeHeader() {
           <Icon className="h-6 w-6 text-primary" />
         </div>
         <h1 className="font-heading text-3xl font-bold text-foreground">
-          {greeting.text}, Sarah
+          {greeting.text}, {displayName}
         </h1>
       </div>
       <p className="text-muted-foreground ml-14">
