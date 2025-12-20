@@ -1,5 +1,7 @@
 import { useState, useMemo } from 'react';
 import { format, addMonths } from 'date-fns';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements } from '@stripe/react-stripe-js';
 import {
   Dialog,
   DialogContent,
@@ -25,8 +27,12 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { Clock, User, Calendar as CalendarIcon, CreditCard, Sparkles, CalendarPlus, Users, RefreshCw, Loader2 } from 'lucide-react';
+import { PaymentForm } from './PaymentForm';
+import { Clock, User, Calendar as CalendarIcon, CreditCard, Users, RefreshCw, Loader2, CheckCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+// Initialize Stripe
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 
 interface BookingModalProps {
   open: boolean;
@@ -34,7 +40,7 @@ interface BookingModalProps {
   onBookingComplete?: () => void;
 }
 
-type Step = 'type' | 'therapist' | 'date' | 'time' | 'details' | 'confirm';
+type Step = 'type' | 'therapist' | 'date' | 'time' | 'details' | 'confirm' | 'payment' | 'success';
 
 export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingModalProps) {
   const [step, setStep] = useState<Step>('type');
@@ -50,6 +56,12 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
     phone: '',
     notes: '',
   });
+  
+  // Payment state
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState<number>(0);
+  const [bookingResult, setBookingResult] = useState<{ appointment: any; receiptUrl?: string } | null>(null);
 
   const { toast } = useToast();
   const { profile } = useAuth();
@@ -78,7 +90,6 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   const availableTherapists = useMemo(() => {
     if (!selectedTypeData || !calendars.length) return [];
     
-    // calendarIDs on the appointment type tells us which therapists offer this service
     const calendarIds = selectedTypeData.calendarIDs || [];
     return calendars.filter(calendar => calendarIds.includes(calendar.id));
   }, [selectedTypeData, calendars]);
@@ -87,7 +98,6 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   const previousTherapist = useMemo(() => {
     if (!appointments.length) return null;
     
-    // Find the most recent completed appointment
     const sortedAppointments = [...appointments]
       .filter(a => !a.canceled)
       .sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
@@ -105,13 +115,13 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
     return availableDateStrings.includes(dateString);
   };
 
-  const handleSubmit = async () => {
+  const handleProceedToPayment = async () => {
     if (!selectedType || !selectedTime || !selectedTypeData) return;
 
     setIsSubmitting(true);
     try {
-      // Create Stripe checkout session
-      const { data, error } = await supabase.functions.invoke('create-session-payment', {
+      // Create PaymentIntent
+      const { data, error } = await supabase.functions.invoke('create-payment-intent', {
         body: {
           appointmentTypeID: selectedType,
           appointmentTypeName: selectedTypeData.name,
@@ -130,20 +140,24 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
       if (error) throw error;
       if (data.error) throw new Error(data.error);
 
-      // Redirect to Stripe checkout
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        throw new Error('No checkout URL received');
-      }
+      setClientSecret(data.clientSecret);
+      setPaymentIntentId(data.paymentIntentId);
+      setPaymentAmount(data.amount);
+      setStep('payment');
     } catch (error) {
       toast({
         title: 'Payment Setup Failed',
-        description: error instanceof Error ? error.message : 'Failed to start payment',
+        description: error instanceof Error ? error.message : 'Failed to initialize payment',
         variant: 'destructive',
       });
+    } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handlePaymentSuccess = (result: { appointment: any; receiptUrl?: string }) => {
+    setBookingResult(result);
+    setStep('success');
   };
 
   const handleClose = () => {
@@ -153,7 +167,15 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
     setSelectedDate(undefined);
     setSelectedTime(null);
     setFormData({ firstName: '', lastName: '', email: '', phone: '', notes: '' });
+    setClientSecret(null);
+    setPaymentIntentId(null);
+    setPaymentAmount(0);
+    setBookingResult(null);
     onOpenChange(false);
+    
+    if (bookingResult) {
+      onBookingComplete?.();
+    }
   };
 
   const handleSelectTherapist = (calendarId: number) => {
@@ -273,7 +295,6 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
             ) : availableTherapists.length > 0 ? (
               <ScrollArea className="h-[300px] pr-4">
                 <div className="space-y-3">
-                  {/* Show previous therapist first if they offer this service */}
                   {previousTherapist && availableTherapists.some(t => t.id === previousTherapist.id) && (
                     <>
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -294,7 +315,6 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                     </>
                   )}
                   
-                  {/* Show other therapists */}
                   {availableTherapists
                     .filter(t => t.id !== previousTherapist?.id)
                     .map(therapist => renderTherapistCard(therapist))}
@@ -501,7 +521,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                 Back
               </Button>
               <Button 
-                onClick={handleSubmit} 
+                onClick={handleProceedToPayment} 
                 className="flex-1 gap-2"
                 disabled={isSubmitting}
               >
@@ -513,11 +533,79 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                 ) : (
                   <>
                     <CreditCard className="h-4 w-4" />
-                    Pay & Book
+                    Continue to Payment
                   </>
                 )}
               </Button>
             </div>
+          </div>
+        );
+
+      case 'payment':
+        if (!clientSecret || !paymentIntentId) return null;
+        
+        return (
+          <Elements 
+            stripe={stripePromise} 
+            options={{ 
+              clientSecret,
+              appearance: {
+                theme: 'stripe',
+                variables: {
+                  colorPrimary: '#7c3aed',
+                  borderRadius: '8px',
+                },
+              },
+            }}
+          >
+            <PaymentForm
+              paymentIntentId={paymentIntentId}
+              amount={paymentAmount}
+              onSuccess={handlePaymentSuccess}
+              onBack={() => setStep('confirm')}
+            />
+          </Elements>
+        );
+
+      case 'success':
+        return (
+          <div className="flex flex-col items-center justify-center py-6 space-y-6">
+            <div className="h-20 w-20 rounded-full bg-green-100 flex items-center justify-center">
+              <CheckCircle className="h-10 w-10 text-green-600" />
+            </div>
+            <div className="text-center space-y-2">
+              <h3 className="font-semibold text-xl">Booking Confirmed!</h3>
+              <p className="text-muted-foreground">
+                Your session has been booked successfully.
+              </p>
+            </div>
+            
+            {bookingResult?.appointment && (
+              <div className="bg-accent/50 rounded-xl p-4 w-full space-y-2">
+                <p className="font-medium">{bookingResult.appointment.type}</p>
+                <p className="text-sm text-muted-foreground">
+                  with {bookingResult.appointment.therapist}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {new Date(bookingResult.appointment.datetime).toLocaleString('en-IE', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </p>
+              </div>
+            )}
+            
+            <p className="text-sm text-muted-foreground text-center">
+              A confirmation email has been sent to {formData.email}
+            </p>
+            
+            <Button onClick={handleClose} className="w-full">
+              Done
+            </Button>
           </div>
         );
     }
@@ -530,12 +618,14 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
       case 'date': return 'Select Date';
       case 'time': return 'Select Time';
       case 'details': return 'Your Details';
-      case 'confirm': return 'Confirm & Pay';
+      case 'confirm': return 'Confirm Booking';
+      case 'payment': return 'Payment';
+      case 'success': return 'Booking Complete';
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={step === 'success' ? handleClose : onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{getStepTitle()}</DialogTitle>
