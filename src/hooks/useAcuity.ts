@@ -177,7 +177,11 @@ export function useAcuityCalendars() {
   return { calendars, loading, error };
 }
 
-export function useAcuityAvailability(appointmentTypeId: number | null, month: string | null) {
+export function useAcuityAvailability(
+  appointmentTypeId: number | null, 
+  month: string | null,
+  calendarId?: number | null
+) {
   const [dates, setDates] = useState<{ date: string }[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -190,15 +194,17 @@ export function useAcuityAvailability(appointmentTypeId: number | null, month: s
     const fetchAvailability = async () => {
       setLoading(true);
       try {
-        const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/acuity?action=get-availability&appointmentTypeId=${appointmentTypeId}&month=${month}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-              'Content-Type': 'application/json',
-            },
-          }
-        );
+        let url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/acuity?action=get-availability&appointmentTypeId=${appointmentTypeId}&month=${month}`;
+        if (calendarId) {
+          url += `&calendarId=${calendarId}`;
+        }
+        
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        });
 
         if (!response.ok) {
           throw new Error('Failed to fetch availability');
@@ -214,12 +220,16 @@ export function useAcuityAvailability(appointmentTypeId: number | null, month: s
     };
 
     fetchAvailability();
-  }, [appointmentTypeId, month]);
+  }, [appointmentTypeId, month, calendarId]);
 
   return { dates, loading };
 }
 
-export function useAcuityTimes(appointmentTypeId: number | null, date: string | null) {
+export function useAcuityTimes(
+  appointmentTypeId: number | null, 
+  date: string | null,
+  calendarId?: number | null
+) {
   const [times, setTimes] = useState<AcuityAvailableTime[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -232,15 +242,17 @@ export function useAcuityTimes(appointmentTypeId: number | null, date: string | 
     const fetchTimes = async () => {
       setLoading(true);
       try {
-        const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/acuity?action=get-times&appointmentTypeId=${appointmentTypeId}&date=${date}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-              'Content-Type': 'application/json',
-            },
-          }
-        );
+        let url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/acuity?action=get-times&appointmentTypeId=${appointmentTypeId}&date=${date}`;
+        if (calendarId) {
+          url += `&calendarId=${calendarId}`;
+        }
+        
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        });
 
         if (!response.ok) {
           throw new Error('Failed to fetch times');
@@ -256,7 +268,7 @@ export function useAcuityTimes(appointmentTypeId: number | null, date: string | 
     };
 
     fetchTimes();
-  }, [appointmentTypeId, date]);
+  }, [appointmentTypeId, date, calendarId]);
 
   return { times, loading };
 }
@@ -269,6 +281,7 @@ export async function bookAppointment(data: {
   email: string;
   phone?: string;
   notes?: string;
+  calendarID?: number;
 }) {
   const response = await fetch(
     `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/acuity?action=book-appointment`,

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { format, addMonths, addWeeks } from 'date-fns';
+import { useState, useMemo } from 'react';
+import { format, addMonths } from 'date-fns';
 import {
   Dialog,
   DialogContent,
@@ -13,15 +13,20 @@ import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
 import {
   useAcuityAppointmentTypes,
+  useAcuityCalendars,
   useAcuityAvailability,
   useAcuityTimes,
+  useAcuityAppointments,
   bookAppointment,
+  AcuityCalendar,
 } from '@/hooks/useAcuity';
 import { useToast } from '@/hooks/use-toast';
 import { useLogActivity } from '@/hooks/useActivities';
-import { Clock, User, Calendar as CalendarIcon, CheckCircle2, Sparkles, CalendarPlus } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Clock, User, Calendar as CalendarIcon, CheckCircle2, Sparkles, CalendarPlus, Users, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface BookingModalProps {
@@ -30,11 +35,12 @@ interface BookingModalProps {
   onBookingComplete?: () => void;
 }
 
-type Step = 'type' | 'date' | 'time' | 'details' | 'confirm' | 'success';
+type Step = 'type' | 'therapist' | 'date' | 'time' | 'details' | 'confirm' | 'success';
 
 export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingModalProps) {
   const [step, setStep] = useState<Step>('type');
   const [selectedType, setSelectedType] = useState<number | null>(null);
+  const [selectedCalendar, setSelectedCalendar] = useState<number | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -48,20 +54,51 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
 
   const { toast } = useToast();
   const logActivity = useLogActivity();
+  const { profile } = useAuth();
+  
   const { types, loading: typesLoading } = useAcuityAppointmentTypes();
+  const { calendars, loading: calendarsLoading } = useAcuityCalendars();
+  const { appointments } = useAcuityAppointments(profile?.email);
   
   const currentMonth = format(new Date(), 'yyyy-MM');
   const { dates: availableDates, loading: datesLoading } = useAcuityAvailability(
     selectedType,
-    selectedDate ? format(selectedDate, 'yyyy-MM') : currentMonth
+    selectedDate ? format(selectedDate, 'yyyy-MM') : currentMonth,
+    selectedCalendar
   );
   
   const { times: availableTimes, loading: timesLoading } = useAcuityTimes(
     selectedType,
-    selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null
+    selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null,
+    selectedCalendar
   );
 
   const selectedTypeData = types.find(t => t.id === selectedType);
+  const selectedCalendarData = calendars.find(c => c.id === selectedCalendar);
+
+  // Get therapists that offer the selected service
+  const availableTherapists = useMemo(() => {
+    if (!selectedTypeData || !calendars.length) return [];
+    
+    // calendarIDs on the appointment type tells us which therapists offer this service
+    const calendarIds = selectedTypeData.calendarIDs || [];
+    return calendars.filter(calendar => calendarIds.includes(calendar.id));
+  }, [selectedTypeData, calendars]);
+
+  // Get previous therapist from past appointments
+  const previousTherapist = useMemo(() => {
+    if (!appointments.length) return null;
+    
+    // Find the most recent completed appointment
+    const sortedAppointments = [...appointments]
+      .filter(a => !a.canceled)
+      .sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
+    
+    if (sortedAppointments.length === 0) return null;
+    
+    const lastAppointment = sortedAppointments[0];
+    return calendars.find(c => c.id === lastAppointment.calendarID) || null;
+  }, [appointments, calendars]);
 
   const availableDateStrings = availableDates.map(d => d.date);
 
@@ -83,15 +120,17 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
         email: formData.email,
         phone: formData.phone || undefined,
         notes: formData.notes || undefined,
+        calendarID: selectedCalendar || undefined,
       });
 
       // Log activity
       logActivity.mutate({
         activity_type: 'session_booked',
         title: 'Session booked',
-        description: `${selectedTypeData?.name} on ${format(new Date(selectedTime), 'MMM d, yyyy')}`,
+        description: `${selectedTypeData?.name} with ${selectedCalendarData?.name || 'therapist'} on ${format(new Date(selectedTime), 'MMM d, yyyy')}`,
         metadata: {
           appointment_type: selectedTypeData?.name,
+          therapist: selectedCalendarData?.name,
           datetime: selectedTime,
         },
       });
@@ -115,7 +154,6 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   };
 
   const handleBookAnother = () => {
-    // Keep the same type selected for convenience
     setSelectedDate(undefined);
     setSelectedTime(null);
     setStep('date');
@@ -124,11 +162,57 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   const handleClose = () => {
     setStep('type');
     setSelectedType(null);
+    setSelectedCalendar(null);
     setSelectedDate(undefined);
     setSelectedTime(null);
     setFormData({ firstName: '', lastName: '', email: '', phone: '', notes: '' });
     onOpenChange(false);
   };
+
+  const handleSelectTherapist = (calendarId: number) => {
+    setSelectedCalendar(calendarId);
+    setStep('date');
+  };
+
+  const renderTherapistCard = (therapist: AcuityCalendar, isPrevious: boolean = false) => (
+    <button
+      key={therapist.id}
+      onClick={() => handleSelectTherapist(therapist.id)}
+      className={cn(
+        "w-full p-4 rounded-xl border-2 text-left transition-all hover:border-primary/50 hover:bg-accent/50",
+        selectedCalendar === therapist.id 
+          ? "border-primary bg-primary/5" 
+          : "border-border"
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+          <User className="h-5 w-5 text-primary" />
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <h4 className="font-semibold text-foreground">{therapist.name}</h4>
+            {isPrevious && (
+              <Badge variant="secondary" className="text-xs">
+                <RefreshCw className="h-3 w-3 mr-1" />
+                Previous
+              </Badge>
+            )}
+          </div>
+          {therapist.description && (
+            <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+              {therapist.description}
+            </p>
+          )}
+          {therapist.location && (
+            <p className="text-xs text-muted-foreground mt-1">
+              {therapist.location}
+            </p>
+          )}
+        </div>
+      </div>
+    </button>
+  );
 
   const renderStep = () => {
     switch (step) {
@@ -150,7 +234,8 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                       key={type.id}
                       onClick={() => {
                         setSelectedType(type.id);
-                        setStep('date');
+                        setSelectedCalendar(null);
+                        setStep('therapist');
                       }}
                       className={cn(
                         "w-full p-4 rounded-xl border-2 text-left transition-all hover:border-primary/50 hover:bg-accent/50",
@@ -186,10 +271,65 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
           </div>
         );
 
+      case 'therapist':
+        return (
+          <div className="space-y-4">
+            <p className="text-muted-foreground">
+              Choose your therapist for {selectedTypeData?.name}
+            </p>
+            {calendarsLoading ? (
+              <div className="space-y-3">
+                {[1, 2].map(i => (
+                  <Skeleton key={i} className="h-20 w-full" />
+                ))}
+              </div>
+            ) : availableTherapists.length > 0 ? (
+              <ScrollArea className="h-[300px] pr-4">
+                <div className="space-y-3">
+                  {/* Show previous therapist first if they offer this service */}
+                  {previousTherapist && availableTherapists.some(t => t.id === previousTherapist.id) && (
+                    <>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Users className="h-4 w-4" />
+                        <span>Rebook with your previous therapist</span>
+                      </div>
+                      {renderTherapistCard(previousTherapist, true)}
+                      <div className="relative py-2">
+                        <div className="absolute inset-0 flex items-center">
+                          <span className="w-full border-t" />
+                        </div>
+                        <div className="relative flex justify-center text-xs uppercase">
+                          <span className="bg-background px-2 text-muted-foreground">
+                            Or choose another
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  
+                  {/* Show other therapists */}
+                  {availableTherapists
+                    .filter(t => t.id !== previousTherapist?.id)
+                    .map(therapist => renderTherapistCard(therapist))}
+                </div>
+              </ScrollArea>
+            ) : (
+              <p className="text-center text-muted-foreground py-8">
+                No therapists available for this session type
+              </p>
+            )}
+            <Button variant="ghost" onClick={() => setStep('type')} className="w-full">
+              Back to session types
+            </Button>
+          </div>
+        );
+
       case 'date':
         return (
           <div className="space-y-4">
-            <p className="text-muted-foreground">Choose a date for your {selectedTypeData?.name}</p>
+            <p className="text-muted-foreground">
+              Choose a date with {selectedCalendarData?.name}
+            </p>
             <div className="flex justify-center">
               <Calendar
                 mode="single"
@@ -205,11 +345,11 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                 }}
                 fromDate={new Date()}
                 toDate={addMonths(new Date(), 3)}
-                className="rounded-xl border"
+                className="rounded-xl border pointer-events-auto"
               />
             </div>
-            <Button variant="ghost" onClick={() => setStep('type')} className="w-full">
-              Back to session types
+            <Button variant="ghost" onClick={() => setStep('therapist')} className="w-full">
+              Back to therapist selection
             </Button>
           </div>
         );
@@ -336,6 +476,13 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                 </div>
               </div>
               <div className="flex items-center gap-3">
+                <Users className="h-5 w-5 text-primary" />
+                <div>
+                  <p className="font-medium">{selectedCalendarData?.name}</p>
+                  <p className="text-sm text-muted-foreground">Your therapist</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
                 <Clock className="h-5 w-5 text-primary" />
                 <div>
                   <p className="font-medium">
@@ -389,7 +536,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                 You're all set!
               </h3>
               <p className="text-muted-foreground">
-                Your {selectedTypeData?.name} is scheduled for{' '}
+                Your {selectedTypeData?.name} with {selectedCalendarData?.name} is scheduled for{' '}
                 <span className="font-medium text-foreground">
                   {selectedTime && format(new Date(selectedTime), 'MMMM d')}
                 </span>
@@ -424,6 +571,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   const getStepTitle = () => {
     switch (step) {
       case 'type': return 'Choose Session Type';
+      case 'therapist': return 'Choose Your Therapist';
       case 'date': return 'Select Date';
       case 'time': return 'Select Time';
       case 'details': return 'Your Details';
