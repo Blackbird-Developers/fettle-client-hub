@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.verify-payment-and-book]
 verify_jwt = false
+
+[functions.get-payment-history]
+verify_jwt = false
