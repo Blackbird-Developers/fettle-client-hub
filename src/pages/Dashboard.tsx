@@ -4,6 +4,7 @@ import { QuickStats } from "@/components/dashboard/QuickStats";
 import { UpcomingSessions } from "@/components/dashboard/UpcomingSessions";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
 import { PackagesPromo } from "@/components/dashboard/PackagesPromo";
+import { ProgressDashboard } from "@/components/dashboard/ProgressDashboard";
 
 export default function Dashboard() {
   return (
@@ -14,6 +15,7 @@ export default function Dashboard() {
       <div className="grid lg:grid-cols-3 gap-6 mt-8">
         <div className="lg:col-span-2 space-y-6">
           <UpcomingSessions />
+          <ProgressDashboard />
         </div>
         <div className="space-y-6">
           <PackagesPromo />
