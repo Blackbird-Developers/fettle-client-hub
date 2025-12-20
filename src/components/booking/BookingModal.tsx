@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { format, addMonths } from 'date-fns';
+import { format, addMonths, addWeeks } from 'date-fns';
 import {
   Dialog,
   DialogContent,
@@ -20,7 +20,8 @@ import {
   bookAppointment,
 } from '@/hooks/useAcuity';
 import { useToast } from '@/hooks/use-toast';
-import { Clock, User, Calendar as CalendarIcon, CheckCircle2 } from 'lucide-react';
+import { useLogActivity } from '@/hooks/useActivities';
+import { Clock, User, Calendar as CalendarIcon, CheckCircle2, Sparkles, CalendarPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface BookingModalProps {
@@ -29,7 +30,7 @@ interface BookingModalProps {
   onBookingComplete?: () => void;
 }
 
-type Step = 'type' | 'date' | 'time' | 'details' | 'confirm';
+type Step = 'type' | 'date' | 'time' | 'details' | 'confirm' | 'success';
 
 export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingModalProps) {
   const [step, setStep] = useState<Step>('type');
@@ -46,6 +47,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   });
 
   const { toast } = useToast();
+  const logActivity = useLogActivity();
   const { types, loading: typesLoading } = useAcuityAppointmentTypes();
   
   const currentMonth = format(new Date(), 'yyyy-MM');
@@ -83,18 +85,23 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
         notes: formData.notes || undefined,
       });
 
+      // Log activity
+      logActivity.mutate({
+        activity_type: 'session_booked',
+        title: 'Session booked',
+        description: `${selectedTypeData?.name} on ${format(new Date(selectedTime), 'MMM d, yyyy')}`,
+        metadata: {
+          appointment_type: selectedTypeData?.name,
+          datetime: selectedTime,
+        },
+      });
+
       toast({
         title: 'Session Booked!',
         description: 'Your therapy session has been scheduled successfully.',
       });
 
-      // Reset and close
-      setStep('type');
-      setSelectedType(null);
-      setSelectedDate(undefined);
-      setSelectedTime(null);
-      setFormData({ firstName: '', lastName: '', email: '', phone: '', notes: '' });
-      onOpenChange(false);
+      setStep('success');
       onBookingComplete?.();
     } catch (error) {
       toast({
@@ -105,6 +112,22 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleBookAnother = () => {
+    // Keep the same type selected for convenience
+    setSelectedDate(undefined);
+    setSelectedTime(null);
+    setStep('date');
+  };
+
+  const handleClose = () => {
+    setStep('type');
+    setSelectedType(null);
+    setSelectedDate(undefined);
+    setSelectedTime(null);
+    setFormData({ firstName: '', lastName: '', email: '', phone: '', notes: '' });
+    onOpenChange(false);
   };
 
   const renderStep = () => {
@@ -352,6 +375,49 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
             </div>
           </div>
         );
+
+      case 'success':
+        return (
+          <div className="space-y-6 text-center py-4">
+            <div className="flex justify-center">
+              <div className="p-4 rounded-full bg-success/10 animate-scale-in">
+                <CheckCircle2 className="h-12 w-12 text-success" />
+              </div>
+            </div>
+            <div>
+              <h3 className="text-xl font-heading font-bold text-foreground mb-2">
+                You're all set!
+              </h3>
+              <p className="text-muted-foreground">
+                Your {selectedTypeData?.name} is scheduled for{' '}
+                <span className="font-medium text-foreground">
+                  {selectedTime && format(new Date(selectedTime), 'MMMM d')}
+                </span>
+              </p>
+            </div>
+            
+            {/* Book Next Session CTA */}
+            <div className="bg-gradient-to-br from-primary/10 to-primary/5 rounded-xl p-5 border border-primary/20">
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <Sparkles className="h-5 w-5 text-primary" />
+                <p className="font-heading font-semibold text-foreground">
+                  Consistency is key
+                </p>
+              </div>
+              <p className="text-sm text-muted-foreground mb-4">
+                Regular sessions lead to better outcomes. Book your next session now while you're here.
+              </p>
+              <Button onClick={handleBookAnother} className="w-full gap-2">
+                <CalendarPlus className="h-4 w-4" />
+                Book Next Session
+              </Button>
+            </div>
+
+            <Button variant="ghost" onClick={handleClose} className="w-full">
+              Done for now
+            </Button>
+          </div>
+        );
     }
   };
 
@@ -362,6 +428,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
       case 'time': return 'Select Time';
       case 'details': return 'Your Details';
       case 'confirm': return 'Confirm Booking';
+      case 'success': return 'Booking Confirmed';
     }
   };
 
