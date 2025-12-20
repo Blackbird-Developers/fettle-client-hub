@@ -86,6 +86,7 @@ serve(async (req) => {
       case 'get-availability': {
         const appointmentTypeId = url.searchParams.get('appointmentTypeId');
         const month = url.searchParams.get('month'); // Format: YYYY-MM
+        const calendarId = url.searchParams.get('calendarId');
         
         if (!appointmentTypeId || !month) {
           return new Response(
@@ -94,15 +95,17 @@ serve(async (req) => {
           );
         }
 
-        const response = await fetch(
-          `${ACUITY_API_BASE}/availability/dates?appointmentTypeID=${appointmentTypeId}&month=${month}`,
-          {
-            headers: {
-              'Authorization': `Basic ${authHeader}`,
-              'Content-Type': 'application/json',
-            },
-          }
-        );
+        let availabilityUrl = `${ACUITY_API_BASE}/availability/dates?appointmentTypeID=${appointmentTypeId}&month=${month}`;
+        if (calendarId) {
+          availabilityUrl += `&calendarID=${calendarId}`;
+        }
+
+        const response = await fetch(availabilityUrl, {
+          headers: {
+            'Authorization': `Basic ${authHeader}`,
+            'Content-Type': 'application/json',
+          },
+        });
 
         if (!response.ok) {
           throw new Error(`Acuity API error: ${response.status}`);
@@ -117,6 +120,7 @@ serve(async (req) => {
       case 'get-times': {
         const appointmentTypeId = url.searchParams.get('appointmentTypeId');
         const date = url.searchParams.get('date'); // Format: YYYY-MM-DD
+        const calendarId = url.searchParams.get('calendarId');
 
         if (!appointmentTypeId || !date) {
           return new Response(
@@ -125,15 +129,17 @@ serve(async (req) => {
           );
         }
 
-        const response = await fetch(
-          `${ACUITY_API_BASE}/availability/times?appointmentTypeID=${appointmentTypeId}&date=${date}`,
-          {
-            headers: {
-              'Authorization': `Basic ${authHeader}`,
-              'Content-Type': 'application/json',
-            },
-          }
-        );
+        let timesUrl = `${ACUITY_API_BASE}/availability/times?appointmentTypeID=${appointmentTypeId}&date=${date}`;
+        if (calendarId) {
+          timesUrl += `&calendarID=${calendarId}`;
+        }
+
+        const response = await fetch(timesUrl, {
+          headers: {
+            'Authorization': `Basic ${authHeader}`,
+            'Content-Type': 'application/json',
+          },
+        });
 
         if (!response.ok) {
           throw new Error(`Acuity API error: ${response.status}`);
