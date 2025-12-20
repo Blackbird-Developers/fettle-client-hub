@@ -1,1 +1,7 @@
 project_id = "aexsnxuhyvpplolihkxt"
+
+[functions.acuity]
+verify_jwt = false
+
+[functions.session-reminders]
+verify_jwt = false
