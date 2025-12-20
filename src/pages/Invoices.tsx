@@ -20,11 +20,16 @@ export default function Invoices() {
             <FileText className="h-10 w-10 text-muted-foreground" />
           </div>
           <h3 className="font-heading text-lg font-semibold text-foreground mb-2">
-            No invoices available
+            Need an invoice?
           </h3>
           <p className="text-muted-foreground text-center max-w-md">
-            Invoice management is not available through Acuity Scheduling. 
-            Please contact your therapist directly for billing inquiries.
+            To request an invoice, please email{" "}
+            <a 
+              href="mailto:operations@fettle.ie" 
+              className="text-primary hover:underline font-medium"
+            >
+              operations@fettle.ie
+            </a>
           </p>
         </CardContent>
       </Card>
