@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ChevronRight, Calendar, Clock, User, Video, MapPin } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAcuityAppointments, AcuityAppointment } from "@/hooks/useAcuity";
+import { useAuth } from "@/contexts/AuthContext";
 
 function CompactSessionCard({ appointment }: { appointment: AcuityAppointment }) {
   const dateTime = parseISO(appointment.datetime);
@@ -87,7 +88,8 @@ function SessionSkeleton() {
 }
 
 export function UpcomingSessions() {
-  const { appointments, loading, error } = useAcuityAppointments();
+  const { user } = useAuth();
+  const { appointments, loading, error } = useAcuityAppointments(user?.email);
   
   const upcomingSessions = appointments
     .filter(apt => !apt.canceled && !isPast(parseISO(apt.datetime)))

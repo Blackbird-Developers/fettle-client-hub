@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Mail, Lock, User, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function Signup() {
   const [firstName, setFirstName] = useState("");
@@ -15,20 +16,47 @@ export default function Signup() {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { signUp, user } = useAuth();
+
+  useEffect(() => {
+    if (user) {
+      navigate("/dashboard");
+    }
+  }, [user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (password.length < 8) {
+      toast({
+        title: "Password too short",
+        description: "Password must be at least 8 characters.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsLoading(true);
     
-    // Simulate signup - replace with actual auth when backend is enabled
-    setTimeout(() => {
+    const { error } = await signUp(email, password, firstName, lastName);
+    
+    if (error) {
       setIsLoading(false);
       toast({
-        title: "Demo Mode",
-        description: "Authentication will work once the backend is connected.",
+        title: "Sign up failed",
+        description: error.message.includes("already registered")
+          ? "An account with this email already exists."
+          : error.message,
+        variant: "destructive",
       });
-      navigate("/dashboard");
-    }, 1000);
+      return;
+    }
+    
+    toast({
+      title: "Account created!",
+      description: "Welcome to Fettle. You're now signed in.",
+    });
+    navigate("/dashboard");
   };
 
   return (

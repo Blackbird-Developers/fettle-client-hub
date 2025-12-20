@@ -1,7 +1,8 @@
 import { Calendar, Home, FileText, User, LogOut, Plus } from "lucide-react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: Home },
@@ -12,6 +13,17 @@ const navigation = [
 
 export function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { profile, signOut } = useAuth();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/login");
+  };
+
+  const displayName = profile?.first_name 
+    ? `${profile.first_name} ${profile.last_name || ''}`.trim()
+    : profile?.email || 'User';
 
   return (
     <aside className="flex h-screen w-64 flex-col bg-sidebar border-r border-sidebar-border">
@@ -47,9 +59,11 @@ export function Sidebar() {
 
       {/* Book Session CTA */}
       <div className="px-4 pb-4">
-        <Button className="w-full gap-2 shadow-soft" size="lg">
-          <Plus className="h-4 w-4" />
-          Book Session
+        <Button className="w-full gap-2 shadow-soft" size="lg" asChild>
+          <NavLink to="/sessions">
+            <Plus className="h-4 w-4" />
+            Book Session
+          </NavLink>
         </Button>
       </div>
 
@@ -61,13 +75,17 @@ export function Sidebar() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-sidebar-foreground truncate">
-              Sarah Murphy
+              {displayName}
             </p>
             <p className="text-xs text-muted-foreground truncate">
-              sarah@example.com
+              {profile?.email}
             </p>
           </div>
-          <button className="p-2 rounded-lg hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-accent-foreground transition-colors">
+          <button 
+            onClick={handleSignOut}
+            className="p-2 rounded-lg hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-accent-foreground transition-colors"
+            title="Sign out"
+          >
             <LogOut className="h-4 w-4" />
           </button>
         </div>
