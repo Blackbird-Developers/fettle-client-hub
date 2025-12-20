@@ -119,8 +119,63 @@ serve(async (req) => {
     const appointment = await acuityResponse.json();
     logStep("Appointment booked successfully", { appointmentId: appointment.id });
 
-    // Update the session metadata with the appointment ID (for idempotency)
-    // Note: We can't update session metadata, but the payment intent metadata serves as a record
+    // Get receipt URL from the charge
+    let receiptUrl = null;
+    if (session.payment_intent) {
+      try {
+        const charges = await stripe.charges.list({
+          payment_intent: session.payment_intent as string,
+          limit: 1,
+        });
+        if (charges.data.length > 0) {
+          receiptUrl = charges.data[0].receipt_url;
+        }
+      } catch (e) {
+        logStep("Could not fetch receipt URL", { error: e });
+      }
+    }
+
+    // Send confirmation email (fire and forget - don't block on this)
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY");
+    
+    if (supabaseUrl && supabaseKey) {
+      try {
+        logStep("Sending booking confirmation email");
+        
+        const emailPayload = {
+          to: email,
+          firstName,
+          sessionType: appointment.type || "Therapy Session",
+          therapistName: appointment.calendar || "Your Therapist",
+          datetime,
+          duration: appointment.duration || 50,
+          amount: session.amount_total || 0,
+          currency: session.currency || "eur",
+          receiptUrl,
+        };
+
+        fetch(`${supabaseUrl}/functions/v1/send-booking-confirmation`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseKey}`,
+          },
+          body: JSON.stringify(emailPayload),
+        }).then(res => {
+          if (res.ok) {
+            logStep("Confirmation email sent successfully");
+          } else {
+            logStep("Confirmation email failed", { status: res.status });
+          }
+        }).catch(err => {
+          logStep("Error sending confirmation email", { error: err.message });
+        });
+      } catch (emailError) {
+        logStep("Failed to initiate confirmation email", { error: emailError });
+        // Don't throw - booking was successful, email is secondary
+      }
+    }
 
     return new Response(JSON.stringify({ 
       success: true, 
