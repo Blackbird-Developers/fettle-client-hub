@@ -1,5 +1,6 @@
 import { Sun, Moon, Cloud } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function getGreeting(): { text: string; icon: typeof Sun } {
   const hour = new Date().getHours();
@@ -11,9 +12,21 @@ function getGreeting(): { text: string; icon: typeof Sun } {
 export function WelcomeHeader() {
   const greeting = getGreeting();
   const Icon = greeting.icon;
-  const { profile } = useAuth();
+  const { profile, loading } = useAuth();
 
   const displayName = profile?.first_name || profile?.email?.split('@')[0] || "there";
+
+  if (loading) {
+    return (
+      <div className="mb-8 animate-fade-in">
+        <div className="flex items-center gap-3 mb-2">
+          <Skeleton className="h-10 w-10 rounded-xl" />
+          <Skeleton className="h-9 w-64" />
+        </div>
+        <Skeleton className="h-5 w-72 ml-14" />
+      </div>
+    );
+  }
 
   return (
     <div className="mb-8 animate-fade-in">
