@@ -20,13 +20,12 @@ import {
   useAcuityAvailability,
   useAcuityTimes,
   useAcuityAppointments,
-  bookAppointment,
   AcuityCalendar,
 } from '@/hooks/useAcuity';
 import { useToast } from '@/hooks/use-toast';
-import { useLogActivity } from '@/hooks/useActivities';
 import { useAuth } from '@/contexts/AuthContext';
-import { Clock, User, Calendar as CalendarIcon, CheckCircle2, Sparkles, CalendarPlus, Users, RefreshCw } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { Clock, User, Calendar as CalendarIcon, CreditCard, Sparkles, CalendarPlus, Users, RefreshCw, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface BookingModalProps {
@@ -35,7 +34,7 @@ interface BookingModalProps {
   onBookingComplete?: () => void;
 }
 
-type Step = 'type' | 'therapist' | 'date' | 'time' | 'details' | 'confirm' | 'success';
+type Step = 'type' | 'therapist' | 'date' | 'time' | 'details' | 'confirm';
 
 export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingModalProps) {
   const [step, setStep] = useState<Step>('type');
@@ -53,7 +52,6 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   });
 
   const { toast } = useToast();
-  const logActivity = useLogActivity();
   const { profile } = useAuth();
   
   const { types, loading: typesLoading } = useAcuityAppointmentTypes();
@@ -108,55 +106,44 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   };
 
   const handleSubmit = async () => {
-    if (!selectedType || !selectedTime) return;
+    if (!selectedType || !selectedTime || !selectedTypeData) return;
 
     setIsSubmitting(true);
     try {
-      await bookAppointment({
-        appointmentTypeID: selectedType,
-        datetime: selectedTime,
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        email: formData.email,
-        phone: formData.phone || undefined,
-        notes: formData.notes || undefined,
-        calendarID: selectedCalendar || undefined,
-      });
-
-      // Log activity
-      logActivity.mutate({
-        activity_type: 'session_booked',
-        title: 'Session booked',
-        description: `${selectedTypeData?.name} with ${selectedCalendarData?.name || 'therapist'} on ${format(new Date(selectedTime), 'MMM d, yyyy')}`,
-        metadata: {
-          appointment_type: selectedTypeData?.name,
-          therapist: selectedCalendarData?.name,
+      // Create Stripe checkout session
+      const { data, error } = await supabase.functions.invoke('create-session-payment', {
+        body: {
+          appointmentTypeID: selectedType,
+          appointmentTypeName: selectedTypeData.name,
+          appointmentTypePrice: selectedTypeData.price,
           datetime: selectedTime,
+          calendarID: selectedCalendar,
+          calendarName: selectedCalendarData?.name,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          email: formData.email,
+          phone: formData.phone || undefined,
+          notes: formData.notes || undefined,
         },
       });
 
-      toast({
-        title: 'Session Booked!',
-        description: 'Your therapy session has been scheduled successfully.',
-      });
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
 
-      setStep('success');
-      onBookingComplete?.();
+      // Redirect to Stripe checkout
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error('No checkout URL received');
+      }
     } catch (error) {
       toast({
-        title: 'Booking Failed',
-        description: error instanceof Error ? error.message : 'Failed to book session',
+        title: 'Payment Setup Failed',
+        description: error instanceof Error ? error.message : 'Failed to start payment',
         variant: 'destructive',
       });
-    } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const handleBookAnother = () => {
-    setSelectedDate(undefined);
-    setSelectedTime(null);
-    setStep('date');
   };
 
   const handleClose = () => {
@@ -501,6 +488,14 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                 </div>
               </div>
             </div>
+            {selectedTypeData?.price && parseFloat(selectedTypeData.price) > 0 && (
+              <div className="bg-primary/5 rounded-lg p-3 border border-primary/20">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Session fee</span>
+                  <span className="text-lg font-bold text-primary">€{selectedTypeData.price}</span>
+                </div>
+              </div>
+            )}
             <div className="flex gap-3">
               <Button variant="ghost" onClick={() => setStep('details')} className="flex-1">
                 Back
@@ -511,58 +506,18 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (
-                  'Booking...'
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Processing...
+                  </>
                 ) : (
                   <>
-                    <CheckCircle2 className="h-4 w-4" />
-                    Confirm Booking
+                    <CreditCard className="h-4 w-4" />
+                    Pay & Book
                   </>
                 )}
               </Button>
             </div>
-          </div>
-        );
-
-      case 'success':
-        return (
-          <div className="space-y-6 text-center py-4">
-            <div className="flex justify-center">
-              <div className="p-4 rounded-full bg-success/10 animate-scale-in">
-                <CheckCircle2 className="h-12 w-12 text-success" />
-              </div>
-            </div>
-            <div>
-              <h3 className="text-xl font-heading font-bold text-foreground mb-2">
-                You're all set!
-              </h3>
-              <p className="text-muted-foreground">
-                Your {selectedTypeData?.name} with {selectedCalendarData?.name} is scheduled for{' '}
-                <span className="font-medium text-foreground">
-                  {selectedTime && format(new Date(selectedTime), 'MMMM d')}
-                </span>
-              </p>
-            </div>
-            
-            {/* Book Next Session CTA */}
-            <div className="bg-gradient-to-br from-primary/10 to-primary/5 rounded-xl p-5 border border-primary/20">
-              <div className="flex items-center justify-center gap-2 mb-2">
-                <Sparkles className="h-5 w-5 text-primary" />
-                <p className="font-heading font-semibold text-foreground">
-                  Consistency is key
-                </p>
-              </div>
-              <p className="text-sm text-muted-foreground mb-4">
-                Regular sessions lead to better outcomes. Book your next session now while you're here.
-              </p>
-              <Button onClick={handleBookAnother} className="w-full gap-2">
-                <CalendarPlus className="h-4 w-4" />
-                Book Next Session
-              </Button>
-            </div>
-
-            <Button variant="ghost" onClick={handleClose} className="w-full">
-              Done for now
-            </Button>
           </div>
         );
     }
@@ -575,8 +530,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
       case 'date': return 'Select Date';
       case 'time': return 'Select Time';
       case 'details': return 'Your Details';
-      case 'confirm': return 'Confirm Booking';
-      case 'success': return 'Booking Confirmed';
+      case 'confirm': return 'Confirm & Pay';
     }
   };
 
