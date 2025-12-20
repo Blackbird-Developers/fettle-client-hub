@@ -3,6 +3,7 @@ import { WelcomeHeader } from "@/components/dashboard/WelcomeHeader";
 import { QuickStats } from "@/components/dashboard/QuickStats";
 import { UpcomingSessions } from "@/components/dashboard/UpcomingSessions";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
+import { PackagesPromo } from "@/components/dashboard/PackagesPromo";
 
 export default function Dashboard() {
   return (
@@ -11,10 +12,11 @@ export default function Dashboard() {
       <QuickStats />
       
       <div className="grid lg:grid-cols-3 gap-6 mt-8">
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-6">
           <UpcomingSessions />
         </div>
-        <div>
+        <div className="space-y-6">
+          <PackagesPromo />
           <RecentActivity />
         </div>
       </div>
