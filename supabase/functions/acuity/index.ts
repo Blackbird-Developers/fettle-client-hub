@@ -41,30 +41,56 @@ serve(async (req) => {
         const minDate = new Date(today.getFullYear(), today.getMonth() - 3, 1).toISOString().split('T')[0]; // 3 months ago
         const maxDate = new Date(today.getFullYear(), today.getMonth() + 6, 0).toISOString().split('T')[0]; // 6 months ahead
         
-        let appointmentsUrl = `${ACUITY_API_BASE}/appointments?minDate=${minDate}&maxDate=${maxDate}&max=100`;
+        // Build base URL - fetch both active and cancelled appointments
+        let baseParams = `minDate=${minDate}&maxDate=${maxDate}&max=100`;
         if (clientEmail) {
-          appointmentsUrl += `&email=${encodeURIComponent(clientEmail)}`;
+          baseParams += `&email=${encodeURIComponent(clientEmail)}`;
         }
         
-        console.log(`Fetching appointments from: ${appointmentsUrl}`);
+        // Fetch active appointments
+        const activeUrl = `${ACUITY_API_BASE}/appointments?${baseParams}`;
+        console.log(`Fetching active appointments from: ${activeUrl}`);
         
-        const response = await fetch(appointmentsUrl, {
+        const activeResponse = await fetch(activeUrl, {
           headers: {
             'Authorization': `Basic ${authHeader}`,
             'Content-Type': 'application/json',
           },
         });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`Acuity API error: ${response.status} - ${errorText}`);
-          throw new Error(`Acuity API error: ${response.status}`);
+        if (!activeResponse.ok) {
+          const errorText = await activeResponse.text();
+          console.error(`Acuity API error: ${activeResponse.status} - ${errorText}`);
+          throw new Error(`Acuity API error: ${activeResponse.status}`);
         }
 
-        const appointments = await response.json();
-        console.log(`Found ${appointments.length} appointments`);
+        const activeAppointments = await activeResponse.json();
+        console.log(`Found ${activeAppointments.length} active appointments`);
         
-        return new Response(JSON.stringify(appointments), {
+        // Fetch cancelled appointments separately (Acuity requires canceled=true filter)
+        const cancelledUrl = `${ACUITY_API_BASE}/appointments?${baseParams}&canceled=true`;
+        console.log(`Fetching cancelled appointments from: ${cancelledUrl}`);
+        
+        const cancelledResponse = await fetch(cancelledUrl, {
+          headers: {
+            'Authorization': `Basic ${authHeader}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        let cancelledAppointments: unknown[] = [];
+        if (cancelledResponse.ok) {
+          cancelledAppointments = await cancelledResponse.json();
+          console.log(`Found ${cancelledAppointments.length} cancelled appointments`);
+        } else {
+          console.log('Could not fetch cancelled appointments');
+        }
+        
+        // Combine both arrays
+        const allAppointments = [...activeAppointments, ...cancelledAppointments];
+        console.log(`Total appointments: ${allAppointments.length}`);
+        
+        return new Response(JSON.stringify(allAppointments), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }

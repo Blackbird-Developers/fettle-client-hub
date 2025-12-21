@@ -67,23 +67,44 @@ serve(async (req) => {
 
     for (const profile of profiles || []) {
       try {
-        // Fetch appointments from Acuity for this user
-        const appointmentsUrl = `${ACUITY_API_BASE}/appointments?minDate=${minDate}&maxDate=${maxDate}&max=100&email=${encodeURIComponent(profile.email)}`;
+        // Fetch active appointments from Acuity for this user
+        const baseParams = `minDate=${minDate}&maxDate=${maxDate}&max=100&email=${encodeURIComponent(profile.email)}`;
+        const activeUrl = `${ACUITY_API_BASE}/appointments?${baseParams}`;
         
-        const response = await fetch(appointmentsUrl, {
+        const activeResponse = await fetch(activeUrl, {
           headers: {
             'Authorization': `Basic ${authHeader}`,
             'Content-Type': 'application/json',
           },
         });
 
-        if (!response.ok) {
-          logStep(`Failed to fetch appointments for ${profile.email}`, { status: response.status });
+        if (!activeResponse.ok) {
+          logStep(`Failed to fetch active appointments for ${profile.email}`, { status: activeResponse.status });
           continue;
         }
 
-        const appointments = await response.json();
-        logStep(`Fetched appointments for ${profile.email}`, { count: appointments.length });
+        const activeAppointments = await activeResponse.json();
+        
+        // Fetch cancelled appointments separately
+        const cancelledUrl = `${ACUITY_API_BASE}/appointments?${baseParams}&canceled=true`;
+        const cancelledResponse = await fetch(cancelledUrl, {
+          headers: {
+            'Authorization': `Basic ${authHeader}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        let cancelledAppointments: unknown[] = [];
+        if (cancelledResponse.ok) {
+          cancelledAppointments = await cancelledResponse.json();
+        }
+        
+        const appointments = [...activeAppointments, ...cancelledAppointments];
+        logStep(`Fetched appointments for ${profile.email}`, { 
+          active: activeAppointments.length, 
+          cancelled: cancelledAppointments.length,
+          total: appointments.length 
+        });
 
         const changes: string[] = [];
 
