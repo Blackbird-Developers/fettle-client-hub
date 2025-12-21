@@ -23,6 +23,12 @@ export function PaymentForm({ paymentIntentId, amount, onSuccess, onBack }: Paym
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentSucceeded, setPaymentSucceeded] = useState(false);
 
+  console.log('[PaymentForm Debug] Component rendered');
+  console.log('[PaymentForm Debug] stripe loaded:', !!stripe);
+  console.log('[PaymentForm Debug] elements loaded:', !!elements);
+  console.log('[PaymentForm Debug] paymentIntentId:', paymentIntentId);
+  console.log('[PaymentForm Debug] amount:', amount);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 

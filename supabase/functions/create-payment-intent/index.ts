@@ -20,9 +20,17 @@ serve(async (req) => {
     logStep("Function started");
 
     const stripeKey = Deno.env.get("RESTRICTED_API_KEY");
+    logStep("RESTRICTED_API_KEY check", { 
+      exists: !!stripeKey, 
+      prefix: stripeKey ? stripeKey.substring(0, 10) + '...' : 'NOT SET' 
+    });
+    
     if (!stripeKey) throw new Error("RESTRICTED_API_KEY is not set");
 
-    const body = await req.json();
+    const rawBody = await req.text();
+    logStep("Raw request body", { body: rawBody });
+    
+    const body = JSON.parse(rawBody);
     const { 
       appointmentTypeID,
       appointmentTypeName,
@@ -37,28 +45,47 @@ serve(async (req) => {
       notes
     } = body;
 
-    logStep("Received booking data", { 
+    logStep("Parsed booking data", { 
       appointmentTypeID, 
       appointmentTypeName, 
       price: appointmentTypePrice,
+      priceType: typeof appointmentTypePrice,
       datetime,
-      calendarName 
+      calendarName,
+      firstName,
+      lastName,
+      email
     });
 
     if (!appointmentTypeID || !datetime || !firstName || !lastName || !email) {
+      logStep("Missing required fields", {
+        hasAppointmentTypeID: !!appointmentTypeID,
+        hasDatetime: !!datetime,
+        hasFirstName: !!firstName,
+        hasLastName: !!lastName,
+        hasEmail: !!email
+      });
       throw new Error("Missing required booking fields");
     }
 
     // Parse price - Acuity returns price as string like "72.99"
     const priceValue = parseFloat(appointmentTypePrice || "0");
+    logStep("Price parsing", { 
+      rawPrice: appointmentTypePrice, 
+      parsedPrice: priceValue 
+    });
+    
     if (priceValue <= 0) {
       throw new Error("Invalid or missing price for this appointment type");
     }
 
     // Convert to cents for Stripe
     const amountInCents = Math.round(priceValue * 100);
+    logStep("Amount calculation", { priceValue, amountInCents });
 
+    logStep("Initializing Stripe client");
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
+    logStep("Stripe client initialized");
 
     // Check if customer exists
     const customers = await stripe.customers.list({ email, limit: 1 });
