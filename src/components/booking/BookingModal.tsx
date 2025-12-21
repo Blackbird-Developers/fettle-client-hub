@@ -31,9 +31,12 @@ import { PaymentForm } from './PaymentForm';
 import { Clock, User, Calendar as CalendarIcon, CreditCard, Users, RefreshCw, Loader2, CheckCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Initialize Stripe
+// Initialize Stripe with debugging
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
+console.log('[Stripe Debug] Publishable key exists:', !!stripePublishableKey);
+console.log('[Stripe Debug] Publishable key prefix:', stripePublishableKey?.substring(0, 10) + '...');
 const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null;
+console.log('[Stripe Debug] stripePromise created:', !!stripePromise);
 interface BookingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -117,36 +120,58 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   };
 
   const handleProceedToPayment = async () => {
-    if (!selectedType || !selectedTime || !selectedTypeData) return;
+    console.log('[Stripe Debug] handleProceedToPayment called');
+    console.log('[Stripe Debug] selectedType:', selectedType);
+    console.log('[Stripe Debug] selectedTime:', selectedTime);
+    console.log('[Stripe Debug] selectedTypeData:', selectedTypeData);
+    
+    if (!selectedType || !selectedTime || !selectedTypeData) {
+      console.log('[Stripe Debug] Missing required data, returning early');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
+      const requestBody = {
+        appointmentTypeID: selectedType,
+        appointmentTypeName: selectedTypeData.name,
+        appointmentTypePrice: selectedTypeData.price,
+        datetime: selectedTime,
+        calendarID: selectedCalendar,
+        calendarName: selectedCalendarData?.name,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        phone: formData.phone || undefined,
+        notes: formData.notes || undefined,
+      };
+      
+      console.log('[Stripe Debug] Calling create-payment-intent with:', requestBody);
+      
       // Create PaymentIntent
       const { data, error } = await supabase.functions.invoke('create-payment-intent', {
-        body: {
-          appointmentTypeID: selectedType,
-          appointmentTypeName: selectedTypeData.name,
-          appointmentTypePrice: selectedTypeData.price,
-          datetime: selectedTime,
-          calendarID: selectedCalendar,
-          calendarName: selectedCalendarData?.name,
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          email: formData.email,
-          phone: formData.phone || undefined,
-          notes: formData.notes || undefined,
-        },
+        body: requestBody,
       });
+
+      console.log('[Stripe Debug] Response data:', data);
+      console.log('[Stripe Debug] Response error:', error);
 
       if (error) throw error;
       if (data.error) throw new Error(data.error);
 
+      console.log('[Stripe Debug] Setting clientSecret:', data.clientSecret?.substring(0, 20) + '...');
+      console.log('[Stripe Debug] Setting paymentIntentId:', data.paymentIntentId);
+      console.log('[Stripe Debug] Setting paymentAmount:', data.amount);
+      console.log('[Stripe Debug] Setting paymentLivemode:', data.livemode);
+      
       setClientSecret(data.clientSecret);
       setPaymentIntentId(data.paymentIntentId);
       setPaymentAmount(data.amount);
       setPaymentLivemode(typeof data.livemode === 'boolean' ? data.livemode : null);
       setStep('payment');
+      console.log('[Stripe Debug] Step set to payment');
     } catch (error) {
+      console.error('[Stripe Debug] Error:', error);
       toast({
         title: 'Payment Setup Failed',
         description: error instanceof Error ? error.message : 'Failed to initialize payment',
@@ -545,9 +570,20 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
         );
 
       case 'payment': {
-        if (!clientSecret || !paymentIntentId) return null;
+        console.log('[Stripe Debug] Rendering payment step');
+        console.log('[Stripe Debug] clientSecret exists:', !!clientSecret);
+        console.log('[Stripe Debug] paymentIntentId:', paymentIntentId);
+        console.log('[Stripe Debug] stripePromise exists:', !!stripePromise);
+        console.log('[Stripe Debug] paymentAmount:', paymentAmount);
+        console.log('[Stripe Debug] paymentLivemode:', paymentLivemode);
+        
+        if (!clientSecret || !paymentIntentId) {
+          console.log('[Stripe Debug] Missing clientSecret or paymentIntentId, returning null');
+          return null;
+        }
 
         if (!stripePromise) {
+          console.log('[Stripe Debug] No stripePromise - missing publishable key');
           return (
             <div className="space-y-4">
               <p className="text-sm text-destructive">
@@ -572,7 +608,12 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
           intentMode !== 'unknown' &&
           publishableMode !== intentMode;
 
+        console.log('[Stripe Debug] publishableMode:', publishableMode);
+        console.log('[Stripe Debug] intentMode:', intentMode);
+        console.log('[Stripe Debug] modeMismatch:', modeMismatch);
+
         if (modeMismatch) {
+          console.log('[Stripe Debug] Mode mismatch detected!');
           return (
             <div className="space-y-4">
               <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
@@ -589,6 +630,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
           );
         }
 
+        console.log('[Stripe Debug] Rendering Elements with clientSecret');
         return (
           <Elements
             stripe={stripePromise}
