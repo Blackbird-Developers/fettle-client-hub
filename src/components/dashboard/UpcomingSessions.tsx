@@ -22,37 +22,37 @@ function CompactSessionCard({ appointment }: { appointment: AcuityAppointment })
             <User className="h-5 w-5 text-primary" />
           </div>
 
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-4 mb-1">
-              <div>
-                <h3 className="font-heading font-semibold text-card-foreground text-sm">
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <div className="min-w-0 flex-1">
+                <h3 className="font-heading font-semibold text-card-foreground text-sm truncate">
                   {appointment.calendar}
                 </h3>
-                <p className="text-sm text-muted-foreground">{appointment.type}</p>
+                <p className="text-sm text-muted-foreground truncate">{appointment.type}</p>
               </div>
-              <Badge variant="outline" className="bg-info/10 text-info border-info/20">
+              <Badge variant="outline" className="bg-info/10 text-info border-info/20 shrink-0">
                 Upcoming
               </Badge>
             </div>
 
-            <div className="flex flex-wrap gap-4 text-sm text-muted-foreground mt-1">
-              <span className="flex items-center gap-1.5">
-                <Calendar className="h-4 w-4" />
-                {format(dateTime, 'MMM d, yyyy')}
+            <div className="flex flex-wrap gap-2 sm:gap-4 text-xs sm:text-sm text-muted-foreground mt-1">
+              <span className="flex items-center gap-1">
+                <Calendar className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
+                <span className="truncate">{format(dateTime, 'MMM d, yyyy')}</span>
               </span>
-              <span className="flex items-center gap-1.5">
-                <Clock className="h-4 w-4" />
-                {format(dateTime, 'h:mm a')} ({appointment.duration} min)
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
+                <span className="truncate">{format(dateTime, 'h:mm a')}</span>
               </span>
-              <span className="flex items-center gap-1.5">
+              <span className="flex items-center gap-1">
                 {isVideo ? (
                   <>
-                    <Video className="h-4 w-4" />
+                    <Video className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
                     Video
                   </>
                 ) : (
                   <>
-                    <MapPin className="h-4 w-4" />
+                    <MapPin className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
                     In-Person
                   </>
                 )}

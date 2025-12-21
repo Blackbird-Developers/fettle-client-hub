@@ -128,16 +128,16 @@ export function QuickStats() {
           className="border-border/50 hover:shadow-soft transition-shadow duration-300"
           style={{ animationDelay: `${index * 0.05}s` }}
         >
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className={`p-2.5 rounded-xl ${stat.bgColor}`}>
-                <stat.icon className={`h-5 w-5 ${stat.color}`} />
+          <CardContent className="p-3 sm:p-4">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className={`p-2 sm:p-2.5 rounded-xl ${stat.bgColor} shrink-0`}>
+                <stat.icon className={`h-4 w-4 sm:h-5 sm:w-5 ${stat.color}`} />
               </div>
-              <div>
-                <p className="text-2xl font-heading font-bold text-card-foreground">
+              <div className="min-w-0 flex-1">
+                <p className="text-lg sm:text-2xl font-heading font-bold text-card-foreground truncate">
                   {stat.value}
                 </p>
-                <p className="text-xs text-muted-foreground">{stat.label}</p>
+                <p className="text-[10px] sm:text-xs text-muted-foreground truncate">{stat.label}</p>
               </div>
             </div>
           </CardContent>
