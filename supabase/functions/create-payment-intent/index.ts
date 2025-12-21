@@ -19,8 +19,8 @@ serve(async (req) => {
   try {
     logStep("Function started");
 
-    const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-    if (!stripeKey) throw new Error("STRIPE_SECRET_KEY is not set");
+    const stripeKey = Deno.env.get("RESTRICTED_API_KEY");
+    if (!stripeKey) throw new Error("RESTRICTED_API_KEY is not set");
 
     const body = await req.json();
     const { 
