@@ -284,7 +284,7 @@ export default function Sessions() {
           ) : error ? (
             <div className="text-center py-12 text-muted-foreground">
               <p>Failed to load sessions</p>
-              <Button className="mt-4" variant="outline" onClick={refetch}>
+              <Button className="mt-4" variant="outline" onClick={() => refetch()}>
                 Try Again
               </Button>
             </div>

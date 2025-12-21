@@ -45,14 +45,16 @@ export interface AcuityAvailableTime {
   slotsAvailable: number;
 }
 
-export function useAcuityAppointments(clientEmail?: string) {
+export function useAcuityAppointments(clientEmail?: string, autoRefreshMs: number = 60000) {
   const [appointments, setAppointments] = useState<AcuityAppointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const fetchAppointments = async () => {
-    setLoading(true);
+  const fetchAppointments = async (showLoading = true) => {
+    if (showLoading) {
+      setLoading(true);
+    }
     setError(null);
     
     try {
@@ -61,12 +63,6 @@ export function useAcuityAppointments(clientEmail?: string) {
         params.append('email', clientEmail);
       }
 
-      const { data, error } = await supabase.functions.invoke('acuity', {
-        body: null,
-        headers: {},
-      });
-
-      // Use query params approach
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/acuity?${params.toString()}`,
         {
@@ -86,11 +82,14 @@ export function useAcuityAppointments(clientEmail?: string) {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load appointments';
       setError(message);
-      toast({
-        title: 'Error',
-        description: message,
-        variant: 'destructive',
-      });
+      // Only show toast on initial load failures
+      if (showLoading) {
+        toast({
+          title: 'Error',
+          description: message,
+          variant: 'destructive',
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -98,7 +97,14 @@ export function useAcuityAppointments(clientEmail?: string) {
 
   useEffect(() => {
     fetchAppointments();
-  }, [clientEmail]);
+    
+    // Set up auto-refresh interval to detect changes from Acuity
+    const intervalId = setInterval(() => {
+      fetchAppointments(false); // Silent refresh without loading indicator
+    }, autoRefreshMs);
+
+    return () => clearInterval(intervalId);
+  }, [clientEmail, autoRefreshMs]);
 
   return { appointments, loading, error, refetch: fetchAppointments };
 }

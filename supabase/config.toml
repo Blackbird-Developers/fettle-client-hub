@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.confirm-payment-and-book]
 verify_jwt = false
+
+[functions.sync-acuity-appointments]
+verify_jwt = false
