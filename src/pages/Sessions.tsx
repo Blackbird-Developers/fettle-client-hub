@@ -96,68 +96,70 @@ function AcuitySessionCard({
   return (
     <>
       <Card className="group transition-all duration-300 hover:shadow-elevated border-border/50">
-        <CardContent className="p-6">
-          <div className="flex gap-4 flex-col sm:flex-row sm:items-start">
+        <CardContent className="p-4 sm:p-6">
+          <div className="flex gap-3 sm:gap-4 flex-col sm:flex-row sm:items-start">
             {/* Therapist Avatar */}
-            <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-              <User className="h-6 w-6 text-primary" />
+            <div className="h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <User className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
             </div>
 
             {/* Session Details */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-start justify-between gap-4 mb-2">
-                <div>
-                  <h3 className="font-heading font-semibold text-card-foreground text-lg">
+            <div className="flex-1 min-w-0 overflow-hidden">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-heading font-semibold text-card-foreground text-base sm:text-lg truncate">
                     {appointment.calendar}
                   </h3>
-                  <p className="text-sm text-muted-foreground">{appointment.type}</p>
+                  <p className="text-sm text-muted-foreground truncate">{appointment.type}</p>
                 </div>
-                {getStatusBadge()}
+                <div className="shrink-0">
+                  {getStatusBadge()}
+                </div>
               </div>
 
-              <div className="flex flex-wrap gap-4 text-sm text-muted-foreground mt-3">
-                <span className="flex items-center gap-1.5">
-                  <Calendar className="h-4 w-4" />
+              <div className="flex flex-wrap gap-2 sm:gap-4 text-xs sm:text-sm text-muted-foreground mt-3">
+                <span className="flex items-center gap-1">
+                  <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                   {format(dateTime, 'MMM d, yyyy')}
                 </span>
-                <span className="flex items-center gap-1.5">
-                  <Clock className="h-4 w-4" />
-                  {format(dateTime, 'h:mm a')} ({appointment.duration} min)
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+                  {format(dateTime, 'h:mm a')}
                 </span>
-                <span className="flex items-center gap-1.5">
+                <span className="flex items-center gap-1">
                   {isVideo ? (
                     <>
-                      <Video className="h-4 w-4" />
-                      Video Call
+                      <Video className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+                      Video
                     </>
                   ) : (
                     <>
-                      <MapPin className="h-4 w-4" />
-                      {appointment.location || 'In-Person'}
+                      <MapPin className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+                      In-Person
                     </>
                   )}
                 </span>
               </div>
 
               {isUpcoming && appointment.canClientCancel && (
-                <div className="flex gap-3 mt-4">
+                <div className="flex flex-wrap gap-2 sm:gap-3 mt-4">
                   {isVideo && (
-                    <Button size="sm" className="shadow-soft">
+                    <Button size="sm" className="shadow-soft text-xs sm:text-sm">
                       Join Session
                     </Button>
                   )}
                   {appointment.canClientReschedule && (
-                    <Button size="sm" variant="outline">
+                    <Button size="sm" variant="outline" className="text-xs sm:text-sm">
                       Reschedule
                     </Button>
                   )}
                   <Button 
                     size="sm" 
                     variant="ghost" 
-                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10 text-xs sm:text-sm"
                     onClick={() => setShowCancelDialog(true)}
                   >
-                    <X className="h-4 w-4 mr-1" />
+                    <X className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
                     Cancel
                   </Button>
                 </div>
@@ -250,16 +252,16 @@ export default function Sessions() {
 
   return (
     <DashboardLayout>
-      <div className="flex items-center justify-between mb-8 animate-fade-in">
-        <div>
-          <h1 className="font-heading text-3xl font-bold text-foreground">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8 animate-fade-in">
+        <div className="min-w-0">
+          <h1 className="font-heading text-2xl sm:text-3xl font-bold text-foreground">
             My Sessions
           </h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-sm sm:text-base text-muted-foreground mt-1">
             View and manage your therapy sessions
           </p>
         </div>
-        <Button className="gap-2 shadow-soft" onClick={() => setBookingOpen(true)}>
+        <Button className="gap-2 shadow-soft shrink-0 w-full sm:w-auto" onClick={() => setBookingOpen(true)}>
           <Plus className="h-4 w-4" />
           Book New Session
         </Button>
