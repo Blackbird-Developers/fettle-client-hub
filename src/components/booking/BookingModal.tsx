@@ -66,6 +66,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentLivemode, setPaymentLivemode] = useState<boolean | null>(null);
   const [bookingResult, setBookingResult] = useState<{ appointment: any; receiptUrl?: string } | null>(null);
+  const [couponCode, setCouponCode] = useState('');
 
   const { toast } = useToast();
   const { profile } = useAuth();
@@ -144,12 +145,13 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
         email: formData.email,
         phone: formData.phone || undefined,
         notes: formData.notes || undefined,
+        couponCode: couponCode.trim() || undefined,
       };
       
-      console.log('[Stripe Debug] Calling create-payment-intent with:', requestBody);
+      console.log('[Stripe Debug] Calling create-session-payment with:', requestBody);
       
-      // Create PaymentIntent
-      const { data, error } = await supabase.functions.invoke('create-payment-intent', {
+      // Create Checkout Session (supports coupons)
+      const { data, error } = await supabase.functions.invoke('create-session-payment', {
         body: requestBody,
       });
 
@@ -159,17 +161,12 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
       if (error) throw error;
       if (data.error) throw new Error(data.error);
 
-      console.log('[Stripe Debug] Setting clientSecret:', data.clientSecret?.substring(0, 20) + '...');
-      console.log('[Stripe Debug] Setting paymentIntentId:', data.paymentIntentId);
-      console.log('[Stripe Debug] Setting paymentAmount:', data.amount);
-      console.log('[Stripe Debug] Setting paymentLivemode:', data.livemode);
-      
-      setClientSecret(data.clientSecret);
-      setPaymentIntentId(data.paymentIntentId);
-      setPaymentAmount(data.amount);
-      setPaymentLivemode(typeof data.livemode === 'boolean' ? data.livemode : null);
-      setStep('payment');
-      console.log('[Stripe Debug] Step set to payment');
+      // Redirect to Stripe Checkout
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error('No checkout URL returned');
+      }
     } catch (error) {
       console.error('[Stripe Debug] Error:', error);
       toast({
@@ -199,6 +196,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
     setPaymentAmount(0);
     setPaymentLivemode(null);
     setBookingResult(null);
+    setCouponCode('');
     onOpenChange(false);
     
     if (bookingResult) {
@@ -537,10 +535,22 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
               </div>
             </div>
             {selectedTypeData?.price && parseFloat(selectedTypeData.price) > 0 && (
-              <div className="bg-primary/5 rounded-lg p-3 border border-primary/20">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Session fee</span>
-                  <span className="text-lg font-bold text-primary">€{selectedTypeData.price}</span>
+              <div className="space-y-3">
+                <div className="bg-primary/5 rounded-lg p-3 border border-primary/20">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Session fee</span>
+                    <span className="text-lg font-bold text-primary">€{selectedTypeData.price}</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="couponCode">Coupon Code (optional)</Label>
+                  <Input
+                    id="couponCode"
+                    value={couponCode}
+                    onChange={e => setCouponCode(e.target.value.toUpperCase())}
+                    placeholder="Enter coupon code"
+                    className="uppercase"
+                  />
                 </div>
               </div>
             )}

@@ -35,7 +35,8 @@ serve(async (req) => {
       lastName,
       email,
       phone,
-      notes
+      notes,
+      couponCode, // Optional coupon code from user input
     } = body;
 
     logStep("Received booking data", { 
@@ -81,8 +82,8 @@ serve(async (req) => {
       notes: notes || "",
     };
 
-    // Create checkout session with dynamic price
-    const session = await stripe.checkout.sessions.create({
+    // Build checkout session options
+    const sessionOptions: any = {
       customer: customerId,
       customer_email: customerId ? undefined : email,
       line_items: [
@@ -105,7 +106,16 @@ serve(async (req) => {
       payment_intent_data: {
         metadata: bookingMetadata,
       },
-    });
+    };
+
+    // If a coupon code is provided, add it as a discount
+    if (couponCode && couponCode.trim()) {
+      logStep("Applying coupon code", { couponCode: couponCode.trim() });
+      sessionOptions.discounts = [{ coupon: couponCode.trim() }];
+    }
+
+    // Create checkout session with dynamic price
+    const session = await stripe.checkout.sessions.create(sessionOptions);
 
     logStep("Checkout session created", { sessionId: session.id, url: session.url });
 
