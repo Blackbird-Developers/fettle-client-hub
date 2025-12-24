@@ -62,6 +62,7 @@ export function BookingModal({
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [ignorePreselectedTherapist, setIgnorePreselectedTherapist] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -106,7 +107,7 @@ export function BookingModal({
 
   // Filter appointment types based on whether we're rebooking with a specific therapist
   const filteredAppointmentTypes = useMemo(() => {
-    if (preselectedCalendarName) {
+    if (preselectedCalendarName && !ignorePreselectedTherapist) {
       // When rebooking, show only "Individual Session with {therapist name}" types
       const therapistFirstName = preselectedCalendarName.split(' ')[0];
       return types.filter(type => 
@@ -116,7 +117,7 @@ export function BookingModal({
     }
     // Default: show Individual Therapy Session types
     return types.filter(type => type.name.startsWith('Individual Therapy Session'));
-  }, [types, preselectedCalendarName]);
+  }, [types, preselectedCalendarName, ignorePreselectedTherapist]);
 
   // Helper to format the display name for clearer customer understanding
   const formatSessionDisplayName = (name: string, isTherapistSpecific: boolean = false) => {
@@ -301,11 +302,17 @@ export function BookingModal({
     setCouponCode('');
     setUsePackageCredits(false);
     setSelectedPackageId(null);
+    setIgnorePreselectedTherapist(false);
     onOpenChange(false);
     
     if (bookingResult) {
       onBookingComplete?.();
     }
+  };
+
+  const handleBookWithAnotherTherapist = () => {
+    setIgnorePreselectedTherapist(true);
+    setSelectedCalendar(null);
   };
 
   // When a preselected therapist is provided and a type is selected, skip to date
@@ -390,7 +397,7 @@ export function BookingModal({
                 </div>
                 <Button 
                   variant="outline" 
-                  onClick={handleClose}
+                  onClick={handleBookWithAnotherTherapist}
                   className="mt-2"
                 >
                   Book with another therapist
