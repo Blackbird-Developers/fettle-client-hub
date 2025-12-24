@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Mail, Lock, User, ArrowRight } from "lucide-react";
+import { Mail, Lock, User, ArrowRight, CheckCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -18,6 +18,7 @@ export default function Signup() {
   const [privacyConsent, setPrivacyConsent] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
   const { signUp, user } = useAuth();
@@ -100,18 +101,69 @@ export default function Signup() {
       return;
     }
 
-    // Get the user to record consent
-    const { data: { user: newUser } } = await supabase.auth.getUser();
-    if (newUser) {
-      await recordConsent(newUser.id);
-    }
+    // Show email verification message
+    setIsLoading(false);
+    setEmailSent(true);
     
     toast({
-      title: "Account created!",
-      description: "Welcome to Fettle. You're now signed in.",
+      title: "Verification email sent!",
+      description: "Please check your inbox and click the link to verify your email.",
     });
-    navigate("/dashboard");
   };
+
+  // Show email verification success screen
+  if (emailSent) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="w-full max-w-md animate-fade-in">
+          <div className="text-center mb-8">
+            <Link to="/" className="inline-block">
+              <span className="font-heading text-4xl font-bold text-primary">fettle</span>
+              <span className="text-sm text-muted-foreground">.ie</span>
+            </Link>
+          </div>
+
+          <Card className="border-border/50 shadow-elevated">
+            <CardHeader className="text-center">
+              <div className="mx-auto mb-4 w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                <CheckCircle className="h-8 w-8 text-primary" />
+              </div>
+              <CardTitle className="font-heading text-2xl">Check your email</CardTitle>
+              <CardDescription className="text-base">
+                We've sent a verification link to
+              </CardDescription>
+              <p className="font-medium text-foreground mt-1">{email}</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="bg-muted/50 rounded-lg p-4 text-sm text-muted-foreground">
+                <p className="mb-2">
+                  Click the link in the email to verify your account and complete your registration.
+                </p>
+                <p>
+                  If you don't see the email, check your spam folder.
+                </p>
+              </div>
+              
+              <div className="text-center space-y-2">
+                <Button 
+                  variant="outline" 
+                  className="w-full"
+                  onClick={() => setEmailSent(false)}
+                >
+                  Use a different email
+                </Button>
+                <Link to="/login">
+                  <Button variant="ghost" className="w-full">
+                    Back to login
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
