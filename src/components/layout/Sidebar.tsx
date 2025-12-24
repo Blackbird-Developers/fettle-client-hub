@@ -126,7 +126,7 @@ export function MobileHeader() {
 
 export function Sidebar() {
   return (
-    <aside className="hidden lg:flex lg:sticky lg:top-0 lg:h-screen w-64 flex-col bg-sidebar border-r border-sidebar-border flex-shrink-0">
+    <aside className="flex h-full w-64 flex-col bg-sidebar">
       <SidebarContent />
     </aside>
   );

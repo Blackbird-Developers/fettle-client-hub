@@ -11,8 +11,12 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Mobile Header */}
       <MobileHeader />
       
-      {/* Desktop Sidebar */}
-      <Sidebar />
+      {/* Desktop Sidebar - wrapper extends full height */}
+      <div className="hidden lg:block w-64 flex-shrink-0 bg-sidebar border-r border-sidebar-border">
+        <div className="sticky top-0 h-screen">
+          <Sidebar />
+        </div>
+      </div>
       
       <main className="flex-1 overflow-x-hidden min-w-0">
         <div className="p-4 sm:p-6 lg:p-8 max-w-full">
