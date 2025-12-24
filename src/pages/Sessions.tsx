@@ -168,8 +168,8 @@ function AcuitySessionCard({
                 </div>
               )}
 
-              {/* Rebook button for past completed sessions */}
-              {!isUpcoming && !appointment.canceled && onRebook && (
+              {/* Rebook button for past sessions (completed or cancelled) */}
+              {!isUpcoming && onRebook && (
                 <div className="flex flex-wrap gap-2 sm:gap-3 mt-4">
                   <Button 
                     size="sm" 
