@@ -1,14 +1,12 @@
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useActivePackages } from "@/hooks/useUserPackages";
-import { Gift, CalendarPlus, Sparkles } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { BookSessionDropdown } from "@/components/booking/BookSessionDropdown";
+import { Gift, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function PackageSessionsCounter() {
   const { packages, totalRemainingSessions, isLoading } = useActivePackages();
-  const navigate = useNavigate();
 
   if (isLoading) {
     return (
@@ -92,14 +90,7 @@ export function PackageSessionsCounter() {
               })}
             </div>
             
-            <Button 
-              size="sm" 
-              onClick={() => navigate('/sessions')}
-              className="w-full gap-2"
-            >
-              <CalendarPlus className="h-4 w-4" />
-              Book a Session
-            </Button>
+            <BookSessionDropdown variant="compact" />
           </div>
         </div>
       </CardContent>
