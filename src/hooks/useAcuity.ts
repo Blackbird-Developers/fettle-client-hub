@@ -213,13 +213,17 @@ export function useAcuityAvailability(
         });
 
         if (!response.ok) {
-          throw new Error('Failed to fetch availability');
+          // Handle 400/500 errors gracefully - appointment type may not be available for this calendar
+          console.warn('Availability not found for this combination, returning empty dates');
+          setDates([]);
+          return;
         }
 
         const data = await response.json();
         setDates(data);
       } catch (err) {
         console.error('Error fetching availability:', err);
+        setDates([]); // Return empty dates on error
       } finally {
         setLoading(false);
       }
