@@ -28,17 +28,17 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     : profile?.email || 'User';
 
   return (
-    <>
+    <div className="flex flex-col h-full">
       {/* Logo */}
-      <div className="flex h-16 items-center px-6 border-b border-sidebar-border">
+      <div className="flex h-16 items-center px-6 border-b border-sidebar-border flex-shrink-0">
         <span className="font-heading text-2xl font-bold text-primary">
           fettle
         </span>
         <span className="ml-1 text-xs text-muted-foreground">.ie</span>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 px-4 py-6 space-y-2">
+      {/* Navigation - scrollable */}
+      <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
         {navigation.map((item) => {
           const isActive = location.pathname === item.href;
           return (
@@ -60,40 +60,43 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
 
-      {/* Book Session CTA */}
-      <div className="px-4 pb-4">
-        <Button className="w-full gap-2 shadow-soft" size="lg" asChild onClick={onNavigate}>
-          <NavLink to="/sessions">
-            <Plus className="h-4 w-4" />
-            Book Session
-          </NavLink>
-        </Button>
-      </div>
+      {/* Sticky bottom section */}
+      <div className="flex-shrink-0 bg-sidebar">
+        {/* Book Session CTA */}
+        <div className="px-4 pb-4">
+          <Button className="w-full gap-2 shadow-soft" size="lg" asChild onClick={onNavigate}>
+            <NavLink to="/sessions">
+              <Plus className="h-4 w-4" />
+              Book Session
+            </NavLink>
+          </Button>
+        </div>
 
-      {/* User section */}
-      <div className="border-t border-sidebar-border p-4">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-            <User className="h-5 w-5 text-primary" />
+        {/* User section */}
+        <div className="border-t border-sidebar-border p-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+              <User className="h-5 w-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-sidebar-foreground truncate">
+                {displayName}
+              </p>
+              <p className="text-xs text-muted-foreground truncate">
+                {profile?.email}
+              </p>
+            </div>
+            <button 
+              onClick={handleSignOut}
+              className="p-2 rounded-lg hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-accent-foreground transition-colors"
+              title="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-sidebar-foreground truncate">
-              {displayName}
-            </p>
-            <p className="text-xs text-muted-foreground truncate">
-              {profile?.email}
-            </p>
-          </div>
-          <button 
-            onClick={handleSignOut}
-            className="p-2 rounded-lg hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-accent-foreground transition-colors"
-            title="Sign out"
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
