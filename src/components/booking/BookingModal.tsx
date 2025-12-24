@@ -88,6 +88,21 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
     selectedCalendar
   );
 
+  // Filter to only show Individual Therapy Session types
+  const individualTherapyTypes = useMemo(() => {
+    return types.filter(type => type.name.startsWith('Individual Therapy Session'));
+  }, [types]);
+
+  // Helper to format the display name for clearer customer understanding
+  const formatSessionDisplayName = (name: string) => {
+    // Extract the focus area from parentheses, e.g., "Individual Therapy Session (Depression)" -> "Depression"
+    const match = name.match(/\(([^)]+)\)/);
+    if (match) {
+      return match[1]; // Return just the focus area
+    }
+    return name.replace('Individual Therapy Session', '').trim() || 'General Session';
+  };
+
   const selectedTypeData = types.find(t => t.id === selectedType);
   const selectedCalendarData = calendars.find(c => c.id === selectedCalendar);
 
@@ -264,7 +279,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
             ) : (
               <ScrollArea className="h-[300px] pr-4">
                 <div className="space-y-3">
-                  {types.map(type => (
+                  {individualTherapyTypes.map(type => (
                     <button
                       key={type.id}
                       onClick={() => {
@@ -281,7 +296,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                     >
                       <div className="flex justify-between items-start">
                         <div>
-                          <h4 className="font-semibold text-foreground">{type.name}</h4>
+                          <h4 className="font-semibold text-foreground">{formatSessionDisplayName(type.name)}</h4>
                           {type.description && (
                             <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
                               {type.description}
