@@ -24,11 +24,13 @@ import {
   useAcuityAppointments,
   AcuityCalendar,
 } from '@/hooks/useAcuity';
+import { useActivePackages } from '@/hooks/useUserPackages';
+import { useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { PaymentForm } from './PaymentForm';
-import { Clock, User, Calendar as CalendarIcon, CreditCard, Users, RefreshCw, Loader2, CheckCircle } from 'lucide-react';
+import { Clock, User, Calendar as CalendarIcon, CreditCard, Users, RefreshCw, Loader2, CheckCircle, Gift } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // Initialize Stripe with debugging
@@ -67,9 +69,15 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   const [paymentLivemode, setPaymentLivemode] = useState<boolean | null>(null);
   const [bookingResult, setBookingResult] = useState<{ appointment: any; receiptUrl?: string } | null>(null);
   const [couponCode, setCouponCode] = useState('');
+  const [usePackageCredits, setUsePackageCredits] = useState(false);
+  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
 
   const { toast } = useToast();
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
+  const queryClient = useQueryClient();
+  
+  // Fetch user's active packages
+  const { packages: activePackages, totalRemainingSessions } = useActivePackages();
   
   const { types, loading: typesLoading } = useAcuityAppointmentTypes();
   const { calendars, loading: calendarsLoading } = useAcuityCalendars();
@@ -135,7 +143,58 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
     return availableDateStrings.includes(dateString);
   };
 
+  const handleBookWithPackage = async () => {
+    if (!selectedType || !selectedTime || !selectedTypeData || !selectedPackageId) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('book-with-package', {
+        body: {
+          packageId: selectedPackageId,
+          appointmentTypeID: selectedType,
+          datetime: selectedTime,
+          calendarID: selectedCalendar,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          email: formData.email,
+          phone: formData.phone || undefined,
+          notes: formData.notes || undefined,
+        },
+      });
+
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+
+      // Invalidate packages query to refresh the counter
+      queryClient.invalidateQueries({ queryKey: ['user-packages'] });
+
+      setBookingResult({ appointment: data.appointment });
+      setStep('success');
+      
+      toast({
+        title: 'Session Booked!',
+        description: `You have ${data.remainingSessions} session${data.remainingSessions === 1 ? '' : 's'} remaining in your package.`,
+      });
+    } catch (error) {
+      console.error('Package booking error:', error);
+      toast({
+        title: 'Booking Failed',
+        description: error instanceof Error ? error.message : 'Failed to book session',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleProceedToPayment = async () => {
+    // If using package credits, book with package instead
+    if (usePackageCredits && selectedPackageId) {
+      return handleBookWithPackage();
+    }
+
     console.log('[Stripe Debug] handleProceedToPayment called');
     console.log('[Stripe Debug] selectedType:', selectedType);
     console.log('[Stripe Debug] selectedTime:', selectedTime);
@@ -212,6 +271,8 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
     setPaymentLivemode(null);
     setBookingResult(null);
     setCouponCode('');
+    setUsePackageCredits(false);
+    setSelectedPackageId(null);
     onOpenChange(false);
     
     if (bookingResult) {
@@ -551,7 +612,81 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                 </div>
               </div>
             </div>
-            {selectedTypeData?.price && parseFloat(selectedTypeData.price) > 0 && (
+            
+            {/* Package Credits Option */}
+            {totalRemainingSessions > 0 && (
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUsePackageCredits(true);
+                    // Auto-select first available package
+                    const firstPackage = activePackages[0];
+                    if (firstPackage) {
+                      setSelectedPackageId(firstPackage.id);
+                    }
+                  }}
+                  className={cn(
+                    "w-full p-4 rounded-xl border-2 text-left transition-all",
+                    usePackageCredits 
+                      ? "border-success bg-success/5" 
+                      : "border-border hover:border-success/50 hover:bg-success/5"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-success/10">
+                      <Gift className="h-5 w-5 text-success" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-foreground">Use Package Credit</p>
+                        <Badge className="bg-success/10 text-success border-success/20 text-xs">
+                          {totalRemainingSessions} available
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Book using your pre-purchased session credits
+                      </p>
+                    </div>
+                    {usePackageCredits && (
+                      <CheckCircle className="h-5 w-5 text-success" />
+                    )}
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUsePackageCredits(false);
+                    setSelectedPackageId(null);
+                  }}
+                  className={cn(
+                    "w-full p-4 rounded-xl border-2 text-left transition-all",
+                    !usePackageCredits 
+                      ? "border-primary bg-primary/5" 
+                      : "border-border hover:border-primary/50 hover:bg-primary/5"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-primary/10">
+                      <CreditCard className="h-5 w-5 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-semibold text-foreground">Pay €{selectedTypeData?.price}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Pay for this individual session
+                      </p>
+                    </div>
+                    {!usePackageCredits && (
+                      <CheckCircle className="h-5 w-5 text-primary" />
+                    )}
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {/* Standard payment option when no packages */}
+            {totalRemainingSessions === 0 && selectedTypeData?.price && parseFloat(selectedTypeData.price) > 0 && (
               <div className="space-y-3">
                 <div className="bg-primary/5 rounded-lg p-3 border border-primary/20">
                   <div className="flex justify-between items-center">
@@ -559,18 +694,23 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                     <span className="text-lg font-bold text-primary">€{selectedTypeData.price}</span>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="couponCode">Coupon Code (optional)</Label>
-                  <Input
-                    id="couponCode"
-                    value={couponCode}
-                    onChange={e => setCouponCode(e.target.value.toUpperCase())}
-                    placeholder="Enter coupon code"
-                    className="uppercase"
-                  />
-                </div>
               </div>
             )}
+
+            {/* Coupon code - only show when paying */}
+            {!usePackageCredits && selectedTypeData?.price && parseFloat(selectedTypeData.price) > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="couponCode">Coupon Code (optional)</Label>
+                <Input
+                  id="couponCode"
+                  value={couponCode}
+                  onChange={e => setCouponCode(e.target.value.toUpperCase())}
+                  placeholder="Enter coupon code"
+                  className="uppercase"
+                />
+              </div>
+            )}
+
             <div className="flex gap-3">
               <Button variant="ghost" onClick={() => setStep('details')} className="flex-1">
                 Back
@@ -583,7 +723,12 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                 {isSubmitting ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Processing...
+                    {usePackageCredits ? 'Booking...' : 'Processing...'}
+                  </>
+                ) : usePackageCredits ? (
+                  <>
+                    <Gift className="h-4 w-4" />
+                    Book Session
                   </>
                 ) : (
                   <>
