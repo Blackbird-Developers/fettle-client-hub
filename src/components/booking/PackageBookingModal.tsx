@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements } from '@stripe/react-stripe-js';
 import {
   Dialog,
   DialogContent,
@@ -12,15 +14,21 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { Check, Gift, Loader2, Sparkles, TrendingDown } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { PackagePaymentForm } from './PackagePaymentForm';
+import { Check, Gift, Loader2, Sparkles, TrendingDown, CheckCircle, Receipt, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+// Initialize Stripe
+const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
+const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null;
 
 interface PackageBookingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-type Step = 'select' | 'details' | 'processing';
+type Step = 'select' | 'details' | 'payment' | 'success';
 
 // Package definitions
 const PACKAGES = [
@@ -60,9 +68,19 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
     email: '',
     phone: '',
   });
+  
+  // Payment state
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState<number>(0);
+  const [purchaseResult, setPurchaseResult] = useState<{ 
+    package: any; 
+    receiptUrl?: string 
+  } | null>(null);
 
   const { toast } = useToast();
   const { profile } = useAuth();
+  const queryClient = useQueryClient();
 
   // Pre-fill form data from profile
   const handleSelectPackage = (pkg: typeof PACKAGES[0]) => {
@@ -76,14 +94,13 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
     setStep('details');
   };
 
-  const handlePurchase = async () => {
+  const handleProceedToPayment = async () => {
     if (!selectedPackage) return;
 
     setIsSubmitting(true);
-    setStep('processing');
 
     try {
-      const { data, error } = await supabase.functions.invoke('create-package-payment', {
+      const { data, error } = await supabase.functions.invoke('create-package-payment-intent', {
         body: {
           packageId: selectedPackage.id,
           firstName: formData.firstName,
@@ -96,28 +113,43 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
       if (error) throw error;
       if (data.error) throw new Error(data.error);
 
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        throw new Error('No checkout URL returned');
-      }
+      setClientSecret(data.clientSecret);
+      setPaymentIntentId(data.paymentIntentId);
+      setPaymentAmount(data.amount);
+      setStep('payment');
     } catch (error) {
-      console.error('Package purchase error:', error);
+      console.error('Payment setup error:', error);
       toast({
         title: 'Payment Setup Failed',
         description: error instanceof Error ? error.message : 'Failed to initialize payment',
         variant: 'destructive',
       });
-      setStep('details');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handlePaymentSuccess = (result: { package: any; receiptUrl?: string }) => {
+    setPurchaseResult(result);
+    setStep('success');
+    
+    // Refresh packages query
+    queryClient.invalidateQueries({ queryKey: ['user-packages'] });
+    
+    toast({
+      title: 'Package Purchased!',
+      description: `You now have ${result.package.sessions} sessions to use.`,
+    });
   };
 
   const handleClose = () => {
     setStep('select');
     setSelectedPackage(null);
     setFormData({ firstName: '', lastName: '', email: '', phone: '' });
+    setClientSecret(null);
+    setPaymentIntentId(null);
+    setPaymentAmount(0);
+    setPurchaseResult(null);
     onOpenChange(false);
   };
 
@@ -132,7 +164,8 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
     switch (step) {
       case 'select': return 'Choose Your Package';
       case 'details': return 'Your Details';
-      case 'processing': return 'Processing...';
+      case 'payment': return 'Payment';
+      case 'success': return 'Purchase Complete!';
     }
   };
 
@@ -275,7 +308,7 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
                 Back
               </Button>
               <Button 
-                onClick={handlePurchase}
+                onClick={handleProceedToPayment}
                 disabled={!formData.firstName || !formData.lastName || !formData.email || isSubmitting}
                 className="flex-1 gap-2"
               >
@@ -285,20 +318,77 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
                     Processing...
                   </>
                 ) : (
-                  <>
-                    Continue to Payment
-                  </>
+                  <>Continue to Payment</>
                 )}
               </Button>
             </div>
           </div>
         );
 
-      case 'processing':
+      case 'payment':
+        if (!clientSecret || !stripePromise || !paymentIntentId) {
+          return (
+            <div className="flex flex-col items-center justify-center py-12 gap-4">
+              <Loader2 className="h-10 w-10 animate-spin text-primary" />
+              <p className="text-muted-foreground">Loading payment form...</p>
+            </div>
+          );
+        }
+
         return (
-          <div className="flex flex-col items-center justify-center py-12 gap-4">
-            <Loader2 className="h-10 w-10 animate-spin text-primary" />
-            <p className="text-muted-foreground">Redirecting to secure payment...</p>
+          <Elements 
+            stripe={stripePromise} 
+            options={{ 
+              clientSecret,
+              appearance: {
+                theme: 'stripe',
+                variables: {
+                  colorPrimary: 'hsl(var(--primary))',
+                },
+              },
+            }}
+          >
+            <PackagePaymentForm
+              paymentIntentId={paymentIntentId}
+              amount={paymentAmount}
+              packageName={selectedPackage?.name || ''}
+              onSuccess={handlePaymentSuccess}
+              onBack={() => setStep('details')}
+            />
+          </Elements>
+        );
+
+      case 'success':
+        return (
+          <div className="flex flex-col items-center justify-center py-8 space-y-6">
+            <div className="h-20 w-20 rounded-full bg-success/10 flex items-center justify-center">
+              <CheckCircle className="h-10 w-10 text-success" />
+            </div>
+            
+            <div className="text-center space-y-2">
+              <h3 className="text-xl font-semibold">Package Purchased!</h3>
+              <p className="text-muted-foreground">
+                You now have <span className="font-semibold text-foreground">{purchaseResult?.package?.sessions} sessions</span> ready to book.
+              </p>
+            </div>
+
+            {purchaseResult?.receiptUrl && (
+              <Button 
+                variant="outline" 
+                onClick={() => window.open(purchaseResult.receiptUrl, '_blank')}
+                className="gap-2"
+              >
+                <Receipt className="h-4 w-4" />
+                View Receipt
+                <ExternalLink className="h-3 w-3" />
+              </Button>
+            )}
+
+            <div className="w-full pt-4">
+              <Button onClick={handleClose} className="w-full">
+                Start Booking Sessions
+              </Button>
+            </div>
           </div>
         );
     }
@@ -308,7 +398,8 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
   const progressSteps = [
     { key: 'select', label: 'Package' },
     { key: 'details', label: 'Details' },
-    { key: 'processing', label: 'Payment' },
+    { key: 'payment', label: 'Payment' },
+    { key: 'success', label: 'Done' },
   ] as const;
 
   const currentStepIndex = progressSteps.findIndex(s => s.key === step);
@@ -321,20 +412,22 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
         </DialogHeader>
         
         {/* Progress Indicator */}
-        <div className="flex items-center justify-center gap-1.5 pb-2">
-          {progressSteps.map((s, index) => (
-            <div
-              key={s.key}
-              className={cn(
-                "h-1.5 rounded-full transition-all duration-300",
-                index <= currentStepIndex 
-                  ? "bg-primary w-8" 
-                  : "bg-muted w-4"
-              )}
-              title={s.label}
-            />
-          ))}
-        </div>
+        {step !== 'success' && (
+          <div className="flex items-center justify-center gap-1.5 pb-2">
+            {progressSteps.map((s, index) => (
+              <div
+                key={s.key}
+                className={cn(
+                  "h-1.5 rounded-full transition-all duration-300",
+                  index <= currentStepIndex 
+                    ? "bg-primary w-8" 
+                    : "bg-muted w-4"
+                )}
+                title={s.label}
+              />
+            ))}
+          </div>
+        )}
         
         {renderStep()}
       </DialogContent>
