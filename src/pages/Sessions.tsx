@@ -16,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { BookingModal } from "@/components/booking/BookingModal";
+import { BookSessionDropdown } from "@/components/booking/BookSessionDropdown";
 import { useAcuityAppointments, AcuityAppointment } from "@/hooks/useAcuity";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -238,7 +238,6 @@ function SessionSkeleton() {
 }
 
 export default function Sessions() {
-  const [bookingOpen, setBookingOpen] = useState(false);
   const { user } = useAuth();
   const { appointments, loading, error, refetch } = useAcuityAppointments(user?.email);
 
@@ -261,10 +260,10 @@ export default function Sessions() {
             View and manage your therapy sessions
           </p>
         </div>
-        <Button className="gap-2 shadow-soft shrink-0 w-full sm:w-auto" onClick={() => setBookingOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Book New Session
-        </Button>
+        <BookSessionDropdown 
+          onBookingComplete={refetch}
+          className="shrink-0 w-full sm:w-auto"
+        />
       </div>
 
       <Tabs defaultValue="upcoming" className="animate-fade-in" style={{ animationDelay: "0.1s" }}>
@@ -302,10 +301,9 @@ export default function Sessions() {
           ) : (
             <div className="text-center py-12 text-muted-foreground">
               <p>No upcoming sessions</p>
-              <Button className="mt-4 gap-2" onClick={() => setBookingOpen(true)}>
-                <Plus className="h-4 w-4" />
-                Book Your First Session
-              </Button>
+              <div className="mt-4">
+                <BookSessionDropdown onBookingComplete={refetch} />
+              </div>
             </div>
           )}
         </TabsContent>
@@ -331,12 +329,6 @@ export default function Sessions() {
           )}
         </TabsContent>
       </Tabs>
-
-      <BookingModal 
-        open={bookingOpen} 
-        onOpenChange={setBookingOpen}
-        onBookingComplete={refetch}
-      />
     </DashboardLayout>
   );
 }
