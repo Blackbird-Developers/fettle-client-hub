@@ -17,20 +17,23 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { BookSessionDropdown } from "@/components/booking/BookSessionDropdown";
+import { BookingModal } from "@/components/booking/BookingModal";
 import { useAcuityAppointments, AcuityAppointment } from "@/hooks/useAcuity";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Calendar, Clock, User, Video, MapPin, X, Loader2, AlertTriangle } from "lucide-react";
+import { Plus, Calendar, Clock, User, Video, MapPin, X, Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function AcuitySessionCard({ 
   appointment, 
   onCancel,
+  onRebook,
   clientEmail
 }: { 
   appointment: AcuityAppointment; 
   onCancel?: () => void;
+  onRebook?: (calendarId: number, calendarName: string) => void;
   clientEmail?: string;
 }) {
   const [isCancelling, setIsCancelling] = useState(false);
@@ -164,6 +167,21 @@ function AcuitySessionCard({
                   </Button>
                 </div>
               )}
+
+              {/* Rebook button for past completed sessions */}
+              {!isUpcoming && !appointment.canceled && onRebook && (
+                <div className="flex flex-wrap gap-2 sm:gap-3 mt-4">
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    className="gap-1.5 text-xs sm:text-sm"
+                    onClick={() => onRebook(appointment.calendarID, appointment.calendar)}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    Rebook with {appointment.calendar.split(' ')[0]}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </CardContent>
@@ -240,6 +258,25 @@ function SessionSkeleton() {
 export default function Sessions() {
   const { user } = useAuth();
   const { appointments, loading, error, refetch } = useAcuityAppointments(user?.email);
+  
+  // State for rebook modal
+  const [rebookOpen, setRebookOpen] = useState(false);
+  const [rebookCalendarId, setRebookCalendarId] = useState<number | undefined>();
+  const [rebookCalendarName, setRebookCalendarName] = useState<string | undefined>();
+
+  const handleRebook = (calendarId: number, calendarName: string) => {
+    setRebookCalendarId(calendarId);
+    setRebookCalendarName(calendarName);
+    setRebookOpen(true);
+  };
+
+  const handleRebookClose = (open: boolean) => {
+    setRebookOpen(open);
+    if (!open) {
+      setRebookCalendarId(undefined);
+      setRebookCalendarName(undefined);
+    }
+  };
 
   const now = new Date();
   const upcomingSessions = appointments.filter(apt => 
@@ -320,6 +357,7 @@ export default function Sessions() {
                 key={appointment.id} 
                 appointment={appointment} 
                 clientEmail={user?.email}
+                onRebook={handleRebook}
               />
             ))
           ) : (
@@ -329,6 +367,15 @@ export default function Sessions() {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Rebook Modal */}
+      <BookingModal 
+        open={rebookOpen} 
+        onOpenChange={handleRebookClose}
+        onBookingComplete={refetch}
+        preselectedCalendarId={rebookCalendarId}
+        preselectedCalendarName={rebookCalendarName}
+      />
     </DashboardLayout>
   );
 }
