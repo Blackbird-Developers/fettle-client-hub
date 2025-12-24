@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { Resend } from "https://esm.sh/resend@2.0.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,6 +11,33 @@ const logStep = (step: string, details?: any) => {
   const detailsStr = details ? ` - ${JSON.stringify(details)}` : '';
   console.log(`[BOOK-WITH-PACKAGE] ${step}${detailsStr}`);
 };
+
+async function sendLowSessionsReminder(email: string, firstName: string, packageName: string) {
+  const resendApiKey = Deno.env.get("RESEND_API_KEY");
+  if (!resendApiKey) {
+    logStep("RESEND_API_KEY not configured, skipping email");
+    return;
+  }
+
+  const resend = new Resend(resendApiKey);
+
+  try {
+    await resend.emails.send({
+      from: "Therapy Sessions <onboarding@resend.dev>",
+      to: [email],
+      subject: "Only 1 Session Remaining in Your Package",
+      html: `
+        <h1>Hi ${firstName},</h1>
+        <p>This is a friendly reminder that you have <strong>only 1 session remaining</strong> in your <strong>${packageName}</strong> package.</p>
+        <p>To continue your therapy journey without interruption, consider purchasing a new package before your last session.</p>
+        <p>Best regards,<br>Your Therapy Team</p>
+      `,
+    });
+    logStep("Low sessions reminder email sent", { email });
+  } catch (error) {
+    logStep("Failed to send low sessions reminder", { error: String(error) });
+  }
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -147,6 +175,12 @@ serve(async (req) => {
       logStep("Session deducted from package", { 
         newRemaining: userPackage.remaining_sessions - 1 
       });
+
+      // Send reminder email if only 1 session remaining
+      const newRemaining = userPackage.remaining_sessions - 1;
+      if (newRemaining === 1) {
+        await sendLowSessionsReminder(email, firstName, userPackage.package_name);
+      }
     }
 
     return new Response(JSON.stringify({
