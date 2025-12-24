@@ -110,6 +110,51 @@ export type Database = {
         }
         Relationships: []
       }
+      user_packages: {
+        Row: {
+          amount_paid: number
+          created_at: string
+          expires_at: string | null
+          id: string
+          package_id: string
+          package_name: string
+          purchased_at: string
+          remaining_sessions: number
+          stripe_session_id: string | null
+          total_sessions: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          amount_paid: number
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          package_id: string
+          package_name: string
+          purchased_at?: string
+          remaining_sessions: number
+          stripe_session_id?: string | null
+          total_sessions: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          amount_paid?: number
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          package_id?: string
+          package_name?: string
+          purchased_at?: string
+          remaining_sessions?: number
+          stripe_session_id?: string | null
+          total_sessions?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

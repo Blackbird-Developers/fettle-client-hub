@@ -5,6 +5,7 @@ import { UpcomingSessions } from "@/components/dashboard/UpcomingSessions";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
 import { PackagesPromo } from "@/components/dashboard/PackagesPromo";
 import { ProgressDashboard } from "@/components/dashboard/ProgressDashboard";
+import { PackageSessionsCounter } from "@/components/dashboard/PackageSessionsCounter";
 
 export default function Dashboard() {
   return (
@@ -18,6 +19,7 @@ export default function Dashboard() {
           <ProgressDashboard />
         </div>
         <div className="space-y-4 sm:space-y-6">
+          <PackageSessionsCounter />
           <PackagesPromo />
           <RecentActivity />
         </div>

@@ -32,6 +32,7 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
 
     const body = await req.json();
     const { sessionId } = body;
@@ -71,6 +72,58 @@ serve(async (req) => {
       sessions: packageInfo.sessions,
       amountPaid,
     });
+
+    // Get the authenticated user from the request
+    const authHeader = req.headers.get("Authorization");
+    let userId: string | null = null;
+
+    if (authHeader && supabaseUrl && supabaseAnonKey) {
+      const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
+      const token = authHeader.replace("Bearer ", "");
+      const { data: userData } = await supabaseAuth.auth.getUser(token);
+      userId = userData.user?.id || null;
+      logStep("User authenticated", { userId });
+    }
+
+    // Save package to database
+    if (supabaseUrl && supabaseServiceKey && userId) {
+      try {
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+        
+        // Check if this session has already been processed
+        const { data: existingPackage } = await supabaseAdmin
+          .from('user_packages')
+          .select('id')
+          .eq('stripe_session_id', sessionId)
+          .maybeSingle();
+
+        if (!existingPackage) {
+          // Insert new package
+          const { error: insertError } = await supabaseAdmin
+            .from('user_packages')
+            .insert({
+              user_id: userId,
+              package_id: packageId,
+              package_name: packageInfo.name,
+              total_sessions: packageInfo.sessions,
+              remaining_sessions: packageInfo.sessions,
+              amount_paid: amountPaid,
+              stripe_session_id: sessionId,
+              expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(), // 1 year expiry
+            });
+
+          if (insertError) {
+            logStep("Failed to save package to database", { error: insertError });
+          } else {
+            logStep("Package saved to database");
+          }
+        } else {
+          logStep("Package already exists for this session");
+        }
+      } catch (dbError) {
+        logStep("Database error", { error: dbError });
+      }
+    }
 
     // Send confirmation email
     if (supabaseUrl && supabaseServiceKey) {
