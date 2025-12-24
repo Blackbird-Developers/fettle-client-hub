@@ -369,20 +369,43 @@ export function BookingModal({
   const renderStep = () => {
     switch (step) {
       case 'type':
+        // Show enhanced loading state when checking therapist availability
+        if (typesLoading && preselectedCalendarName && !ignorePreselectedTherapist) {
+          return (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 p-4 rounded-xl bg-primary/5 border border-primary/10">
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <User className="h-5 w-5 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium text-foreground">{preselectedCalendarName}</p>
+                  <p className="text-sm text-muted-foreground">Checking availability...</p>
+                </div>
+                <Loader2 className="h-5 w-5 text-primary animate-spin" />
+              </div>
+              <div className="space-y-3">
+                {[1, 2, 3].map(i => (
+                  <Skeleton key={i} className="h-20 w-full rounded-xl" />
+                ))}
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div className="space-y-4">
             <p className="text-muted-foreground">
-              {preselectedCalendarName 
+              {preselectedCalendarName && !ignorePreselectedTherapist
                 ? `Select a session type to book with ${preselectedCalendarName}`
                 : 'Select the type of session you\'d like to book'}
             </p>
             {typesLoading ? (
               <div className="space-y-3">
                 {[1, 2, 3].map(i => (
-                  <Skeleton key={i} className="h-20 w-full" />
+                  <Skeleton key={i} className="h-20 w-full rounded-xl" />
                 ))}
               </div>
-            ) : filteredAppointmentTypes.length === 0 ? (
+            ) : filteredAppointmentTypes.length === 0 && preselectedCalendarName && !ignorePreselectedTherapist ? (
               <div className="text-center py-8 space-y-4">
                 <div className="h-12 w-12 rounded-full bg-muted/50 flex items-center justify-center mx-auto">
                   <CalendarIcon className="h-6 w-6 text-muted-foreground" />
