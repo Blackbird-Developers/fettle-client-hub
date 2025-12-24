@@ -249,11 +249,6 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
               </Badge>
             )}
           </div>
-          {therapist.description && (
-            <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-              {therapist.description}
-            </p>
-          )}
           {therapist.location && (
             <p className="text-xs text-muted-foreground mt-1">
               {therapist.location}
@@ -379,22 +374,29 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
               Choose a date with {selectedCalendarData?.name}
             </p>
             <div className="flex justify-center">
-              <Calendar
-                mode="single"
-                selected={selectedDate}
-                onSelect={(date) => {
-                  setSelectedDate(date);
-                  if (date) setStep('time');
-                }}
-                disabled={(date) => {
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
-                  return date < today || !isDateAvailable(date);
-                }}
-                fromDate={new Date()}
-                toDate={addMonths(new Date(), 3)}
-                className="rounded-xl border pointer-events-auto"
-              />
+              {datesLoading ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <p className="text-sm text-muted-foreground">Loading available dates...</p>
+                </div>
+              ) : (
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(date) => {
+                    setSelectedDate(date);
+                    if (date) setStep('time');
+                  }}
+                  disabled={(date) => {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    return date < today || !isDateAvailable(date);
+                  }}
+                  fromDate={new Date()}
+                  toDate={addMonths(new Date(), 3)}
+                  className="rounded-xl border pointer-events-auto"
+                />
+              )}
             </div>
             <Button variant="ghost" onClick={() => setStep('therapist')} className="w-full">
               Back to therapist selection
