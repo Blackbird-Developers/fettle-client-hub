@@ -4,15 +4,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Mail, Lock, User, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function Signup() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [privacyConsent, setPrivacyConsent] = useState(false);
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -24,9 +28,53 @@ export default function Signup() {
     }
   }, [user, navigate]);
 
+  const recordConsent = async (userId: string) => {
+    const consents = [
+      {
+        user_id: userId,
+        consent_type: "privacy_policy",
+        consented: true,
+        consented_at: new Date().toISOString(),
+        user_agent: navigator.userAgent,
+      },
+      {
+        user_id: userId,
+        consent_type: "terms_of_service",
+        consented: true,
+        consented_at: new Date().toISOString(),
+        user_agent: navigator.userAgent,
+      },
+    ];
+
+    if (marketingConsent) {
+      consents.push({
+        user_id: userId,
+        consent_type: "marketing",
+        consented: true,
+        consented_at: new Date().toISOString(),
+        user_agent: navigator.userAgent,
+      });
+    }
+
+    // Insert consent records
+    const { error } = await supabase.from("user_consent").insert(consents);
+    if (error) {
+      console.error("Failed to record consent:", error);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!privacyConsent) {
+      toast({
+        title: "Consent required",
+        description: "You must agree to the Privacy Policy and Terms of Service to create an account.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (password.length < 8) {
       toast({
         title: "Password too short",
@@ -50,6 +98,12 @@ export default function Signup() {
         variant: "destructive",
       });
       return;
+    }
+
+    // Get the user to record consent
+    const { data: { user: newUser } } = await supabase.auth.getUser();
+    if (newUser) {
+      await recordConsent(newUser.id);
     }
     
     toast({
@@ -140,17 +194,65 @@ export default function Signup() {
                 </p>
               </div>
 
-              <Button type="submit" className="w-full gap-2 shadow-soft" disabled={isLoading}>
+              {/* Consent Checkboxes */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-start space-x-3">
+                  <Checkbox
+                    id="privacy"
+                    checked={privacyConsent}
+                    onCheckedChange={(checked) => setPrivacyConsent(!!checked)}
+                    required
+                  />
+                  <div className="space-y-1">
+                    <Label htmlFor="privacy" className="text-sm font-normal cursor-pointer leading-tight">
+                      I agree to the{" "}
+                      <Link to="/privacy" className="text-primary hover:underline" target="_blank">
+                        Privacy Policy
+                      </Link>{" "}
+                      and{" "}
+                      <Link to="/terms" className="text-primary hover:underline" target="_blank">
+                        Terms of Service
+                      </Link>
+                      <span className="text-destructive"> *</span>
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Required to create an account
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start space-x-3">
+                  <Checkbox
+                    id="marketing"
+                    checked={marketingConsent}
+                    onCheckedChange={(checked) => setMarketingConsent(!!checked)}
+                  />
+                  <div className="space-y-1">
+                    <Label htmlFor="marketing" className="text-sm font-normal cursor-pointer leading-tight">
+                      Send me updates about new services and promotions
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Optional - you can change this anytime
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <Button 
+                type="submit" 
+                className="w-full gap-2 shadow-soft" 
+                disabled={isLoading || !privacyConsent}
+              >
                 {isLoading ? "Creating account..." : "Create account"}
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </form>
 
             <p className="mt-4 text-xs text-center text-muted-foreground">
-              By signing up, you agree to our{" "}
-              <Link to="/terms" className="text-primary hover:underline">Terms of Service</Link>
-              {" "}and{" "}
+              Your data is protected under GDPR and Irish Data Protection Act 2018.
+              Read our{" "}
               <Link to="/privacy" className="text-primary hover:underline">Privacy Policy</Link>
+              {" "}for details.
             </p>
 
             <div className="mt-6 text-center text-sm text-muted-foreground">

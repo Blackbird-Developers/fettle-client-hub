@@ -29,3 +29,9 @@ verify_jwt = false
 
 [functions.sync-acuity-appointments]
 verify_jwt = false
+
+[functions.export-user-data]
+verify_jwt = false
+
+[functions.delete-user-account]
+verify_jwt = false
