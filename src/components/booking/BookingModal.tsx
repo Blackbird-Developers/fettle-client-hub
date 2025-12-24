@@ -375,6 +375,27 @@ export function BookingModal({
                   <Skeleton key={i} className="h-20 w-full" />
                 ))}
               </div>
+            ) : filteredAppointmentTypes.length === 0 ? (
+              <div className="text-center py-8 space-y-4">
+                <div className="h-12 w-12 rounded-full bg-muted/50 flex items-center justify-center mx-auto">
+                  <CalendarIcon className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="text-muted-foreground">
+                    No available session types found for {preselectedCalendarName}.
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    This therapist may not have open availability right now.
+                  </p>
+                </div>
+                <Button 
+                  variant="outline" 
+                  onClick={handleClose}
+                  className="mt-2"
+                >
+                  Book with another therapist
+                </Button>
+              </div>
             ) : (
               <ScrollArea className="h-[300px] pr-4">
                 <div className="space-y-3">
