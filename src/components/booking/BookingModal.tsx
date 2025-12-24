@@ -43,14 +43,22 @@ interface BookingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onBookingComplete?: () => void;
+  preselectedCalendarId?: number;
+  preselectedCalendarName?: string;
 }
 
 type Step = 'type' | 'therapist' | 'date' | 'time' | 'details' | 'confirm' | 'payment' | 'success';
 
-export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingModalProps) {
-  const [step, setStep] = useState<Step>('type');
+export function BookingModal({ 
+  open, 
+  onOpenChange, 
+  onBookingComplete,
+  preselectedCalendarId,
+  preselectedCalendarName 
+}: BookingModalProps) {
+  const [step, setStep] = useState<Step>(preselectedCalendarId ? 'type' : 'type');
   const [selectedType, setSelectedType] = useState<number | null>(null);
-  const [selectedCalendar, setSelectedCalendar] = useState<number | null>(null);
+  const [selectedCalendar, setSelectedCalendar] = useState<number | null>(preselectedCalendarId || null);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -261,7 +269,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
   const handleClose = () => {
     setStep('type');
     setSelectedType(null);
-    setSelectedCalendar(null);
+    setSelectedCalendar(preselectedCalendarId || null);
     setSelectedDate(undefined);
     setSelectedTime(null);
     setFormData({ firstName: '', lastName: '', email: '', phone: '', notes: '' });
@@ -277,6 +285,17 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
     
     if (bookingResult) {
       onBookingComplete?.();
+    }
+  };
+
+  // When a preselected therapist is provided and a type is selected, skip to date
+  const handleTypeSelection = (typeId: number) => {
+    setSelectedType(typeId);
+    setSelectedCalendar(preselectedCalendarId || null);
+    if (preselectedCalendarId) {
+      setStep('date');
+    } else {
+      setStep('therapist');
     }
   };
 
@@ -325,7 +344,11 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
       case 'type':
         return (
           <div className="space-y-4">
-            <p className="text-muted-foreground">Select the type of session you'd like to book</p>
+            <p className="text-muted-foreground">
+              {preselectedCalendarName 
+                ? `Select a session type to book with ${preselectedCalendarName}`
+                : 'Select the type of session you\'d like to book'}
+            </p>
             {typesLoading ? (
               <div className="space-y-3">
                 {[1, 2, 3].map(i => (
@@ -338,11 +361,7 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
                   {individualTherapyTypes.map(type => (
                     <button
                       key={type.id}
-                      onClick={() => {
-                        setSelectedType(type.id);
-                        setSelectedCalendar(null);
-                        setStep('therapist');
-                      }}
+                      onClick={() => handleTypeSelection(type.id)}
                       className={cn(
                         "w-full p-4 rounded-xl border-2 text-left transition-all hover:border-primary/50 hover:bg-accent/50",
                         selectedType === type.id 
