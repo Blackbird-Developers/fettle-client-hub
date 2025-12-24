@@ -372,8 +372,8 @@ export function BookingModal({
         // Show enhanced loading state when checking therapist availability
         if (typesLoading && preselectedCalendarName && !ignorePreselectedTherapist) {
           return (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 p-4 rounded-xl bg-primary/5 border border-primary/10">
+            <div className="space-y-4 animate-fade-in">
+              <div className="flex items-center gap-3 p-4 rounded-xl bg-primary/5 border border-primary/10 animate-scale-in">
                 <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                   <User className="h-5 w-5 text-primary" />
                 </div>
@@ -384,8 +384,12 @@ export function BookingModal({
                 <Loader2 className="h-5 w-5 text-primary animate-spin" />
               </div>
               <div className="space-y-3">
-                {[1, 2, 3].map(i => (
-                  <Skeleton key={i} className="h-20 w-full rounded-xl" />
+                {[1, 2, 3].map((i) => (
+                  <Skeleton 
+                    key={i} 
+                    className="h-20 w-full rounded-xl animate-fade-in" 
+                    style={{ animationDelay: `${i * 100}ms`, animationFillMode: 'backwards' }}
+                  />
                 ))}
               </div>
             </div>
