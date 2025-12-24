@@ -739,12 +739,45 @@ export function BookingModal({ open, onOpenChange, onBookingComplete }: BookingM
     }
   };
 
+  // Progress indicator steps (excluding success which is the final state)
+  const progressSteps = [
+    { key: 'type', label: 'Type' },
+    { key: 'therapist', label: 'Therapist' },
+    { key: 'date', label: 'Date' },
+    { key: 'time', label: 'Time' },
+    { key: 'details', label: 'Details' },
+    { key: 'confirm', label: 'Confirm' },
+    { key: 'payment', label: 'Payment' },
+  ] as const;
+
+  const currentStepIndex = progressSteps.findIndex(s => s.key === step);
+  const isSuccessStep = step === 'success';
+
   return (
     <Dialog open={open} onOpenChange={step === 'success' ? handleClose : onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{getStepTitle()}</DialogTitle>
         </DialogHeader>
+        
+        {/* Progress Indicator */}
+        {!isSuccessStep && (
+          <div className="flex items-center justify-center gap-1.5 pb-2">
+            {progressSteps.map((s, index) => (
+              <div
+                key={s.key}
+                className={cn(
+                  "h-1.5 rounded-full transition-all duration-300",
+                  index <= currentStepIndex 
+                    ? "bg-primary w-6" 
+                    : "bg-muted w-4"
+                )}
+                title={s.label}
+              />
+            ))}
+          </div>
+        )}
+        
         {renderStep()}
       </DialogContent>
     </Dialog>
