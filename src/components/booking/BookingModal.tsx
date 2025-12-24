@@ -104,13 +104,33 @@ export function BookingModal({
     selectedCalendar
   );
 
-  // Filter to only show Individual Therapy Session types
-  const individualTherapyTypes = useMemo(() => {
+  // Filter appointment types based on whether we're rebooking with a specific therapist
+  const filteredAppointmentTypes = useMemo(() => {
+    if (preselectedCalendarName) {
+      // When rebooking, show only "Individual Session with {therapist name}" types
+      const therapistFirstName = preselectedCalendarName.split(' ')[0];
+      return types.filter(type => 
+        type.name.toLowerCase().includes(`individual session with ${therapistFirstName.toLowerCase()}`) ||
+        type.name.toLowerCase().includes(`individual session with ${preselectedCalendarName.toLowerCase()}`)
+      );
+    }
+    // Default: show Individual Therapy Session types
     return types.filter(type => type.name.startsWith('Individual Therapy Session'));
-  }, [types]);
+  }, [types, preselectedCalendarName]);
 
   // Helper to format the display name for clearer customer understanding
-  const formatSessionDisplayName = (name: string) => {
+  const formatSessionDisplayName = (name: string, isTherapistSpecific: boolean = false) => {
+    if (isTherapistSpecific) {
+      // For therapist-specific sessions, extract duration or session type info
+      // e.g., "Individual Session with Alex (50 min)" -> "50 min Session"
+      const durationMatch = name.match(/\((\d+)\s*min\)/i);
+      if (durationMatch) {
+        return `${durationMatch[1]} Minute Session`;
+      }
+      // Remove therapist name prefix to show just the session type
+      const cleaned = name.replace(/Individual Session with [^(]+/i, '').trim();
+      return cleaned || 'Therapy Session';
+    }
     // Extract the focus area from parentheses, e.g., "Individual Therapy Session (Depression)" -> "Depression"
     const match = name.match(/\(([^)]+)\)/);
     if (match) {
@@ -358,7 +378,7 @@ export function BookingModal({
             ) : (
               <ScrollArea className="h-[300px] pr-4">
                 <div className="space-y-3">
-                  {individualTherapyTypes.map(type => (
+                  {filteredAppointmentTypes.map(type => (
                     <button
                       key={type.id}
                       onClick={() => handleTypeSelection(type.id)}
@@ -371,7 +391,7 @@ export function BookingModal({
                     >
                       <div className="flex justify-between items-start">
                         <div>
-                          <h4 className="font-semibold text-foreground">{formatSessionDisplayName(type.name)}</h4>
+                          <h4 className="font-semibold text-foreground">{formatSessionDisplayName(type.name, !!preselectedCalendarName)}</h4>
                           {type.description && (
                             <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
                               {type.description}
