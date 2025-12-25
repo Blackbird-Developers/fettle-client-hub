@@ -50,9 +50,21 @@ export default function Login() {
 
   const handleGoogleSignIn = async () => {
     setIsGoogleLoading(true);
+    
+    // Set a timeout to reset loading state if OAuth takes too long
+    const timeoutId = setTimeout(() => {
+      setIsGoogleLoading(false);
+      toast({
+        title: "Connection timeout",
+        description: "Google sign in is taking too long. Please try again.",
+        variant: "destructive",
+      });
+    }, 30000); // 30 seconds timeout
+    
     const { error } = await signInWithGoogle();
     
     if (error) {
+      clearTimeout(timeoutId);
       setIsGoogleLoading(false);
       toast({
         title: "Google sign in failed",
