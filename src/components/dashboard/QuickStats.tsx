@@ -121,23 +121,23 @@ export function QuickStats() {
   ];
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 lg:gap-4 animate-fade-in">
       {stats.map((stat, index) => (
         <Card 
           key={stat.label} 
           className="border-border/50 hover:shadow-soft transition-shadow duration-300"
           style={{ animationDelay: `${index * 0.05}s` }}
         >
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className={`p-2 sm:p-2.5 rounded-xl ${stat.bgColor} shrink-0`}>
-                <stat.icon className={`h-4 w-4 sm:h-5 sm:w-5 ${stat.color}`} />
+          <CardContent className="p-2.5 sm:p-3 lg:p-4">
+            <div className="flex items-center gap-2 lg:gap-3">
+              <div className={`p-1.5 sm:p-2 lg:p-2.5 rounded-lg lg:rounded-xl ${stat.bgColor} shrink-0`}>
+                <stat.icon className={`h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5 ${stat.color}`} />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-lg sm:text-2xl font-heading font-bold text-card-foreground truncate">
+                <p className="text-base sm:text-lg lg:text-2xl font-heading font-bold text-card-foreground truncate">
                   {stat.value}
                 </p>
-                <p className="text-[10px] sm:text-xs text-muted-foreground truncate">{stat.label}</p>
+                <p className="text-[9px] sm:text-[10px] lg:text-xs text-muted-foreground truncate">{stat.label}</p>
               </div>
             </div>
           </CardContent>
