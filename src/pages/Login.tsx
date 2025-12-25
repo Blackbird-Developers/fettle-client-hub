@@ -82,6 +82,14 @@ export default function Login() {
           <div className="flex flex-col items-center gap-4 p-6 rounded-lg bg-card shadow-elevated border border-border/50">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
             <p className="text-sm font-medium text-foreground">Connecting to Google...</p>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsGoogleLoading(false)}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              Cancel
+            </Button>
           </div>
         </div>
       )}
