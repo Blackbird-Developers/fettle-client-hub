@@ -46,21 +46,21 @@ export function PackagesPromo() {
             </div>
           </div>
           
-          <div className="grid grid-cols-3 gap-2 pt-1">
-            <div className="text-center p-2 rounded-lg bg-accent/50">
-              <p className="text-lg font-bold text-foreground">3</p>
-              <p className="text-xs text-muted-foreground">Sessions</p>
-              <p className="text-xs text-success font-medium">Save 6%</p>
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2 pt-1">
+            <div className="text-center p-1.5 sm:p-2 rounded-lg bg-accent/50">
+              <p className="text-sm sm:text-lg font-bold text-foreground">3</p>
+              <p className="text-[10px] sm:text-xs text-muted-foreground">Sessions</p>
+              <p className="text-[10px] sm:text-xs text-success font-medium">Save 6%</p>
             </div>
-            <div className="text-center p-2 rounded-lg bg-primary/10 border border-primary/20">
-              <p className="text-lg font-bold text-primary">6</p>
-              <p className="text-xs text-muted-foreground">Sessions</p>
-              <p className="text-xs text-success font-medium">Save 13%</p>
+            <div className="text-center p-1.5 sm:p-2 rounded-lg bg-primary/10 border border-primary/20">
+              <p className="text-sm sm:text-lg font-bold text-primary">6</p>
+              <p className="text-[10px] sm:text-xs text-muted-foreground">Sessions</p>
+              <p className="text-[10px] sm:text-xs text-success font-medium">Save 13%</p>
             </div>
-            <div className="text-center p-2 rounded-lg bg-accent/50">
-              <p className="text-lg font-bold text-foreground">9</p>
-              <p className="text-xs text-muted-foreground">Sessions</p>
-              <p className="text-xs text-success font-medium">Save 19%</p>
+            <div className="text-center p-1.5 sm:p-2 rounded-lg bg-accent/50">
+              <p className="text-sm sm:text-lg font-bold text-foreground">9</p>
+              <p className="text-[10px] sm:text-xs text-muted-foreground">Sessions</p>
+              <p className="text-[10px] sm:text-xs text-success font-medium">Save 19%</p>
             </div>
           </div>
         </div>
