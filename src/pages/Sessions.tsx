@@ -144,27 +144,49 @@ function AcuitySessionCard({
                 </span>
               </div>
 
-              {isUpcoming && appointment.canClientCancel && (
+              {isUpcoming && (
                 <div className="flex flex-wrap gap-2 sm:gap-3 mt-4">
                   {isVideo && (
-                    <Button size="sm" className="shadow-soft text-xs sm:text-sm">
+                    <Button 
+                      size="sm" 
+                      className="shadow-soft text-xs sm:text-sm"
+                      onClick={() => {
+                        // Try to find video link in location or formsText
+                        const videoLink = appointment.location?.match(/https?:\/\/[^\s]+/)?.[0] ||
+                                         appointment.formsText?.match(/https?:\/\/[^\s]+/)?.[0];
+                        if (videoLink) {
+                          window.open(videoLink, '_blank');
+                        } else if (appointment.confirmationPage) {
+                          window.open(appointment.confirmationPage, '_blank');
+                        }
+                      }}
+                    >
+                      <Video className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
                       Join Session
                     </Button>
                   )}
-                  {appointment.canClientReschedule && (
-                    <Button size="sm" variant="outline" className="text-xs sm:text-sm">
+                  {appointment.canClientReschedule && appointment.confirmationPage && (
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="text-xs sm:text-sm"
+                      onClick={() => window.open(appointment.confirmationPage, '_blank')}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
                       Reschedule
                     </Button>
                   )}
-                  <Button 
-                    size="sm" 
-                    variant="ghost" 
-                    className="text-destructive hover:text-destructive hover:bg-destructive/10 text-xs sm:text-sm"
-                    onClick={() => setShowCancelDialog(true)}
-                  >
-                    <X className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
-                    Cancel
-                  </Button>
+                  {appointment.canClientCancel && (
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10 text-xs sm:text-sm"
+                      onClick={() => setShowCancelDialog(true)}
+                    >
+                      <X className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
+                      Cancel
+                    </Button>
+                  )}
                 </div>
               )}
 

@@ -19,6 +19,8 @@ export interface AcuityAppointment {
   canClientReschedule: boolean;
   location: string;
   notes: string;
+  confirmationPage?: string;
+  formsText?: string;
 }
 
 export interface AcuityAppointmentType {
