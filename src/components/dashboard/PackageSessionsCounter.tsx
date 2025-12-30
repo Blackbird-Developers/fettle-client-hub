@@ -73,9 +73,11 @@ export function PackageSessionsCounter() {
                 
                 return (
                   <div key={pkg.id} className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">{pkg.package_name}</span>
-                      <span className="font-medium text-foreground">
+                    <div className="flex justify-between gap-2 text-xs min-w-0">
+                      <span className="text-muted-foreground truncate pr-2 min-w-0 flex-1" title={pkg.package_name}>
+                        {pkg.package_name}
+                      </span>
+                      <span className="font-medium text-foreground shrink-0">
                         {pkg.remaining_sessions}/{pkg.total_sessions} left
                       </span>
                     </div>

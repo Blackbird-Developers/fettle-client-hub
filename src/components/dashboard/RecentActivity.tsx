@@ -92,7 +92,7 @@ export function RecentActivity() {
                   <Icon className={`h-4 w-4 ${config.color}`} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-card-foreground">
+                  <p className="text-sm font-medium text-card-foreground break-words">
                     {activity.title}
                   </p>
                   {activity.description && (
@@ -101,7 +101,7 @@ export function RecentActivity() {
                     </p>
                   )}
                 </div>
-                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                <span className="hidden sm:inline-flex text-xs text-muted-foreground whitespace-nowrap shrink-0">
                   {timeAgo}
                 </span>
               </div>
