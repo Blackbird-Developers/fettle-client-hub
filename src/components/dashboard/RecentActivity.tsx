@@ -75,7 +75,7 @@ export function RecentActivity() {
   }
 
   return (
-    <Card className="border-border/50 animate-fade-in" style={{ animationDelay: "0.2s" }}>
+    <Card className="border-border/50 animate-fade-in overflow-hidden" style={{ animationDelay: "0.2s" }}>
       <CardHeader className="pb-3">
         <CardTitle className="font-heading text-lg">Recent Activity</CardTitle>
       </CardHeader>

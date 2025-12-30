@@ -13,7 +13,7 @@ export default function Dashboard() {
       <WelcomeHeader />
       <QuickStats />
       
-      <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6 mt-4 sm:mt-6">
+      <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6 mt-4 sm:mt-6 overflow-hidden">
         <div className="md:col-span-2 xl:col-span-2 space-y-4 lg:space-y-6">
           <UpcomingSessions />
           <ProgressDashboard />

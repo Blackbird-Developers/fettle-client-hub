@@ -33,11 +33,11 @@ export function PackageSessionsCounter() {
   };
 
   return (
-    <Card className="border-success/30 bg-gradient-to-br from-success/5 via-background to-success/10 animate-fade-in overflow-hidden relative">
+    <Card className="border-success/30 bg-gradient-to-br from-success/5 via-background to-success/10 animate-fade-in overflow-hidden relative w-full max-w-full">
       <div className="absolute top-0 right-0 w-24 h-24 bg-success/10 rounded-full -translate-y-1/2 translate-x-1/2" />
       
-      <CardContent className="p-5 relative">
-        <div className="flex items-start gap-4">
+      <CardContent className="p-4 sm:p-5 relative">
+        <div className="flex items-start gap-3 sm:gap-4">
           {/* Sessions Counter Circle */}
           <div className="relative flex-shrink-0">
             <div className={cn(
