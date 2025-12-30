@@ -144,10 +144,10 @@ export function ProgressDashboard() {
   return (
     <Card className="border-border/50 animate-fade-in" style={{ animationDelay: "0.15s" }}>
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="font-heading text-lg flex items-center gap-2">
-            <Target className="h-5 w-5 text-primary" />
-            Your Progress
+        <div className="flex flex-wrap items-center justify-between gap-2 min-w-0">
+          <CardTitle className="font-heading text-lg flex items-center gap-2 min-w-0 flex-1">
+            <Target className="h-5 w-5 text-primary shrink-0" />
+            <span className="min-w-0 break-words">Your Progress</span>
           </CardTitle>
           {currentStreak > 0 && (
             <Badge variant="secondary" className="bg-orange-500/10 text-orange-600 border-orange-500/20 gap-1">
