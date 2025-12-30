@@ -158,6 +158,12 @@ function AcuitySessionCard({
                           window.open(videoLink, '_blank');
                         } else if (appointment.confirmationPage) {
                           window.open(appointment.confirmationPage, '_blank');
+                        } else {
+                          toast({
+                            title: 'Video Link Unavailable',
+                            description: 'The video link for this session is not yet available.',
+                            variant: 'destructive',
+                          });
                         }
                       }}
                     >
@@ -165,7 +171,7 @@ function AcuitySessionCard({
                       Join Session
                     </Button>
                   )}
-                  {appointment.canClientReschedule && appointment.confirmationPage && (
+                  {appointment.confirmationPage && (
                     <Button 
                       size="sm" 
                       variant="outline" 
@@ -176,17 +182,15 @@ function AcuitySessionCard({
                       Reschedule
                     </Button>
                   )}
-                  {appointment.canClientCancel && (
-                    <Button 
-                      size="sm" 
-                      variant="ghost" 
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10 text-xs sm:text-sm"
-                      onClick={() => setShowCancelDialog(true)}
-                    >
-                      <X className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
-                      Cancel
-                    </Button>
-                  )}
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10 text-xs sm:text-sm"
+                    onClick={() => setShowCancelDialog(true)}
+                  >
+                    <X className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
+                    Cancel
+                  </Button>
                 </div>
               )}
 
