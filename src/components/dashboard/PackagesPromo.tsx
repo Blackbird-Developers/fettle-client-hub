@@ -15,17 +15,17 @@ export function PackagesPromo() {
       <div className="absolute bottom-0 left-0 w-24 h-24 bg-success/10 rounded-full translate-y-1/2 -translate-x-1/2" />
       
       <CardHeader className="pb-2 relative">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-2.5 rounded-xl bg-gradient-to-br from-primary to-primary/80 shadow-lg">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="p-2.5 rounded-xl bg-gradient-to-br from-primary to-primary/80 shadow-lg shrink-0">
               <Gift className="h-5 w-5 text-primary-foreground" />
             </div>
-            <div>
-              <CardTitle className="font-heading text-lg">Session Packages</CardTitle>
-              <p className="text-xs text-muted-foreground">The smarter way to therapy</p>
+            <div className="min-w-0">
+              <CardTitle className="font-heading text-lg break-words">Session Packages</CardTitle>
+              <p className="text-xs text-muted-foreground break-words">The smarter way to therapy</p>
             </div>
           </div>
-          <Badge className="bg-success text-success-foreground border-0 shadow-sm">
+          <Badge className="bg-success text-success-foreground border-0 shadow-sm shrink-0 self-start sm:self-auto">
             <Sparkles className="h-3 w-3 mr-1" />
             Save up to 25%
           </Badge>

@@ -96,7 +96,7 @@ export function UpcomingSessions() {
     .slice(0, 2);
 
   return (
-    <section className="animate-fade-in overflow-hidden" style={{ animationDelay: "0.1s" }}>
+    <section className="animate-fade-in" style={{ animationDelay: "0.1s" }}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4 min-w-0">
         <h2 className="font-heading text-xl font-semibold text-foreground min-w-0">
           Upcoming Sessions
