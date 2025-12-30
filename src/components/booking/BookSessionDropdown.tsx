@@ -49,7 +49,7 @@ export function BookSessionDropdown({
         </DropdownMenuTrigger>
         <DropdownMenuContent 
           align="end" 
-          className="w-56 bg-popover border border-border shadow-lg z-50"
+          className="w-56 max-w-[calc(100vw-1rem)] bg-popover border border-border shadow-lg z-50"
         >
           <DropdownMenuItem 
             onClick={() => setBookingOpen(true)}

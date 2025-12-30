@@ -97,11 +97,16 @@ export function UpcomingSessions() {
 
   return (
     <section className="animate-fade-in overflow-hidden" style={{ animationDelay: "0.1s" }}>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="font-heading text-xl font-semibold text-foreground">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4 min-w-0">
+        <h2 className="font-heading text-xl font-semibold text-foreground min-w-0">
           Upcoming Sessions
         </h2>
-        <Button variant="ghost" size="sm" asChild className="text-primary hover:text-primary/80">
+        <Button
+          variant="ghost"
+          size="sm"
+          asChild
+          className="text-primary hover:text-primary/80 self-start sm:self-auto"
+        >
           <Link to="/sessions" className="flex items-center gap-1">
             View all
             <ChevronRight className="h-4 w-4" />
