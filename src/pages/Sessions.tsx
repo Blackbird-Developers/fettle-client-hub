@@ -204,10 +204,15 @@ function AcuitySessionCard({
                     size="sm" 
                     variant="ghost" 
                     className="text-destructive hover:text-destructive hover:bg-destructive/10 text-xs sm:text-sm"
+                    disabled={isCancelling}
                     onClick={() => setShowCancelDialog(true)}
                   >
-                    <X className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
-                    Cancel
+                    {isCancelling ? (
+                      <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1 animate-spin" />
+                    ) : (
+                      <X className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
+                    )}
+                    {isCancelling ? 'Cancelling...' : 'Cancel'}
                   </Button>
                 </div>
               )}
