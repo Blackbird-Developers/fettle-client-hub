@@ -37,6 +37,8 @@ function AcuitySessionCard({
   clientEmail?: string;
 }) {
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
+  const [isRescheduling, setIsRescheduling] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const { toast } = useToast();
   
@@ -150,7 +152,9 @@ function AcuitySessionCard({
                     <Button 
                       size="sm" 
                       className="shadow-soft text-xs sm:text-sm"
+                      disabled={isJoining}
                       onClick={() => {
+                        setIsJoining(true);
                         // Try to find video link in location or formsText
                         const videoLink = appointment.location?.match(/https?:\/\/[^\s]+/)?.[0] ||
                                          appointment.formsText?.match(/https?:\/\/[^\s]+/)?.[0];
@@ -165,10 +169,15 @@ function AcuitySessionCard({
                             variant: 'destructive',
                           });
                         }
+                        setTimeout(() => setIsJoining(false), 1000);
                       }}
                     >
-                      <Video className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
-                      Join Session
+                      {isJoining ? (
+                        <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1 animate-spin" />
+                      ) : (
+                        <Video className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
+                      )}
+                      {isJoining ? 'Opening...' : 'Join Session'}
                     </Button>
                   )}
                   {appointment.confirmationPage && (
@@ -176,10 +185,19 @@ function AcuitySessionCard({
                       size="sm" 
                       variant="outline" 
                       className="text-xs sm:text-sm"
-                      onClick={() => window.open(appointment.confirmationPage, '_blank')}
+                      disabled={isRescheduling}
+                      onClick={() => {
+                        setIsRescheduling(true);
+                        window.open(appointment.confirmationPage, '_blank');
+                        setTimeout(() => setIsRescheduling(false), 1000);
+                      }}
                     >
-                      <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
-                      Reschedule
+                      {isRescheduling ? (
+                        <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
+                      )}
+                      {isRescheduling ? 'Opening...' : 'Reschedule'}
                     </Button>
                   )}
                   <Button 
