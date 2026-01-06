@@ -156,6 +156,14 @@ export function BookingModal({
 
   // Helper to format the display name for clearer customer understanding
   const formatSessionDisplayName = (name: string, isTherapistSpecific: boolean = false) => {
+    // For couples and youth sessions, show just the therapist name
+    if (sessionCategory === 'couples' || sessionCategory === 'youth') {
+      const therapistName = extractTherapistFromTypeName(name);
+      if (therapistName) {
+        return therapistName;
+      }
+    }
+    
     if (isTherapistSpecific) {
       // For therapist-specific sessions, extract duration or session type info
       const durationMatch = name.match(/\((\d+)\s*min\)/i);
@@ -486,7 +494,9 @@ export function BookingModal({
             <p className="text-muted-foreground">
               {preselectedCalendarName && !ignorePreselectedTherapist
                 ? `Select a session type to book with ${preselectedCalendarName}`
-                : 'Select the type of session you\'d like to book'}
+                : sessionCategory === 'couples' || sessionCategory === 'youth'
+                  ? 'Select your therapist'
+                  : "Select the type of session you'd like to book"}
             </p>
             {typesLoading ? (
               <div className="space-y-3">
@@ -1053,7 +1063,10 @@ export function BookingModal({
   const getStepTitle = () => {
     const categoryLabel = getSessionCategoryLabel();
     switch (step) {
-      case 'type': return `${categoryLabel} - Choose Session`;
+      case 'type': 
+        return sessionCategory === 'couples' || sessionCategory === 'youth' 
+          ? `${categoryLabel} - Choose Therapist` 
+          : `${categoryLabel} - Choose Session`;
       case 'therapist': return 'Choose Your Therapist';
       case 'date': return 'Select Date';
       case 'time': return 'Select Time';
