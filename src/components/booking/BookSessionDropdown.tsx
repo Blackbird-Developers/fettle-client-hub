@@ -4,11 +4,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { BookingModal } from '@/components/booking/BookingModal';
+import { BookingModal, SessionCategory } from '@/components/booking/BookingModal';
 import { PackageBookingModal } from '@/components/booking/PackageBookingModal';
-import { CalendarPlus, Plus, ChevronDown, User, Gift } from 'lucide-react';
+import { CalendarPlus, Plus, ChevronDown, User, Gift, Users, Heart } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface BookSessionDropdownProps {
@@ -24,9 +25,15 @@ export function BookSessionDropdown({
 }: BookSessionDropdownProps) {
   const [bookingOpen, setBookingOpen] = useState(false);
   const [packageOpen, setPackageOpen] = useState(false);
+  const [sessionCategory, setSessionCategory] = useState<SessionCategory>('individual');
 
   const handleBookingComplete = () => {
     onBookingComplete?.();
+  };
+
+  const openBookingModal = (category: SessionCategory) => {
+    setSessionCategory(category);
+    setBookingOpen(true);
   };
 
   return (
@@ -49,18 +56,39 @@ export function BookSessionDropdown({
         </DropdownMenuTrigger>
         <DropdownMenuContent 
           align="end" 
-          className="w-56 max-w-[calc(100vw-1rem)] bg-popover border border-border shadow-lg z-50"
+          className="w-64 max-w-[calc(100vw-1rem)] bg-popover border border-border shadow-lg z-50"
         >
           <DropdownMenuItem 
-            onClick={() => setBookingOpen(true)}
+            onClick={() => openBookingModal('individual')}
             className="cursor-pointer py-3 px-4"
           >
             <User className="h-4 w-4 mr-3 text-primary" />
             <div className="flex flex-col">
               <span className="font-medium">Individual Session</span>
-              <span className="text-xs text-muted-foreground">Book a single session</span>
+              <span className="text-xs text-muted-foreground">One-on-one therapy</span>
             </div>
           </DropdownMenuItem>
+          <DropdownMenuItem 
+            onClick={() => openBookingModal('couples')}
+            className="cursor-pointer py-3 px-4"
+          >
+            <Heart className="h-4 w-4 mr-3 text-pink-500" />
+            <div className="flex flex-col">
+              <span className="font-medium">Couple's Therapy</span>
+              <span className="text-xs text-muted-foreground">Sessions for partners</span>
+            </div>
+          </DropdownMenuItem>
+          <DropdownMenuItem 
+            onClick={() => openBookingModal('youth')}
+            className="cursor-pointer py-3 px-4"
+          >
+            <Users className="h-4 w-4 mr-3 text-blue-500" />
+            <div className="flex flex-col">
+              <span className="font-medium">Youth Therapy</span>
+              <span className="text-xs text-muted-foreground">For young people</span>
+            </div>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem 
             onClick={() => setPackageOpen(true)}
             className="cursor-pointer py-3 px-4"
@@ -78,6 +106,7 @@ export function BookSessionDropdown({
         open={bookingOpen} 
         onOpenChange={setBookingOpen}
         onBookingComplete={handleBookingComplete}
+        sessionCategory={sessionCategory}
       />
       
       <PackageBookingModal 
