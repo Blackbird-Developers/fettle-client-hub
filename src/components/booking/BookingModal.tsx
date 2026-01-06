@@ -189,6 +189,29 @@ export function BookingModal({
     return name.replace('Individual Therapy Session', '').trim() || 'General Session';
   };
 
+  // Extract therapist name from couples/youth appointment type names
+  const extractTherapistFromTypeName = (typeName: string): string | null => {
+    // Match patterns like "Couple's Therapy Session with John Smith" or "Youth Therapy - Individual Session with Jane Doe"
+    const couplesMatch = typeName.match(/Couple's Therapy Session with (.+?)(?:\s*\(|$)/i);
+    if (couplesMatch) return couplesMatch[1].trim();
+    
+    const youthMatch = typeName.match(/Youth Therapy - Individual Session with (.+?)(?:\s*\(|$)/i);
+    if (youthMatch) return youthMatch[1].trim();
+    
+    return null;
+  };
+
+  // Get the therapist name - either from calendar data or extracted from type name for couples/youth
+  const getTherapistDisplayName = (): string | null => {
+    if (selectedCalendarData?.name) {
+      return selectedCalendarData.name;
+    }
+    if (selectedTypeData && (sessionCategory === 'couples' || sessionCategory === 'youth')) {
+      return extractTherapistFromTypeName(selectedTypeData.name);
+    }
+    return null;
+  };
+
   const selectedTypeData = types.find(t => t.id === selectedType);
   const selectedCalendarData = calendars.find(c => c.id === selectedCalendar);
 
@@ -580,10 +603,11 @@ export function BookingModal({
         );
 
       case 'date':
+        const therapistName = getTherapistDisplayName();
         return (
           <div className="space-y-4">
             <p className="text-muted-foreground">
-              Choose a date with {selectedCalendarData?.name}
+              Choose a date{therapistName ? ` with ${therapistName}` : ''}
             </p>
             <div className="flex justify-center">
               {datesLoading ? (
@@ -610,8 +634,12 @@ export function BookingModal({
                 />
               )}
             </div>
-            <Button variant="ghost" onClick={() => setStep('therapist')} className="w-full">
-              Back to therapist selection
+            <Button 
+              variant="ghost" 
+              onClick={() => setStep(sessionCategory === 'couples' || sessionCategory === 'youth' ? 'type' : 'therapist')} 
+              className="w-full"
+            >
+              {sessionCategory === 'couples' || sessionCategory === 'youth' ? 'Back to session types' : 'Back to therapist selection'}
             </Button>
           </div>
         );
@@ -740,7 +768,7 @@ export function BookingModal({
               <div className="flex items-center gap-3">
                 <Users className="h-5 w-5 text-primary" />
                 <div>
-                  <p className="font-medium">{selectedCalendarData?.name}</p>
+                  <p className="font-medium">{getTherapistDisplayName() || 'Your therapist'}</p>
                   <p className="text-sm text-muted-foreground">Your therapist</p>
                 </div>
               </div>
