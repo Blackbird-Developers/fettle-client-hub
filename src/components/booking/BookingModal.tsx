@@ -39,12 +39,15 @@ console.log('[Stripe Debug] Publishable key exists:', !!stripePublishableKey);
 console.log('[Stripe Debug] Publishable key prefix:', stripePublishableKey?.substring(0, 10) + '...');
 const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null;
 console.log('[Stripe Debug] stripePromise created:', !!stripePromise);
+export type SessionCategory = 'individual' | 'couples' | 'youth';
+
 interface BookingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onBookingComplete?: () => void;
   preselectedCalendarId?: number;
   preselectedCalendarName?: string;
+  sessionCategory?: SessionCategory;
 }
 
 type Step = 'type' | 'therapist' | 'date' | 'time' | 'details' | 'confirm' | 'payment' | 'success';
@@ -54,7 +57,8 @@ export function BookingModal({
   onOpenChange, 
   onBookingComplete,
   preselectedCalendarId,
-  preselectedCalendarName 
+  preselectedCalendarName,
+  sessionCategory = 'individual'
 }: BookingModalProps) {
   const [step, setStep] = useState<Step>(preselectedCalendarId ? 'type' : 'type');
   const [selectedType, setSelectedType] = useState<number | null>(null);
@@ -105,37 +109,82 @@ export function BookingModal({
     selectedCalendar
   );
 
-  // Filter appointment types based on whether we're rebooking with a specific therapist
+  // Filter appointment types based on session category and whether we're rebooking
   const filteredAppointmentTypes = useMemo(() => {
     if (preselectedCalendarName && !ignorePreselectedTherapist) {
-      // When rebooking, show only "Individual Session with {therapist name}" types
+      // When rebooking, show only session types for the specific therapist
       const therapistFirstName = preselectedCalendarName.split(' ')[0];
-      return types.filter(type => 
-        type.name.toLowerCase().includes(`individual session with ${therapistFirstName.toLowerCase()}`) ||
-        type.name.toLowerCase().includes(`individual session with ${preselectedCalendarName.toLowerCase()}`)
-      );
+      return types.filter(type => {
+        const nameLower = type.name.toLowerCase();
+        const therapistNameLower = therapistFirstName.toLowerCase();
+        const fullNameLower = preselectedCalendarName.toLowerCase();
+        
+        switch (sessionCategory) {
+          case 'couples':
+            return (nameLower.includes(`couple's therapy session with ${therapistNameLower}`) ||
+                    nameLower.includes(`couple's therapy session with ${fullNameLower}`));
+          case 'youth':
+            return (nameLower.includes(`youth therapy - individual session with ${therapistNameLower}`) ||
+                    nameLower.includes(`youth therapy - individual session with ${fullNameLower}`));
+          default: // individual
+            return (nameLower.includes(`individual session with ${therapistNameLower}`) ||
+                    nameLower.includes(`individual session with ${fullNameLower}`)) &&
+                   !nameLower.includes('youth therapy');
+        }
+      });
     }
-    // Default: show Individual Therapy Session types
-    return types.filter(type => type.name.startsWith('Individual Therapy Session'));
-  }, [types, preselectedCalendarName, ignorePreselectedTherapist]);
+    
+    // Filter by session category
+    switch (sessionCategory) {
+      case 'couples':
+        return types.filter(type => type.name.startsWith("Couple's Therapy Session"));
+      case 'youth':
+        return types.filter(type => type.name.startsWith('Youth Therapy - Individual Session'));
+      default: // individual
+        return types.filter(type => type.name.startsWith('Individual Therapy Session'));
+    }
+  }, [types, preselectedCalendarName, ignorePreselectedTherapist, sessionCategory]);
+
+  // Get a human-readable label for the session category
+  const getSessionCategoryLabel = () => {
+    switch (sessionCategory) {
+      case 'couples': return "Couple's Therapy";
+      case 'youth': return 'Youth Therapy';
+      default: return 'Individual Therapy';
+    }
+  };
 
   // Helper to format the display name for clearer customer understanding
   const formatSessionDisplayName = (name: string, isTherapistSpecific: boolean = false) => {
     if (isTherapistSpecific) {
       // For therapist-specific sessions, extract duration or session type info
-      // e.g., "Individual Session with Alex (50 min)" -> "50 min Session"
       const durationMatch = name.match(/\((\d+)\s*min\)/i);
       if (durationMatch) {
         return `${durationMatch[1]} Minute Session`;
       }
-      // Remove therapist name prefix to show just the session type
-      const cleaned = name.replace(/Individual Session with [^(]+/i, '').trim();
+      // Remove prefixes based on session category
+      let cleaned = name;
+      if (sessionCategory === 'couples') {
+        cleaned = name.replace(/Couple's Therapy Session with [^(]+/i, '').trim();
+      } else if (sessionCategory === 'youth') {
+        cleaned = name.replace(/Youth Therapy - Individual Session with [^(]+/i, '').trim();
+      } else {
+        cleaned = name.replace(/Individual Session with [^(]+/i, '').trim();
+      }
       return cleaned || 'Therapy Session';
     }
-    // Extract the focus area from parentheses, e.g., "Individual Therapy Session (Depression)" -> "Depression"
+    
+    // Extract the focus area from parentheses
     const match = name.match(/\(([^)]+)\)/);
     if (match) {
-      return match[1]; // Return just the focus area
+      return match[1];
+    }
+    
+    // Remove common prefixes based on category
+    if (sessionCategory === 'couples') {
+      return name.replace("Couple's Therapy Session", '').trim() || 'General Session';
+    } else if (sessionCategory === 'youth') {
+      return name.replace('Youth Therapy - Individual Session', '').trim() || 'General Session';
     }
     return name.replace('Individual Therapy Session', '').trim() || 'General Session';
   };
@@ -966,8 +1015,9 @@ export function BookingModal({
   };
 
   const getStepTitle = () => {
+    const categoryLabel = getSessionCategoryLabel();
     switch (step) {
-      case 'type': return 'Choose Session Type';
+      case 'type': return `${categoryLabel} - Choose Session`;
       case 'therapist': return 'Choose Your Therapist';
       case 'date': return 'Select Date';
       case 'time': return 'Select Time';
