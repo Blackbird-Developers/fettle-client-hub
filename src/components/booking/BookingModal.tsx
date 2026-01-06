@@ -365,8 +365,21 @@ export function BookingModal({
   };
 
   // When a preselected therapist is provided and a type is selected, skip to date
+  // For couples/youth sessions, the therapist is embedded in the type name, so extract calendar and skip to date
   const handleTypeSelection = (typeId: number) => {
     setSelectedType(typeId);
+    
+    // For couples and youth sessions, therapist is part of the type name - extract calendar ID and skip to date
+    if (sessionCategory === 'couples' || sessionCategory === 'youth') {
+      const selectedTypeInfo = types.find(t => t.id === typeId);
+      // Get the first available calendar for this type (therapist is already specified in the type)
+      if (selectedTypeInfo?.calendarIDs?.length) {
+        setSelectedCalendar(selectedTypeInfo.calendarIDs[0]);
+        setStep('date');
+        return;
+      }
+    }
+    
     setSelectedCalendar(preselectedCalendarId || null);
     if (preselectedCalendarId) {
       setStep('date');
@@ -496,11 +509,6 @@ export function BookingModal({
                       <div className="flex justify-between items-start">
                         <div>
                           <h4 className="font-semibold text-foreground">{formatSessionDisplayName(type.name, !!preselectedCalendarName)}</h4>
-                          {type.description && (
-                            <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                              {type.description}
-                            </p>
-                          )}
                         </div>
                         <div className="text-right shrink-0 ml-4">
                           <div className="flex items-center gap-1 text-sm text-muted-foreground">
