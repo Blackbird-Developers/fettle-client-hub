@@ -160,7 +160,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      trigger_monthly_credit_summary: { Args: never; Returns: undefined }
     }
     Enums: {
       activity_type:
