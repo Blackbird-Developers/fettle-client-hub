@@ -11,7 +11,7 @@ AS $$
 BEGIN
   -- Make HTTP request to the edge function
   PERFORM extensions.http_post(
-    url := 'https://aexsnxuhyvpplolihkxt.supabase.co/functions/v1/send-monthly-credit-summary',
+    url := 'https://gxeoillrmjezpehmcvrh.supabase.co/functions/v1/send-monthly-credit-summary',
     headers := '{"Content-Type": "application/json"}'::jsonb,
     body := '{}'::jsonb
   );
