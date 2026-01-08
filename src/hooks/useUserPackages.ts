@@ -45,10 +45,10 @@ export function useUserPackages() {
 export function useActivePackages() {
   const { data: packages, ...rest } = useUserPackages();
 
-  // Filter to only packages with remaining sessions and not expired
+  // Filter to only packages with remaining sessions
+  // Note: Credits don't expire, so we don't filter by expires_at
   const activePackages = packages?.filter(pkg => {
     if (pkg.remaining_sessions <= 0) return false;
-    if (pkg.expires_at && new Date(pkg.expires_at) < new Date()) return false;
     return true;
   }) || [];
 

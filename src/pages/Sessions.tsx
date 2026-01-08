@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { BookSessionDropdown } from "@/components/booking/BookSessionDropdown";
 import { BookingModal } from "@/components/booking/BookingModal";
+import { PackageCreditsCard } from "@/components/sessions/PackageCreditsCard";
 import { useAcuityAppointments, AcuityAppointment } from "@/hooks/useAcuity";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -350,6 +351,11 @@ export default function Sessions() {
           onBookingComplete={refetch}
           className="shrink-0 w-full sm:w-auto"
         />
+      </div>
+
+      {/* Package Credits Card - inline with sessions */}
+      <div className="mb-6 animate-fade-in" style={{ animationDelay: "0.05s" }}>
+        <PackageCreditsCard onBookingComplete={refetch} />
       </div>
 
       <Tabs defaultValue="upcoming" className="animate-fade-in" style={{ animationDelay: "0.1s" }}>
