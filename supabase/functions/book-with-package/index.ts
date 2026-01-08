@@ -126,6 +126,39 @@ async function sendCreditUsedConfirmation(
   }
 }
 
+async function sendCreditsDepletedEmail(
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+  email: string,
+  firstName: string,
+  packageName: string,
+  totalSessionsCompleted: number
+) {
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/send-credits-depleted`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseServiceKey}`,
+      },
+      body: JSON.stringify({
+        email,
+        firstName,
+        packageName,
+        totalSessionsCompleted,
+      }),
+    });
+
+    if (!response.ok) {
+      logStep("Credits depleted email failed", { status: response.status });
+    } else {
+      logStep("Credits depleted email sent");
+    }
+  } catch (error) {
+    logStep("Failed to send credits depleted email", { error: String(error) });
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -278,9 +311,21 @@ serve(async (req) => {
         userPackage.total_sessions
       );
       
-      // Send low credit reminder if 2 or fewer sessions remaining
+      // Send low credit reminder if 2 or fewer sessions remaining (but not 0)
       if (newRemaining <= 2 && newRemaining > 0) {
         await sendLowSessionsReminder(email, firstName, userPackage.package_name, newRemaining);
+      }
+      
+      // Send credits depleted email when they hit 0
+      if (newRemaining === 0) {
+        await sendCreditsDepletedEmail(
+          supabaseUrl,
+          supabaseServiceKey,
+          email,
+          firstName,
+          userPackage.package_name,
+          userPackage.total_sessions
+        );
       }
     }
 

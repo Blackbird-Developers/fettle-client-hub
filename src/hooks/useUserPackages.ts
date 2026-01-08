@@ -64,3 +64,54 @@ export function useActivePackages() {
     ...rest,
   };
 }
+
+export function usePackageStats() {
+  const { data: packages, ...rest } = useUserPackages();
+
+  // All packages (including depleted)
+  const allPackages = packages || [];
+  
+  // Active packages with remaining sessions
+  const activePackages = allPackages.filter(pkg => pkg.remaining_sessions > 0);
+  
+  // Depleted packages (had sessions, now at 0)
+  const depletedPackages = allPackages.filter(pkg => pkg.remaining_sessions === 0);
+
+  // Calculate totals
+  const totalRemainingSessions = activePackages.reduce(
+    (sum, pkg) => sum + pkg.remaining_sessions,
+    0
+  );
+
+  const totalSessionsUsed = allPackages.reduce(
+    (sum, pkg) => sum + (pkg.total_sessions - pkg.remaining_sessions),
+    0
+  );
+
+  const totalSessionsPurchased = allPackages.reduce(
+    (sum, pkg) => sum + pkg.total_sessions,
+    0
+  );
+
+  // Has ever purchased a package
+  const hasPackageHistory = allPackages.length > 0;
+  
+  // Has active credits
+  const hasActiveCredits = totalRemainingSessions > 0;
+  
+  // Has depleted all credits (had packages but none remaining)
+  const allCreditsDepleted = hasPackageHistory && !hasActiveCredits;
+
+  return {
+    allPackages,
+    activePackages,
+    depletedPackages,
+    totalRemainingSessions,
+    totalSessionsUsed,
+    totalSessionsPurchased,
+    hasPackageHistory,
+    hasActiveCredits,
+    allCreditsDepleted,
+    ...rest,
+  };
+}
