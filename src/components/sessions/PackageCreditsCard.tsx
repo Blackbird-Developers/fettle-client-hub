@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useActivePackages } from "@/hooks/useUserPackages";
+import { usePackageStats } from "@/hooks/useUserPackages";
 import { BookSessionDropdown } from "@/components/booking/BookSessionDropdown";
-import { Gift, Sparkles } from "lucide-react";
+import { PackageBookingModal } from "@/components/booking/PackageBookingModal";
+import { Gift, Sparkles, CheckCircle2, ShoppingBag } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface PackageCreditsCardProps {
@@ -10,7 +13,16 @@ interface PackageCreditsCardProps {
 }
 
 export function PackageCreditsCard({ onBookingComplete }: PackageCreditsCardProps) {
-  const { packages, totalRemainingSessions, isLoading } = useActivePackages();
+  const { 
+    activePackages, 
+    totalRemainingSessions, 
+    totalSessionsUsed,
+    hasPackageHistory,
+    allCreditsDepleted,
+    isLoading 
+  } = usePackageStats();
+  
+  const [packageModalOpen, setPackageModalOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -22,11 +34,64 @@ export function PackageCreditsCard({ onBookingComplete }: PackageCreditsCardProp
     );
   }
 
-  // Don't show if no active packages
-  if (packages.length === 0) {
+  // Don't show if user has never purchased a package
+  if (!hasPackageHistory) {
     return null;
   }
 
+  // Show depleted state when all credits are used
+  if (allCreditsDepleted) {
+    return (
+      <>
+        <Card className="border-amber-500/30 bg-gradient-to-br from-amber-500/5 via-background to-amber-500/10 animate-fade-in overflow-hidden relative">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full -translate-y-1/2 translate-x-1/2" />
+          
+          <CardContent className="p-4 sm:p-6 relative">
+            <div className="flex items-start gap-4">
+              {/* Completed Circle */}
+              <div className="relative flex-shrink-0">
+                <div className={cn(
+                  "w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center",
+                  "bg-gradient-to-br from-amber-500/20 to-amber-500/10 border-2 border-amber-500/30"
+                )}>
+                  <CheckCircle2 className="h-8 w-8 sm:h-10 sm:w-10 text-amber-500" />
+                </div>
+              </div>
+              
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <Gift className="h-4 w-4 sm:h-5 sm:w-5 text-amber-500" />
+                  <h3 className="font-heading font-semibold text-foreground text-base sm:text-lg">All Credits Used</h3>
+                </div>
+                <p className="text-sm text-muted-foreground mb-2">
+                  Great work! You've completed {totalSessionsUsed} session{totalSessionsUsed !== 1 ? 's' : ''} from your package{totalSessionsUsed !== 1 ? 's' : ''}.
+                </p>
+                <p className="text-sm text-foreground mb-4">
+                  Ready to continue your therapy journey? Purchase a new package to save on future sessions.
+                </p>
+                
+                <Button 
+                  onClick={() => setPackageModalOpen(true)}
+                  className="gap-2 bg-amber-500 hover:bg-amber-600 text-white"
+                >
+                  <ShoppingBag className="h-4 w-4" />
+                  Purchase More Sessions
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <PackageBookingModal 
+          open={packageModalOpen} 
+          onOpenChange={setPackageModalOpen}
+        />
+      </>
+    );
+  }
+
+  // Show active credits state
   return (
     <Card className="border-success/30 bg-gradient-to-br from-success/5 via-background to-success/10 animate-fade-in overflow-hidden relative">
       <div className="absolute top-0 right-0 w-32 h-32 bg-success/10 rounded-full -translate-y-1/2 translate-x-1/2" />
@@ -62,8 +127,7 @@ export function PackageCreditsCard({ onBookingComplete }: PackageCreditsCardProp
             
             {/* Package breakdown */}
             <div className="space-y-3 mb-4">
-              {packages.map((pkg) => {
-                const usedSessions = pkg.total_sessions - pkg.remaining_sessions;
+              {activePackages.map((pkg) => {
                 const progressPercent = (pkg.remaining_sessions / pkg.total_sessions) * 100;
                 
                 return (
