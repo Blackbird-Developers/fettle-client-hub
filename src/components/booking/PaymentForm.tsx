@@ -39,7 +39,23 @@ export function PaymentForm({ paymentIntentId, amount, onSuccess, onBack }: Paym
     setIsProcessing(true);
 
     try {
-      // Confirm the payment
+      // First, submit the elements to validate the form
+      // This must be called before confirmPayment()
+      // submit() validates the form and returns an error if validation fails
+      console.log('Submitting payment form...');
+      const submitResult = await elements.submit();
+
+      if (submitResult.error) {
+        console.error('Form validation error:', submitResult.error);
+        throw new Error(
+          submitResult.error.message || 'Please check your payment details'
+        );
+      }
+
+      console.log('Elements submitted successfully');
+      console.log('Confirming payment with Stripe...');
+
+      // Then confirm payment with Stripe
       const { error: paymentError, paymentIntent } = await stripe.confirmPayment({
         elements,
         redirect: 'if_required',
