@@ -451,10 +451,10 @@ export default function Profile() {
 
               <div className="pt-2 flex flex-wrap gap-3">
                 <Link to="/privacy" className="text-sm text-primary hover:underline">
-                  Read our full Privacy Policy ->
+                  Read our full Privacy Policy →
                 </Link>
                 <Link to="/terms" className="text-sm text-primary hover:underline">
-                  Read our Terms & Conditions ->
+                  Read our Terms & Conditions →
                 </Link>
               </div>
             </CardContent>
