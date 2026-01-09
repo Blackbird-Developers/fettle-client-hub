@@ -1,12 +1,23 @@
-import { Link } from "react-router-dom";
+﻿import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Shield, FileText, Users, Lock, Globe, Mail } from "lucide-react";
+import {
+  ArrowLeft,
+  Shield,
+  Users,
+  FileText,
+  Globe,
+  Database,
+  CreditCard,
+  Clock,
+  Cookie,
+  Lock,
+  Mail,
+} from "lucide-react";
 
 export default function PrivacyPolicy() {
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="border-b border-border/50 bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
@@ -24,193 +35,292 @@ export default function PrivacyPolicy() {
 
       <main className="container mx-auto px-4 py-8 max-w-4xl">
         <div className="mb-8 text-center">
-          <h1 className="font-heading text-4xl font-bold text-foreground mb-2">Privacy Policy</h1>
+          <h1 className="font-heading text-4xl font-bold text-foreground mb-2">Privacy & Cookie Policy</h1>
           <p className="text-muted-foreground">
             Last updated: {new Date().toLocaleDateString("en-IE", { year: "numeric", month: "long", day: "numeric" })}
           </p>
         </div>
 
         <div className="space-y-6">
-          {/* Introduction */}
-          <Card className="border-border/50">
-            <CardHeader>
-              <CardTitle className="font-heading flex items-center gap-2">
-                <Shield className="h-5 w-5 text-primary" />
-                Our Commitment to Your Privacy
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="prose prose-sm max-w-none text-muted-foreground">
-              <p>
-                Fettle Therapy Services ("we", "our", or "us") is committed to protecting your personal data 
-                and respecting your privacy in accordance with the General Data Protection Regulation (GDPR) 
-                and the Irish Data Protection Act 2018.
-              </p>
-              <p>
-                This privacy policy explains how we collect, use, store, and protect your personal information 
-                when you use our therapy booking platform at fettle.ie.
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Data Controller */}
           <Card className="border-border/50">
             <CardHeader>
               <CardTitle className="font-heading flex items-center gap-2">
                 <Users className="h-5 w-5 text-primary" />
-                Data Controller
+                About Fettle
               </CardTitle>
             </CardHeader>
             <CardContent className="prose prose-sm max-w-none text-muted-foreground">
               <p>
-                <strong>Fettle Therapy Services</strong><br />
-                Dublin, Ireland<br />
-                Email: privacy@fettle.ie
+                Kerwex Human Resources Limited t/a Fettle is proper mental healthcare for employers and individuals
+                who want to make a real impact on their lives and their organisation's performance.
               </p>
               <p>
-                We are the data controller for the personal data you provide through our platform, 
-                meaning we determine why and how your personal data is processed.
+                Combining a curated team of highly-qualified mental health professionals, personalised therapist
+                matching by real humans, dedicated training and support for managers, and a hassle-free digital
+                experience, Fettle is Ireland's and Europe's first mental healthcare solution that truly covers
+                a broad spectrum of employee and individual mental health needs.
               </p>
             </CardContent>
           </Card>
 
-          {/* Data We Collect */}
           <Card className="border-border/50">
             <CardHeader>
               <CardTitle className="font-heading flex items-center gap-2">
                 <FileText className="h-5 w-5 text-primary" />
-                Personal Data We Collect
+                What this notice is about
               </CardTitle>
             </CardHeader>
             <CardContent className="prose prose-sm max-w-none text-muted-foreground">
-              <p>We collect and process the following categories of personal data:</p>
-              <ul>
-                <li><strong>Account Information:</strong> Email address, first name, last name, password (encrypted)</li>
-                <li><strong>Booking Information:</strong> Session dates, times, therapist preferences, appointment history</li>
-                <li><strong>Payment Information:</strong> Payment method details (processed securely via Stripe)</li>
-                <li><strong>Activity Data:</strong> Login history, booking actions, platform usage</li>
-                <li><strong>Consent Records:</strong> Records of your consent for data processing, marketing preferences</li>
-                <li><strong>Technical Data:</strong> IP address, browser type, device information (for security and analytics)</li>
-              </ul>
+              <p>
+                We want to be transparent about how we collect and use your personal data. This privacy notice
+                exists to tell you exactly how we do this.
+              </p>
+              <p>
+                Personal data is anything that could identify an individual, either on its own or combined with
+                other factors that could lead to identifying an individual.
+              </p>
+              <p>
+                Any time we make a decision on processing personal data, we do it according to this notice. In data
+                protection law terms, this means we are acting as a Data Controller.
+              </p>
             </CardContent>
           </Card>
 
-          {/* Legal Basis */}
           <Card className="border-border/50">
             <CardHeader>
               <CardTitle className="font-heading flex items-center gap-2">
                 <Globe className="h-5 w-5 text-primary" />
-                Legal Basis for Processing
+                The ways we process your data
               </CardTitle>
             </CardHeader>
             <CardContent className="prose prose-sm max-w-none text-muted-foreground">
-              <p>We process your personal data based on the following legal grounds:</p>
+              <h3>Companies partnering with Fettle</h3>
+              <p>
+                When your company starts working with us we collect regular feedback and usage data to better
+                understand what your company needs from Fettle, and to tailor our service in line with this. The
+                legal basis we rely on is Article 6(1)(f) of the GDPR - Legitimate Interests.
+              </p>
+              <h3>When your employees use Fettle</h3>
+              <p>
+                When employees use our digital platform, we store information about attendance, bookings, basic
+                topics that come up in sessions, and clinical outcomes so they can track their progress with Fettle.
+                This information is shared in an anonymous, aggregated form with the company benefits manager or
+                relevant point of contact, and is never attributable to an employee personally. The legal basis we
+                rely on is Article 6(1)(f) of the GDPR - Legitimate Interests.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="font-heading flex items-center gap-2">
+                <Database className="h-5 w-5 text-primary" />
+                What personal data we collect and why
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="prose prose-sm max-w-none text-muted-foreground">
+              <p>
+                When an employee or individual signs up for therapy sessions with Fettle, we need basic information
+                such as name and contact details so we can set up sessions. The legal basis is Article 6(1)(f) of the
+                GDPR - Legitimate Interests.
+              </p>
+              <p>
+                During therapy, therapists keep notes on anything shared about mental health, reasons for booking
+                therapy, and therapy history. Only mental health professionals can view these notes. We only keep
+                information that is willingly shared and relevant to therapy, relying on Article 9(2)(a) of the GDPR
+                - Explicit Consent.
+              </p>
+              <p>
+                After therapy sessions, we keep anonymous records of attendance, usage details, and clinical outcomes
+                to improve our service and to allow your company to track Fettle's effectiveness. The legal basis is
+                Article 6(1)(f) of the GDPR - Legitimate Interests.
+              </p>
+              <p>
+                When an employee books a check-in session, we keep notes on anything shared so we can support them
+                better in future sessions. Only our mental health professionals can see these notes. We rely on
+                Article 9(2)(a) of the GDPR - Explicit Consent.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="font-heading flex items-center gap-2">
+                <Globe className="h-5 w-5 text-primary" />
+                Where we store it
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="prose prose-sm max-w-none text-muted-foreground">
+              <p>
+                We use a tool called Victa for our therapists to take notes for employee therapy sessions. Victa
+                stores data with Amazon Web Services, which is GDPR-ready and uses standard contractual clauses for
+                international transfer of data to the US.
+              </p>
+              <p>
+                We also use a booking tool for individual clients called Acuity which is integrated with Zoom for
+                the delivery of online therapy sessions. Both Zoom and Acuity use standard contractual clauses for
+                international transfer of data to the US.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="font-heading flex items-center gap-2">
+                <CreditCard className="h-5 w-5 text-primary" />
+                Payment information
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="prose prose-sm max-w-none text-muted-foreground">
+              <p>
+                After you place an order on our website you will need to make payment for the services you ordered.
+                We use Stripe, a third-party payment processor. Stripe collects, uses, and processes your information,
+                including payment information, in accordance with their privacy policies.
+              </p>
+              <p>
+                Stripe's services in Europe are provided by Stripe Payments Europe Limited, an entity located in
+                Ireland. In providing Stripe services, Stripe Payments Europe transfers personal data to Stripe, Inc.
+                in the US. For further information about safeguards used when your information is transferred outside
+                the European Economic Area, contact us.
+              </p>
+              <p>
+                Stripe's privacy policy: <a href="https://stripe.com/ie/privacy" className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">https://stripe.com/ie/privacy</a>
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="font-heading flex items-center gap-2">
+                <Clock className="h-5 w-5 text-primary" />
+                How long we keep your information
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="prose prose-sm max-w-none text-muted-foreground">
+              <p>
+                We only keep your personal data for as long as necessary in order to use it as described above for
+                business or legal purposes. We retain personal data as long as needed to deal with queries and for
+                as long as you might legally bring claims against us.
+              </p>
+              <p>
+                All counselling records will be maintained as required by applicable legal and ethical standards of
+                the country in which the therapist resides. Recording of sessions is prohibited.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="font-heading flex items-center gap-2">
+                <Database className="h-5 w-5 text-primary" />
+                When your company has partnered with Fettle
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="prose prose-sm max-w-none text-muted-foreground">
+              <p>
+                We collect regular feedback and usage data to better understand what your company needs from Fettle
+                and to tailor our service. We may ask your benefits manager or relevant point of contact for feedback
+                via online surveys. The legal basis we rely on is Article 6(1)(f) of the GDPR - Legitimate Interests.
+              </p>
+              <p>
+                We use a software called Typeform to get your feedback. Typeform is hosted in Spain. We also store
+                information that your company provides us with on Google Applications. Google Cloud servers are
+                located in the US and use EU Commission Standard Contractual Clauses for the transfer of data.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="font-heading flex items-center gap-2">
+                <Cookie className="h-5 w-5 text-primary" />
+                Cookies
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="prose prose-sm max-w-none text-muted-foreground">
+              <p>
+                Cookies are small files placed on your computer when you visit a website and saved in your browser
+                history. They allow the website to recognise your device and store information about your preferences
+                or past actions.
+              </p>
+              <p>When you use our website, there are two types of cookies that can be set:</p>
               <ul>
-                <li><strong>Contract:</strong> To provide our therapy booking services as per our agreement with you</li>
-                <li><strong>Consent:</strong> For marketing communications and optional data processing (you can withdraw at any time)</li>
-                <li><strong>Legitimate Interest:</strong> To improve our services, prevent fraud, and ensure platform security</li>
-                <li><strong>Legal Obligation:</strong> To comply with applicable laws and regulations</li>
+                <li><strong>First party cookies:</strong> Placed and read by Fettle directly while you use our website</li>
+                <li><strong>Third party cookies:</strong> Set by third parties such as Google Analytics and Hotjar</li>
+              </ul>
+              <p>We use these categories of cookies:</p>
+              <ul>
+                <li><strong>Necessary cookies:</strong> Essential to the operation of our website</li>
+                <li><strong>Analytics cookies:</strong> Anonymous statistics on how visitors use our website</li>
+                <li><strong>Advertising cookies:</strong> Direct you to Fettle ads and track engagement</li>
+              </ul>
+              <p>
+                You can choose not to store non-necessary cookies or adjust your browser settings to prevent cookies
+                from being saved on your computer.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="font-heading flex items-center gap-2">
+                <Shield className="h-5 w-5 text-primary" />
+                Security measures
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="prose prose-sm max-w-none text-muted-foreground">
+              <ul>
+                <li>Two-factor authentication for all tools we use, or SSO with Google</li>
+                <li>Company-wide password manager with unique, strong passwords</li>
+                <li>All laptops are encrypted</li>
+                <li>Immediate installation of OS software updates</li>
+                <li>Strict access controls with least-privilege access to tools</li>
               </ul>
             </CardContent>
           </Card>
 
-          {/* Your Rights */}
           <Card className="border-border/50 border-primary/20 bg-primary/5">
             <CardHeader>
               <CardTitle className="font-heading flex items-center gap-2">
                 <Lock className="h-5 w-5 text-primary" />
-                Your GDPR Rights
+                Your rights
               </CardTitle>
             </CardHeader>
             <CardContent className="prose prose-sm max-w-none text-muted-foreground">
-              <p>Under GDPR and Irish data protection law, you have the following rights:</p>
+              <p>Your personal data is yours, and your rights include:</p>
               <ul>
-                <li><strong>Right of Access (Article 15):</strong> Request a copy of your personal data</li>
-                <li><strong>Right to Rectification (Article 16):</strong> Correct inaccurate personal data</li>
-                <li><strong>Right to Erasure (Article 17):</strong> Request deletion of your personal data ("right to be forgotten")</li>
-                <li><strong>Right to Data Portability (Article 20):</strong> Receive your data in a machine-readable format</li>
-                <li><strong>Right to Restrict Processing (Article 18):</strong> Limit how we use your data</li>
-                <li><strong>Right to Object (Article 21):</strong> Object to processing based on legitimate interests</li>
-                <li><strong>Right to Withdraw Consent:</strong> Withdraw your consent at any time</li>
+                <li>The right to be informed</li>
+                <li>The right of access</li>
+                <li>The right to rectification</li>
+                <li>The right to erasure</li>
+                <li>The right to restrict processing</li>
+                <li>The right to data portability</li>
               </ul>
-              <p className="mt-4 font-medium text-foreground">
-                You can exercise these rights through your Profile settings or by contacting us at privacy@fettle.ie. 
-                We will respond to your request within 30 days.
+              <p>
+                You do not have to pay anything to exercise your rights. Contact us at hello@fettle.ie or +353 (0)1
+                912 0367. We will respond within 1 month.
               </p>
             </CardContent>
           </Card>
 
-          {/* Data Retention */}
-          <Card className="border-border/50">
-            <CardHeader>
-              <CardTitle className="font-heading">Data Retention</CardTitle>
-            </CardHeader>
-            <CardContent className="prose prose-sm max-w-none text-muted-foreground">
-              <p>We retain your personal data only as long as necessary:</p>
-              <ul>
-                <li><strong>Account data:</strong> Until you delete your account</li>
-                <li><strong>Booking history:</strong> 7 years (for legal and accounting requirements)</li>
-                <li><strong>Consent records:</strong> Until you withdraw consent + 3 years for legal compliance</li>
-                <li><strong>Technical logs:</strong> 90 days</li>
-              </ul>
-              <p>When you delete your account, all personal data is permanently removed except where legal retention is required.</p>
-            </CardContent>
-          </Card>
-
-          {/* Data Security */}
-          <Card className="border-border/50">
-            <CardHeader>
-              <CardTitle className="font-heading">Data Security</CardTitle>
-            </CardHeader>
-            <CardContent className="prose prose-sm max-w-none text-muted-foreground">
-              <p>We implement appropriate technical and organizational measures to protect your data:</p>
-              <ul>
-                <li>Encryption of data in transit (TLS/SSL) and at rest</li>
-                <li>Two-factor authentication (2FA) available for account security</li>
-                <li>Regular security audits and vulnerability assessments</li>
-                <li>Access controls and employee training on data protection</li>
-                <li>Secure payment processing through PCI-DSS compliant providers (Stripe)</li>
-              </ul>
-            </CardContent>
-          </Card>
-
-          {/* Third Parties */}
-          <Card className="border-border/50">
-            <CardHeader>
-              <CardTitle className="font-heading">Third-Party Services</CardTitle>
-            </CardHeader>
-            <CardContent className="prose prose-sm max-w-none text-muted-foreground">
-              <p>We share your data with the following trusted third parties:</p>
-              <ul>
-                <li><strong>Stripe:</strong> Payment processing (PCI-DSS compliant)</li>
-                <li><strong>Acuity Scheduling:</strong> Appointment management</li>
-                <li><strong>Resend:</strong> Email communications</li>
-              </ul>
-              <p>All third-party providers are bound by data processing agreements and are GDPR compliant.</p>
-            </CardContent>
-          </Card>
-
-          {/* Contact & Complaints */}
           <Card className="border-border/50">
             <CardHeader>
               <CardTitle className="font-heading flex items-center gap-2">
                 <Mail className="h-5 w-5 text-primary" />
-                Contact & Complaints
+                Contact and complaints
               </CardTitle>
             </CardHeader>
             <CardContent className="prose prose-sm max-w-none text-muted-foreground">
-              <p>For any privacy-related questions or to exercise your rights, contact us:</p>
               <p>
-                <strong>Email:</strong> privacy@fettle.ie<br />
-                <strong>Address:</strong> Fettle Therapy Services, Dublin, Ireland
-              </p>
-              <p className="mt-4">
-                If you are not satisfied with our response, you have the right to lodge a complaint with the 
-                Irish Data Protection Commission:
+                Our Data Protection Officer is Brendan O'Reilly. You can contact Brendan@fettle.ie. For any concerns
+                about our use of your personal information, write to us at hello@fettle.ie.
               </p>
               <p>
-                <strong>Data Protection Commission</strong><br />
-                21 Fitzwilliam Square South, Dublin 2, D02 RD28<br />
-                Website: <a href="https://www.dataprotection.ie" className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">www.dataprotection.ie</a>
+                If you are not satisfied with our response, or you are unhappy with how we have used your data, you
+                can complain to the Data Protection Commission.
+              </p>
+              <p>
+                Data Protection Commission website: <a href="https://www.dataprotection.ie" className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">www.dataprotection.ie</a>
               </p>
             </CardContent>
           </Card>
@@ -218,10 +328,12 @@ export default function PrivacyPolicy() {
 
         <div className="mt-8 text-center text-sm text-muted-foreground">
           <p>
-            Questions about this policy? <a href="mailto:privacy@fettle.ie" className="text-primary hover:underline">Contact our Data Protection Officer</a>
+            Questions about this policy? <a href="mailto:hello@fettle.ie" className="text-primary hover:underline">Contact us</a>
           </p>
         </div>
       </main>
     </div>
   );
 }
+
+
