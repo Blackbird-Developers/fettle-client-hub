@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -389,16 +389,16 @@ export default function Profile() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="currentPassword">Current Password</Label>
-                  <Input id="currentPassword" type="password" placeholder="••••••••" />
+                  <Input id="currentPassword" type="password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" />
                 </div>
                 <div className="grid sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="newPassword">New Password</Label>
-                    <Input id="newPassword" type="password" placeholder="••••••••" />
+                    <Input id="newPassword" type="password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="confirmPassword">Confirm Password</Label>
-                    <Input id="confirmPassword" type="password" placeholder="••••••••" />
+                    <Input id="confirmPassword" type="password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" />
                   </div>
                 </div>
                 <Button variant="outline">Update Password</Button>
@@ -449,9 +449,12 @@ export default function Profile() {
                 </ul>
               </div>
 
-              <div className="pt-2">
+              <div className="pt-2 flex flex-wrap gap-3">
                 <Link to="/privacy" className="text-sm text-primary hover:underline">
-                  Read our full Privacy Policy →
+                  Read our full Privacy Policy ->
+                </Link>
+                <Link to="/terms" className="text-sm text-primary hover:underline">
+                  Read our Terms & Conditions ->
                 </Link>
               </div>
             </CardContent>
@@ -611,3 +614,6 @@ export default function Profile() {
     </DashboardLayout>
   );
 }
+
+
+
