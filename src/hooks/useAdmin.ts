@@ -73,24 +73,29 @@ export function useAdminList() {
   return useQuery({
     queryKey: ["admin-list"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("user_roles")
-        .select(`
-          id,
-          user_id,
-          role,
-          created_at,
-          profiles:user_id (
-            email,
-            first_name,
-            last_name
-          )
-        `)
-        .eq("role", "admin")
-        .order("created_at", { ascending: true });
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
 
-      if (error) throw error;
-      return data;
+      if (!accessToken) {
+        throw new Error("Not authenticated");
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/user-roles?role=admin`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to fetch admin list");
+      }
+
+      return response.json();
     },
     enabled: isAdmin === true,
   });
@@ -98,43 +103,35 @@ export function useAdminList() {
 
 // Invite a new admin by email
 export function useInviteAdmin() {
-  const { user } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (email: string) => {
-      if (!user?.id) throw new Error("Not authenticated");
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
 
-      // First find the user by email
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("id, email")
-        .eq("email", email.toLowerCase())
-        .single();
-
-      if (profileError || !profile) {
-        throw new Error("User not found. They must have an account first.");
+      if (!accessToken) {
+        throw new Error("Not authenticated");
       }
 
-      // Then add admin role
-      const { data, error } = await supabase
-        .from("user_roles")
-        .insert({
-          user_id: profile.id,
-          role: "admin",
-          created_by: user.id,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        if (error.code === "23505") {
-          throw new Error("This user is already an admin.");
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/user-roles`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email, role: "admin" }),
         }
-        throw error;
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to invite admin");
       }
 
-      return data;
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-list"] });
@@ -148,13 +145,31 @@ export function useRemoveAdmin() {
 
   return useMutation({
     mutationFn: async (userId: string) => {
-      const { error } = await supabase
-        .from("user_roles")
-        .delete()
-        .eq("user_id", userId)
-        .eq("role", "admin");
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
 
-      if (error) throw error;
+      if (!accessToken) {
+        throw new Error("Not authenticated");
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/user-roles`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ userId, role: "admin" }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to remove admin");
+      }
+
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-list"] });
