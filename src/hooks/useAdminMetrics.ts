@@ -74,13 +74,22 @@ export function useAdminMetrics() {
         },
       });
 
+      // Check for error in response data (edge function returns JSON with error field)
       if (response.error) {
+        console.error('Admin metrics error:', response.error);
         throw new Error(response.error.message || 'Failed to fetch metrics');
+      }
+
+      if (response.data?.error) {
+        console.error('Admin metrics API error:', response.data.error);
+        throw new Error(response.data.error);
       }
 
       return response.data;
     },
     enabled: isAdmin === true,
-    refetchInterval: 60000, // Refresh every minute
+    refetchInterval: 60000,
+    retry: 2,
+    staleTime: 30000, // Consider data fresh for 30 seconds
   });
 }
