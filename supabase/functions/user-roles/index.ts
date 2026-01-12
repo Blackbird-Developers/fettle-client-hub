@@ -97,26 +97,43 @@ serve(async (req) => {
         // List all admin users with their profile info
         const role = url.searchParams.get("role") || "admin";
 
-        const { data, error } = await adminClient
+        // First get user_roles
+        const { data: roles, error: rolesError } = await adminClient
           .from("user_roles")
-          .select(`
-            id,
-            user_id,
-            role,
-            created_at,
-            profiles:user_id (
-              email,
-              first_name,
-              last_name
-            )
-          `)
+          .select("id, user_id, role, created_at")
           .eq("role", role)
           .order("created_at", { ascending: true });
 
-        if (error) {
-          console.error("Error fetching user roles:", error);
-          throw error;
+        if (rolesError) {
+          console.error("Error fetching user roles:", rolesError);
+          throw rolesError;
         }
+
+        // Then get profiles for those users
+        const userIds = roles?.map(r => r.user_id) || [];
+
+        if (userIds.length === 0) {
+          return new Response(JSON.stringify([]), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const { data: profiles, error: profilesError } = await adminClient
+          .from("profiles")
+          .select("id, email, first_name, last_name")
+          .in("id", userIds);
+
+        if (profilesError) {
+          console.error("Error fetching profiles:", profilesError);
+          throw profilesError;
+        }
+
+        // Combine the data
+        const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
+        const data = roles?.map(r => ({
+          ...r,
+          profiles: profileMap.get(r.user_id) || null
+        })) || [];
 
         return new Response(JSON.stringify(data), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -156,24 +173,14 @@ serve(async (req) => {
         }
 
         // Insert the role
-        const { data, error } = await adminClient
+        const { data: newRole, error } = await adminClient
           .from("user_roles")
           .insert({
             user_id: profile.id,
             role: role,
             created_by: user.id,
           })
-          .select(`
-            id,
-            user_id,
-            role,
-            created_at,
-            profiles:user_id (
-              email,
-              first_name,
-              last_name
-            )
-          `)
+          .select("id, user_id, role, created_at")
           .single();
 
         if (error) {
@@ -191,6 +198,27 @@ serve(async (req) => {
         }
 
         console.log(`Admin ${user.id} added ${role} role to user ${profile.id}`);
+
+        // Return with profile info
+        const data = {
+          ...newRole,
+          profiles: {
+            email: profile.email,
+            first_name: null,
+            last_name: null,
+          }
+        };
+
+        // Get full profile info
+        const { data: fullProfile } = await adminClient
+          .from("profiles")
+          .select("email, first_name, last_name")
+          .eq("id", profile.id)
+          .single();
+
+        if (fullProfile) {
+          data.profiles = fullProfile;
+        }
 
         return new Response(JSON.stringify(data), {
           status: 201,
