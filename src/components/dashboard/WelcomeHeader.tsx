@@ -39,7 +39,7 @@ export function WelcomeHeader() {
         </h1>
       </div>
       <p className="text-sm sm:text-base text-muted-foreground ml-11 sm:ml-14">
-        Here's an overview of your therapy journey
+        Here's an overview of your therapy journey!
       </p>
     </div>
   );
