@@ -52,10 +52,48 @@ serve(async (req) => {
       });
     }
 
-    // Fetch all appointments from Acuity
+    // Fetch all appointments from Acuity - paginate to get all
     const acuityAuth = btoa(`${acuityUserId}:${acuityApiKey}`);
-    const appointmentsResponse = await fetch(
-      'https://acuityscheduling.com/api/v1/appointments?max=10000',
+    
+    // Fetch appointments from the last 2 years to get comprehensive data
+    const today = new Date();
+    const minDate = new Date(today.getFullYear() - 2, 0, 1).toISOString().split('T')[0];
+    const maxDate = new Date(today.getFullYear(), today.getMonth() + 6, 0).toISOString().split('T')[0];
+    
+    const allAppointments: any[] = [];
+    let page = 1;
+    const maxPerPage = 100;
+    let hasMore = true;
+    
+    // Fetch active appointments with pagination
+    while (hasMore) {
+      const offset = (page - 1) * maxPerPage;
+      const response = await fetch(
+        `https://acuityscheduling.com/api/v1/appointments?minDate=${minDate}&maxDate=${maxDate}&max=${maxPerPage}&direction=DESC`,
+        {
+          headers: {
+            'Authorization': `Basic ${acuityAuth}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        console.error(`Acuity API error: ${response.status}`);
+        throw new Error('Failed to fetch appointments from Acuity');
+      }
+
+      const batch = await response.json();
+      allAppointments.push(...batch);
+      
+      // Acuity returns fewer than max if there are no more
+      hasMore = batch.length === maxPerPage && page < 10; // Safety limit of 10 pages (1000 appointments)
+      page++;
+    }
+    
+    // Also fetch cancelled appointments
+    const cancelledResponse = await fetch(
+      `https://acuityscheduling.com/api/v1/appointments?minDate=${minDate}&maxDate=${maxDate}&max=500&canceled=true`,
       {
         headers: {
           'Authorization': `Basic ${acuityAuth}`,
@@ -63,12 +101,14 @@ serve(async (req) => {
         },
       }
     );
-
-    if (!appointmentsResponse.ok) {
-      throw new Error('Failed to fetch appointments from Acuity');
+    
+    if (cancelledResponse.ok) {
+      const cancelledBatch = await cancelledResponse.json();
+      allAppointments.push(...cancelledBatch);
     }
-
-    const appointments = await appointmentsResponse.json();
+    
+    const appointments = allAppointments;
+    console.log(`Fetched ${appointments.length} total appointments`);
 
     // Fetch all profiles for user count
     const { data: profiles, error: profilesError } = await supabaseClient
