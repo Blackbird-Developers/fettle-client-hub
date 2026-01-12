@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Calendar, Home, FileText, User, LogOut, Plus, Menu, X } from "lucide-react";
+import { Calendar, Home, FileText, User, LogOut, Plus, Menu, X, ShieldCheck } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIsAdmin } from "@/hooks/useAdminMetrics";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 const navigation = [
@@ -17,6 +18,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, signOut } = useAuth();
+  const { data: isAdmin } = useIsAdmin();
 
   const handleSignOut = async () => {
     await signOut();
@@ -26,6 +28,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const displayName = profile?.first_name 
     ? `${profile.first_name} ${profile.last_name || ''}`.trim()
     : profile?.email || 'User';
+
+  const navItems = isAdmin 
+    ? [...navigation, { name: "Admin", href: "/admin", icon: ShieldCheck }]
+    : navigation;
 
   return (
     <div className="flex flex-col h-full">
@@ -39,7 +45,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* Navigation - scrollable */}
       <nav className="flex-1 px-3 2xl:px-4 py-4 2xl:py-6 space-y-1.5 2xl:space-y-2 overflow-y-auto">
-        {navigation.map((item) => {
+        {navItems.map((item) => {
           const isActive = location.pathname === item.href;
           return (
             <NavLink
