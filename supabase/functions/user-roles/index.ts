@@ -9,6 +9,8 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
+  console.log("user-roles function called:", req.method);
+
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -17,6 +19,7 @@ serve(async (req) => {
   try {
     // Get authorization header
     const authHeader = req.headers.get("Authorization");
+    console.log("Auth header present:", !!authHeader);
     if (!authHeader) {
       return new Response(
         JSON.stringify({ error: "Missing authorization header" }),
@@ -60,7 +63,20 @@ serve(async (req) => {
       { check_role: "admin" }
     );
 
-    if (roleError || !hasAdminRole) {
+    console.log("Admin role check:", { hasAdminRole, roleError, userId: user.id });
+
+    if (roleError) {
+      console.error("Error checking admin role:", roleError);
+      return new Response(
+        JSON.stringify({ error: "Error checking permissions", details: roleError.message }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    if (!hasAdminRole) {
       return new Response(
         JSON.stringify({ error: "Forbidden: Admin access required" }),
         {
