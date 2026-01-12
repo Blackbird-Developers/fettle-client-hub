@@ -1,8 +1,46 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { useState, useEffect, useMemo } from "react";
-import { startOfMonth, endOfMonth, subMonths, isAfter, isBefore, parseISO } from "date-fns";
+import { ApiError, classifyApiError } from "@/lib/api-errors";
+
+// Types for admin metrics response
+interface AdminMetricsResponse {
+  revenue: {
+    totalRevenue: number;
+    thisMonthRevenue: number;
+    lastMonthRevenue: number;
+    monthOverMonthChange: number;
+    totalPackagesSold: number;
+    averagePackageValue: number;
+    thisMonthPackages: number;
+  };
+  sessions: {
+    totalCompleted: number;
+    totalUpcoming: number;
+    thisMonthCompleted: number;
+    lastMonthCompleted: number;
+    monthOverMonthGrowth: number;
+    uniqueClientsThisMonth: number;
+    firstTimersThisMonth: number;
+    canceledThisMonth: number;
+  };
+  engagement: {
+    totalActiveCredits: number;
+    uniqueClients: number;
+    activePackageHolders: number;
+    clientsWithoutPackages: number;
+  };
+  retention: {
+    totalClients: number;
+    firstSession: number;
+    secondSession: number;
+    thirdSession: number;
+    fourthSession: number;
+    firstToSecondRate: number;
+    secondToThirdRate: number;
+    thirdToFourthRate: number;
+  };
+}
 
 // Check if current user is admin
 export function useIsAdmin() {
@@ -124,50 +162,72 @@ export function useRemoveAdmin() {
   });
 }
 
-// Fetch all appointments (admin only) - for metrics
-export function useAllAppointments() {
+// Main hook to fetch all admin metrics from the edge function
+export function useAdminMetrics() {
   const { data: isAdmin } = useIsAdmin();
-  const [appointments, setAppointments] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!isAdmin) {
-      setLoading(false);
-      return;
-    }
+  return useQuery<AdminMetricsResponse, ApiError>({
+    queryKey: ["admin-metrics"],
+    queryFn: async (): Promise<AdminMetricsResponse> => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
 
-    const fetchAllAppointments = async () => {
-      setLoading(true);
+      if (!accessToken) {
+        throw {
+          type: "unauthorized",
+          message: "Not authenticated",
+          retryable: false,
+        } as ApiError;
+      }
+
+      let response: Response;
       try {
-        // Fetch appointments without email filter to get ALL appointments
-        const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/acuity?action=get-appointments`,
+        response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-metrics`,
           {
             headers: {
-              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+              Authorization: `Bearer ${accessToken}`,
               "Content-Type": "application/json",
             },
           }
         );
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch appointments");
-        }
-
-        const data = await response.json();
-        setAppointments(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load appointments");
-      } finally {
-        setLoading(false);
+      } catch (fetchError) {
+        // Network/CORS errors throw before we get a response
+        const apiError = classifyApiError(fetchError);
+        throw apiError;
       }
-    };
 
-    fetchAllAppointments();
-  }, [isAdmin]);
+      if (!response.ok) {
+        const apiError = classifyApiError(
+          new Error(`HTTP ${response.status}`),
+          response
+        );
+        throw apiError;
+      }
 
-  return { appointments, loading, error };
+      const data = await response.json();
+
+      if (data.error) {
+        throw {
+          type: "server_error",
+          message: data.error,
+          retryable: true,
+        } as ApiError;
+      }
+
+      return data as AdminMetricsResponse;
+    },
+    enabled: isAdmin === true,
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+    retry: (failureCount, error) => {
+      // Don't retry auth/permission/cors/network errors
+      const nonRetryableTypes = ["unauthorized", "forbidden", "cors", "network"];
+      if (error?.type && nonRetryableTypes.includes(error.type)) {
+        return false;
+      }
+      return failureCount < 2;
+    },
+  });
 }
 
 // Get all clients/profiles (admin only)
@@ -189,7 +249,7 @@ export function useAllClients() {
   });
 }
 
-// Get all packages (admin only)
+// Get all packages (admin only) - still useful for detailed package list
 export function useAllPackages() {
   const { data: isAdmin } = useIsAdmin();
 
@@ -215,236 +275,69 @@ export function useAllPackages() {
   });
 }
 
-// Calculate retention funnel from appointments
+// Retention funnel - uses edge function data
 export function useRetentionFunnel() {
-  const { appointments, loading } = useAllAppointments();
+  const { data, isLoading, error } = useAdminMetrics();
 
-  const funnel = useMemo(() => {
-    if (!appointments || appointments.length === 0) {
-      return {
-        totalClients: 0,
-        firstSession: 0,
-        secondSession: 0,
-        thirdSession: 0,
-        fourthSession: 0,
-        firstToSecondRate: 0,
-        secondToThirdRate: 0,
-        thirdToFourthRate: 0,
-      };
-    }
+  const funnel = data?.retention ?? {
+    totalClients: 0,
+    firstSession: 0,
+    secondSession: 0,
+    thirdSession: 0,
+    fourthSession: 0,
+    firstToSecondRate: 0,
+    secondToThirdRate: 0,
+    thirdToFourthRate: 0,
+  };
 
-    const now = new Date();
-
-    // Group appointments by client email (completed only - past date and not canceled)
-    const clientSessions = new Map<string, number>();
-
-    appointments.forEach((apt: any) => {
-      if (apt.canceled) return;
-      const aptDate = parseISO(apt.datetime);
-      if (isAfter(aptDate, now)) return; // Skip future appointments
-
-      const email = apt.email.toLowerCase();
-      clientSessions.set(email, (clientSessions.get(email) || 0) + 1);
-    });
-
-    const totalClients = clientSessions.size;
-    let firstSession = 0;
-    let secondSession = 0;
-    let thirdSession = 0;
-    let fourthSession = 0;
-
-    clientSessions.forEach((count) => {
-      if (count >= 1) firstSession++;
-      if (count >= 2) secondSession++;
-      if (count >= 3) thirdSession++;
-      if (count >= 4) fourthSession++;
-    });
-
-    return {
-      totalClients,
-      firstSession,
-      secondSession,
-      thirdSession,
-      fourthSession,
-      firstToSecondRate: firstSession > 0 ? Math.round((secondSession / firstSession) * 100) : 0,
-      secondToThirdRate: secondSession > 0 ? Math.round((thirdSession / secondSession) * 100) : 0,
-      thirdToFourthRate: thirdSession > 0 ? Math.round((fourthSession / thirdSession) * 100) : 0,
-    };
-  }, [appointments]);
-
-  return { funnel, loading };
+  return { funnel, loading: isLoading, error: error ?? null };
 }
 
-// Calculate revenue metrics from packages
+// Revenue metrics - uses edge function data
 export function useRevenueMetrics() {
-  const { data: packages, isLoading } = useAllPackages();
+  const { data, isLoading, error } = useAdminMetrics();
 
-  const metrics = useMemo(() => {
-    if (!packages || packages.length === 0) {
-      return {
-        totalRevenue: 0,
-        thisMonthRevenue: 0,
-        lastMonthRevenue: 0,
-        monthOverMonthChange: 0,
-        totalPackagesSold: 0,
-        averagePackageValue: 0,
-        thisMonthPackages: 0,
-      };
-    }
+  const metrics = data?.revenue ?? {
+    totalRevenue: 0,
+    thisMonthRevenue: 0,
+    lastMonthRevenue: 0,
+    monthOverMonthChange: 0,
+    totalPackagesSold: 0,
+    averagePackageValue: 0,
+    thisMonthPackages: 0,
+  };
 
-    const now = new Date();
-    const thisMonthStart = startOfMonth(now);
-    const lastMonthStart = startOfMonth(subMonths(now, 1));
-    const lastMonthEnd = endOfMonth(subMonths(now, 1));
-
-    let totalRevenue = 0;
-    let thisMonthRevenue = 0;
-    let lastMonthRevenue = 0;
-    let thisMonthPackages = 0;
-
-    packages.forEach((pkg: any) => {
-      const purchaseDate = parseISO(pkg.purchased_at);
-      const amount = pkg.amount_paid || 0;
-
-      totalRevenue += amount;
-
-      if (isAfter(purchaseDate, thisMonthStart)) {
-        thisMonthRevenue += amount;
-        thisMonthPackages++;
-      } else if (isAfter(purchaseDate, lastMonthStart) && isBefore(purchaseDate, lastMonthEnd)) {
-        lastMonthRevenue += amount;
-      }
-    });
-
-    const monthOverMonthChange =
-      lastMonthRevenue > 0
-        ? Math.round(((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100)
-        : thisMonthRevenue > 0
-        ? 100
-        : 0;
-
-    return {
-      totalRevenue,
-      thisMonthRevenue,
-      lastMonthRevenue,
-      monthOverMonthChange,
-      totalPackagesSold: packages.length,
-      averagePackageValue: packages.length > 0 ? Math.round(totalRevenue / packages.length) : 0,
-      thisMonthPackages,
-    };
-  }, [packages]);
-
-  return { metrics, isLoading };
+  return { metrics, isLoading, error: error ?? null };
 }
 
-// Calculate session metrics from appointments
+// Session metrics - uses edge function data
 export function useSessionMetrics() {
-  const { appointments, loading } = useAllAppointments();
+  const { data, isLoading, error } = useAdminMetrics();
 
-  const metrics = useMemo(() => {
-    if (!appointments || appointments.length === 0) {
-      return {
-        totalCompleted: 0,
-        totalUpcoming: 0,
-        thisMonthCompleted: 0,
-        lastMonthCompleted: 0,
-        monthOverMonthGrowth: 0,
-        uniqueClientsThisMonth: 0,
-        firstTimersThisMonth: 0,
-        canceledThisMonth: 0,
-      };
-    }
+  const metrics = data?.sessions ?? {
+    totalCompleted: 0,
+    totalUpcoming: 0,
+    thisMonthCompleted: 0,
+    lastMonthCompleted: 0,
+    monthOverMonthGrowth: 0,
+    uniqueClientsThisMonth: 0,
+    firstTimersThisMonth: 0,
+    canceledThisMonth: 0,
+  };
 
-    const now = new Date();
-    const thisMonthStart = startOfMonth(now);
-    const lastMonthStart = startOfMonth(subMonths(now, 1));
-    const lastMonthEnd = endOfMonth(subMonths(now, 1));
-
-    let totalCompleted = 0;
-    let totalUpcoming = 0;
-    let thisMonthCompleted = 0;
-    let lastMonthCompleted = 0;
-    let canceledThisMonth = 0;
-
-    const clientsThisMonth = new Set<string>();
-    const clientsBeforeThisMonth = new Set<string>();
-
-    appointments.forEach((apt: any) => {
-      const aptDate = parseISO(apt.datetime);
-      const email = apt.email.toLowerCase();
-
-      if (apt.canceled) {
-        if (isAfter(aptDate, thisMonthStart)) {
-          canceledThisMonth++;
-        }
-        return;
-      }
-
-      if (isBefore(aptDate, now)) {
-        totalCompleted++;
-
-        if (isAfter(aptDate, thisMonthStart)) {
-          thisMonthCompleted++;
-          clientsThisMonth.add(email);
-        } else {
-          clientsBeforeThisMonth.add(email);
-          if (isAfter(aptDate, lastMonthStart) && isBefore(aptDate, lastMonthEnd)) {
-            lastMonthCompleted++;
-          }
-        }
-      } else {
-        totalUpcoming++;
-      }
-    });
-
-    // First-timers: clients who have sessions this month but never before
-    let firstTimersThisMonth = 0;
-    clientsThisMonth.forEach((email) => {
-      if (!clientsBeforeThisMonth.has(email)) {
-        firstTimersThisMonth++;
-      }
-    });
-
-    const monthOverMonthGrowth =
-      lastMonthCompleted > 0
-        ? Math.round(((thisMonthCompleted - lastMonthCompleted) / lastMonthCompleted) * 100)
-        : thisMonthCompleted > 0
-        ? 100
-        : 0;
-
-    return {
-      totalCompleted,
-      totalUpcoming,
-      thisMonthCompleted,
-      lastMonthCompleted,
-      monthOverMonthGrowth,
-      uniqueClientsThisMonth: clientsThisMonth.size,
-      firstTimersThisMonth,
-      canceledThisMonth,
-    };
-  }, [appointments]);
-
-  return { metrics, loading };
+  return { metrics, loading: isLoading, error: error ?? null };
 }
 
-// Calculate engagement stats
+// Engagement stats - uses edge function data
 export function useEngagementStats() {
-  const { data: packages, isLoading: packagesLoading } = useAllPackages();
-  const { data: clients, isLoading: clientsLoading } = useAllClients();
+  const { data, isLoading, error } = useAdminMetrics();
 
-  const stats = useMemo(() => {
-    const totalCredits = packages?.reduce((sum: number, pkg: any) => sum + (pkg.remaining_sessions || 0), 0) || 0;
-    const activePackageHolders = new Set(
-      packages?.filter((pkg: any) => pkg.remaining_sessions > 0).map((pkg: any) => pkg.user_id)
-    ).size;
+  const stats = data?.engagement ?? {
+    totalActiveCredits: 0,
+    uniqueClients: 0,
+    activePackageHolders: 0,
+    clientsWithoutPackages: 0,
+  };
 
-    return {
-      totalActiveCredits: totalCredits,
-      uniqueClients: clients?.length || 0,
-      activePackageHolders,
-      clientsWithoutPackages: (clients?.length || 0) - activePackageHolders,
-    };
-  }, [packages, clients]);
-
-  return { stats, isLoading: packagesLoading || clientsLoading };
+  return { stats, isLoading, error: error ?? null };
 }

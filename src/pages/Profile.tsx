@@ -389,16 +389,16 @@ export default function Profile() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="currentPassword">Current Password</Label>
-                  <Input id="currentPassword" type="password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" />
+                  <Input id="currentPassword" type="password" placeholder="Enter current password" />
                 </div>
                 <div className="grid sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="newPassword">New Password</Label>
-                    <Input id="newPassword" type="password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" />
+                    <Input id="newPassword" type="password" placeholder="Enter new password" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="confirmPassword">Confirm Password</Label>
-                    <Input id="confirmPassword" type="password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" />
+                    <Input id="confirmPassword" type="password" placeholder="Confirm new password" />
                   </div>
                 </div>
                 <Button variant="outline">Update Password</Button>

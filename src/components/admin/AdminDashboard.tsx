@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import {
   Users,
   TrendingUp,
@@ -13,6 +15,11 @@ import {
   ArrowRight,
   Package,
   Repeat,
+  AlertCircle,
+  RefreshCw,
+  WifiOff,
+  ShieldAlert,
+  ServerCrash,
 } from "lucide-react";
 import {
   useRetentionFunnel,
@@ -20,6 +27,7 @@ import {
   useSessionMetrics,
   useEngagementStats,
 } from "@/hooks/useAdmin";
+import { ApiError, ApiErrorType } from "@/lib/api-errors";
 
 function StatCard({
   title,
@@ -192,13 +200,74 @@ function RetentionFunnelCard() {
   );
 }
 
+const ERROR_ICONS: Record<ApiErrorType, typeof AlertCircle> = {
+  cors: ShieldAlert,
+  network: WifiOff,
+  timeout: RefreshCw,
+  unauthorized: ShieldAlert,
+  forbidden: ShieldAlert,
+  not_found: AlertCircle,
+  rate_limit: RefreshCw,
+  server_error: ServerCrash,
+  unknown: AlertCircle,
+};
+
+function ErrorAlert({
+  error,
+  onRetry,
+}: {
+  error: ApiError;
+  onRetry?: () => void;
+}) {
+  const Icon = ERROR_ICONS[error.type] || AlertCircle;
+
+  return (
+    <Alert variant="destructive" className="mb-4">
+      <Icon className="h-4 w-4" />
+      <AlertTitle className="capitalize">{error.type.replace("_", " ")} Error</AlertTitle>
+      <AlertDescription className="mt-2">
+        <p>{error.message}</p>
+        {error.type === "cors" && (
+          <p className="mt-2 text-sm opacity-80">
+            This may indicate the Edge Function is not deployed or has incorrect CORS headers.
+          </p>
+        )}
+        {error.type === "network" && (
+          <p className="mt-2 text-sm opacity-80">
+            Check your internet connection or try again in a few moments.
+          </p>
+        )}
+        {error.retryable && onRetry && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-3"
+            onClick={onRetry}
+          >
+            <RefreshCw className="h-3 w-3 mr-2" />
+            Try Again
+          </Button>
+        )}
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 export function AdminDashboard() {
   const { metrics: revenue, isLoading: revenueLoading } = useRevenueMetrics();
-  const { metrics: sessions, loading: sessionsLoading } = useSessionMetrics();
+  const { metrics: sessions, loading: sessionsLoading, error: sessionsError } = useSessionMetrics();
   const { stats: engagement, isLoading: engagementLoading } = useEngagementStats();
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Error Display */}
+      {sessionsError && (
+        <ErrorAlert
+          error={sessionsError}
+          onRetry={() => window.location.reload()}
+        />
+      )}
+
       {/* Revenue Metrics */}
       <div>
         <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide mb-3">
