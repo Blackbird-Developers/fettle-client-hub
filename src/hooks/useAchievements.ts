@@ -5,6 +5,13 @@ import { useAcuityAppointments } from "@/hooks/useAcuity";
 import { useEffect } from "react";
 import { differenceInDays, startOfMonth, isSameMonth } from "date-fns";
 
+export interface AchievementReward {
+  type: "message" | "discount" | "discount_priority";
+  discountPercent?: number;
+  stripeCouponId?: string;
+  description: string;
+}
+
 export interface Achievement {
   id: string;
   title: string;
@@ -13,54 +20,85 @@ export interface Achievement {
   threshold: number;
   type: "sessions" | "streak" | "packages";
   color: string;
+  reward: AchievementReward;
 }
 
 export const ACHIEVEMENTS: Achievement[] = [
+  // Session-based achievements with rewards
   {
     id: "first_session",
-    title: "First Steps",
+    title: "First Step",
     description: "Complete your first session",
-    icon: "🌟",
+    icon: "⭐",
     threshold: 1,
     type: "sessions",
     color: "from-yellow-400 to-amber-500",
+    reward: {
+      type: "message",
+      description: "Welcome message",
+    },
+  },
+  {
+    id: "three_sessions",
+    title: "Getting Started",
+    description: "Complete 3 sessions",
+    icon: "⚡",
+    threshold: 3,
+    type: "sessions",
+    color: "from-orange-400 to-yellow-500",
+    reward: {
+      type: "discount",
+      discountPercent: 4,
+      stripeCouponId: "FETTLE_LOYALTY_4",
+      description: "4% off next session",
+    },
   },
   {
     id: "five_sessions",
-    title: "Getting Started",
+    title: "Committed",
     description: "Complete 5 sessions",
-    icon: "🔥",
+    icon: "💙",
     threshold: 5,
     type: "sessions",
-    color: "from-orange-400 to-red-500",
+    color: "from-blue-400 to-indigo-500",
+    reward: {
+      type: "discount",
+      discountPercent: 5,
+      stripeCouponId: "FETTLE_LOYALTY_5",
+      description: "5% off next session",
+    },
   },
   {
     id: "ten_sessions",
-    title: "Dedicated",
+    title: "Consistent",
     description: "Complete 10 sessions",
-    icon: "💪",
+    icon: "🏅",
     threshold: 10,
     type: "sessions",
-    color: "from-blue-400 to-indigo-500",
-  },
-  {
-    id: "twenty_five_sessions",
-    title: "Committed",
-    description: "Complete 25 sessions",
-    icon: "🏆",
-    threshold: 25,
-    type: "sessions",
     color: "from-purple-400 to-pink-500",
+    reward: {
+      type: "discount_priority",
+      discountPercent: 8,
+      stripeCouponId: "FETTLE_LOYALTY_8",
+      description: "8% off next session + priority booking",
+    },
   },
   {
-    id: "fifty_sessions",
-    title: "Champion",
-    description: "Complete 50 sessions",
-    icon: "👑",
-    threshold: 50,
+    id: "twenty_sessions",
+    title: "Wellness Champion",
+    description: "Complete 20 sessions",
+    icon: "🏆",
+    threshold: 20,
     type: "sessions",
-    color: "from-amber-400 to-yellow-500",
+    color: "from-amber-400 to-yellow-600",
+    reward: {
+      type: "discount",
+      discountPercent: 10,
+      stripeCouponId: "FETTLE_LOYALTY_10",
+      description: "10% off next session",
+    },
   },
+  // Streak-based achievements
   {
     id: "one_month_streak",
     title: "Monthly Warrior",
@@ -69,6 +107,10 @@ export const ACHIEVEMENTS: Achievement[] = [
     threshold: 1,
     type: "streak",
     color: "from-green-400 to-emerald-500",
+    reward: {
+      type: "message",
+      description: "Keep up the great work!",
+    },
   },
   {
     id: "three_month_streak",
@@ -78,15 +120,27 @@ export const ACHIEVEMENTS: Achievement[] = [
     threshold: 3,
     type: "streak",
     color: "from-teal-400 to-cyan-500",
+    reward: {
+      type: "discount",
+      discountPercent: 5,
+      stripeCouponId: "FETTLE_STREAK_5",
+      description: "5% off next session",
+    },
   },
   {
     id: "six_month_streak",
     title: "Unstoppable",
     description: "Maintain a 6-month streak",
-    icon: "⚡",
+    icon: "🔥",
     threshold: 6,
     type: "streak",
     color: "from-violet-400 to-purple-500",
+    reward: {
+      type: "discount",
+      discountPercent: 10,
+      stripeCouponId: "FETTLE_STREAK_10",
+      description: "10% off next session",
+    },
   },
 ];
 
