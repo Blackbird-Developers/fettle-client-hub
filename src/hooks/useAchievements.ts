@@ -1,9 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { useAcuityAppointments } from "@/hooks/useAcuity";
-import { useEffect, useMemo } from "react";
-import { differenceInDays, startOfMonth, isSameMonth, parseISO } from "date-fns";
+import { usePackageStats } from "@/hooks/useUserPackages";
+import { useEffect } from "react";
 
 export interface AchievementReward {
   type: "message" | "discount" | "discount_priority";
@@ -160,117 +159,39 @@ export function useAwardAchievement() {
 }
 
 export function useCheckAndAwardAchievements() {
-  const { user, profile } = useAuth();
-  const { appointments } = useAcuityAppointments();
+  const { user } = useAuth();
+  const { totalSessionsUsed, isLoading: packagesLoading } = usePackageStats();
   const { data: userAchievements } = useUserAchievements();
   const awardAchievement = useAwardAchievement();
 
   useEffect(() => {
-    if (!user?.id || !profile?.created_at || !appointments || appointments.length === 0 || !userAchievements) return;
+    if (!user?.id || packagesLoading || !userAchievements) return;
 
     const earnedIds = new Set(userAchievements.map((a) => a.achievement_id));
-    const now = new Date();
-    const registrationDate = parseISO(profile.created_at);
 
-    // Calculate completed sessions - only count sessions AFTER user registration
-    const completedSessions = appointments.filter((apt) => {
-      const aptDate = new Date(apt.datetime);
-      return aptDate < now && aptDate >= registrationDate;
-    }).length;
-
-    // Calculate streak (months with at least one session since registration)
-    const sessionsByMonth = new Map<string, boolean>();
-    appointments.forEach((apt) => {
-      const aptDate = new Date(apt.datetime);
-      // Only count sessions after registration date
-      if (aptDate < now && aptDate >= registrationDate) {
-        const monthKey = `${aptDate.getFullYear()}-${aptDate.getMonth()}`;
-        sessionsByMonth.set(monthKey, true);
-      }
-    });
-
-    // Count consecutive months (starting from current month going back, but not before registration)
-    let streakMonths = 0;
-    let checkDate = startOfMonth(now);
-    const registrationMonth = startOfMonth(registrationDate);
-
-    while (checkDate >= registrationMonth) {
-      const monthKey = `${checkDate.getFullYear()}-${checkDate.getMonth()}`;
-      if (sessionsByMonth.has(monthKey)) {
-        streakMonths++;
-        checkDate = new Date(checkDate.getFullYear(), checkDate.getMonth() - 1, 1);
-      } else {
-        break;
-      }
-    }
-
-    // Check and award achievements
+    // Check and award achievements based on package credits used
     ACHIEVEMENTS.forEach((achievement) => {
       if (earnedIds.has(achievement.id)) return;
 
       let shouldAward = false;
 
-      if (achievement.type === "sessions" && completedSessions >= achievement.threshold) {
-        shouldAward = true;
-      } else if (achievement.type === "streak" && streakMonths >= achievement.threshold) {
+      if (achievement.type === "sessions" && totalSessionsUsed >= achievement.threshold) {
         shouldAward = true;
       }
+      // Streak achievements can be added later if needed
 
       if (shouldAward) {
         awardAchievement.mutate(achievement.id);
       }
     });
-  }, [user?.id, profile?.created_at, appointments, userAchievements, awardAchievement]);
+  }, [user?.id, totalSessionsUsed, packagesLoading, userAchievements, awardAchievement]);
 }
 
 export function useAchievementsWithStatus() {
-  const { profile } = useAuth();
-  const { data: userAchievements, isLoading } = useUserAchievements();
-  const { appointments } = useAcuityAppointments();
+  const { data: userAchievements, isLoading: achievementsLoading } = useUserAchievements();
+  const { totalSessionsUsed, isLoading: packagesLoading } = usePackageStats();
 
   const earnedIds = new Set(userAchievements?.map((a) => a.achievement_id) || []);
-  const now = new Date();
-  const registrationDate = profile?.created_at ? parseISO(profile.created_at) : null;
-
-  // Calculate progress - only count sessions AFTER user registration
-  const completedSessions = useMemo(() => {
-    if (!appointments || !registrationDate) return 0;
-    return appointments.filter((apt) => {
-      const aptDate = new Date(apt.datetime);
-      return aptDate < now && aptDate >= registrationDate;
-    }).length;
-  }, [appointments, registrationDate, now]);
-
-  // Calculate streak (only sessions since registration)
-  const streakMonths = useMemo(() => {
-    if (!appointments || !registrationDate) return 0;
-
-    const sessionsByMonth = new Map<string, boolean>();
-    appointments.forEach((apt) => {
-      const aptDate = new Date(apt.datetime);
-      // Only count sessions after registration date
-      if (aptDate < now && aptDate >= registrationDate) {
-        const monthKey = `${aptDate.getFullYear()}-${aptDate.getMonth()}`;
-        sessionsByMonth.set(monthKey, true);
-      }
-    });
-
-    let streak = 0;
-    let checkDate = startOfMonth(now);
-    const registrationMonth = startOfMonth(registrationDate);
-
-    while (checkDate >= registrationMonth) {
-      const monthKey = `${checkDate.getFullYear()}-${checkDate.getMonth()}`;
-      if (sessionsByMonth.has(monthKey)) {
-        streak++;
-        checkDate = new Date(checkDate.getFullYear(), checkDate.getMonth() - 1, 1);
-      } else {
-        break;
-      }
-    }
-
-    return streak;
-  }, [appointments, registrationDate, now]);
 
   const achievementsWithStatus = ACHIEVEMENTS.map((achievement) => {
     const isEarned = earnedIds.has(achievement.id);
@@ -278,12 +199,10 @@ export function useAchievementsWithStatus() {
     let current = 0;
 
     if (achievement.type === "sessions") {
-      current = completedSessions;
-      progress = Math.min((completedSessions / achievement.threshold) * 100, 100);
-    } else if (achievement.type === "streak") {
-      current = streakMonths;
-      progress = Math.min((streakMonths / achievement.threshold) * 100, 100);
+      current = totalSessionsUsed;
+      progress = Math.min((totalSessionsUsed / achievement.threshold) * 100, 100);
     }
+    // Streak achievements can be added later if needed
 
     const earnedAt = userAchievements?.find((a) => a.achievement_id === achievement.id)?.achieved_at;
 
@@ -298,7 +217,7 @@ export function useAchievementsWithStatus() {
 
   return {
     achievements: achievementsWithStatus,
-    isLoading: isLoading || !profile,
+    isLoading: achievementsLoading || packagesLoading,
     earnedCount: earnedIds.size,
     totalCount: ACHIEVEMENTS.length,
   };
