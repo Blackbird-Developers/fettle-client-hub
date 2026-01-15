@@ -9,7 +9,9 @@ Clone & Enter:
 Bash
 
 git clone 
-cd 
+
+cd
+
 Install Dependencies:
 
 Bash
