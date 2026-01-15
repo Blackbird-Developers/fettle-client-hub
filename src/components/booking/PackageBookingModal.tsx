@@ -31,30 +31,37 @@ interface PackageBookingModalProps {
 type Step = 'select' | 'details' | 'payment' | 'success';
 
 // Package definitions
+// Acuity links:
+// 3 sessions: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1122832
+// 6 sessions: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=996385
+// 9 sessions: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1197875
 const PACKAGES = [
-  { 
-    id: 1122832, 
-    name: "3 Session Bundle", 
-    sessions: 3, 
-    price: 225, 
-    individualPrice: 80,
-    popular: false 
+  {
+    id: 1122832,
+    name: "3 Session Bundle",
+    sessions: 3,
+    price: 241.50,
+    individualPrice: 85,
+    savings: 13.50,
+    popular: false
   },
-  { 
-    id: 1967864, 
-    name: "6 Session Bundle", 
-    sessions: 6, 
-    price: 420, 
-    individualPrice: 80,
-    popular: true 
+  {
+    id: 996385,
+    name: "6 Session Bundle",
+    sessions: 6,
+    price: 468,
+    individualPrice: 85,
+    savings: 42,
+    popular: true
   },
-  { 
-    id: 1967867, 
-    name: "9 Session Bundle", 
-    sessions: 9, 
-    price: 585, 
-    individualPrice: 80,
-    popular: false 
+  {
+    id: 1197875,
+    name: "9 Session Bundle",
+    sessions: 9,
+    price: 675,
+    individualPrice: 85,
+    savings: 90,
+    popular: false
   },
 ];
 
@@ -155,7 +162,7 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
 
   const calculateSavings = (pkg: typeof PACKAGES[0]) => {
     const fullPrice = pkg.sessions * pkg.individualPrice;
-    const savings = fullPrice - pkg.price;
+    const savings = pkg.savings;
     const percentSaved = Math.round((savings / fullPrice) * 100);
     return { savings, percentSaved, fullPrice };
   };
@@ -237,7 +244,7 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
             </div>
 
             <p className="text-xs text-center text-muted-foreground pt-2">
-              Individual sessions are €80 each. Packages give you the flexibility to book sessions when you need them.
+              Individual sessions are €85 each. Packages give you the flexibility to book sessions when you need them.
             </p>
           </div>
         );
