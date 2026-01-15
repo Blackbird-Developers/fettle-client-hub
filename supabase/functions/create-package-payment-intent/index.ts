@@ -13,10 +13,13 @@ const logStep = (step: string, details?: any) => {
 };
 
 // Package definitions with Acuity IDs
+// 3 sessions: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1122832
+// 6 sessions: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=996385
+// 9 sessions: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1197875
 const PACKAGES: Record<number, { name: string; sessions: number; price: number }> = {
-  1122832: { name: "3 Session Bundle", sessions: 3, price: 225 },
-  1967864: { name: "6 Session Bundle", sessions: 6, price: 420 },
-  1967867: { name: "9 Session Bundle", sessions: 9, price: 585 },
+  1122832: { name: "3 Session Bundle", sessions: 3, price: 241.50 },
+  996385: { name: "6 Session Bundle", sessions: 6, price: 468 },
+  1197875: { name: "9 Session Bundle", sessions: 9, price: 675 },
 };
 
 serve(async (req) => {
