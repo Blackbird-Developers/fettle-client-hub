@@ -112,9 +112,76 @@ serve(async (req) => {
 
     if (!acuityResponse.ok) {
       const errorText = await acuityResponse.text();
-      logStep("Acuity API error - canceling payment authorization", { status: acuityResponse.status, error: errorText });
+      logStep("Acuity API error", { status: acuityResponse.status, error: errorText });
 
-      // IMPORTANT: Cancel the payment authorization since booking failed
+      // Check if the error is about invalid intake form fields
+      // If so, retry WITHOUT the fields (they may not be required for this appointment type)
+      if (errorText.includes("invalid_fields") || errorText.includes("does not exist on this appointment")) {
+        logStep("Retrying without intake form fields");
+        delete appointmentBody.fields;
+
+        const retryResponse = await fetch("https://acuityscheduling.com/api/v1/appointments", {
+          method: "POST",
+          headers: {
+            "Authorization": `Basic ${acuityAuth}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(appointmentBody),
+        });
+
+        if (retryResponse.ok) {
+          const retryAppointment = await retryResponse.json();
+          logStep("Acuity appointment created on retry (without intake fields)", { appointmentId: retryAppointment.id });
+
+          // Continue with payment capture using the retry appointment
+          logStep("Capturing payment after successful booking", { paymentIntentId });
+
+          try {
+            await stripe.paymentIntents.capture(paymentIntentId);
+            logStep("Payment captured successfully");
+          } catch (captureError) {
+            logStep("CRITICAL: Booking created but payment capture failed", {
+              appointmentId: retryAppointment.id,
+              error: captureError
+            });
+          }
+
+          // Get receipt URL
+          let receiptUrl = null;
+          try {
+            const charges = await stripe.charges.list({
+              payment_intent: paymentIntentId,
+              limit: 1,
+            });
+            if (charges.data.length > 0) {
+              receiptUrl = charges.data[0].receipt_url;
+            }
+          } catch (e) {
+            logStep("Could not get receipt URL", { error: e });
+          }
+
+          return new Response(JSON.stringify({
+            success: true,
+            appointment: {
+              id: retryAppointment.id,
+              datetime: retryAppointment.datetime,
+              type: appointmentTypeName,
+              therapist: calendarName,
+            },
+            receiptUrl,
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 200,
+          });
+        }
+
+        // Retry also failed
+        const retryErrorText = await retryResponse.text();
+        logStep("Retry also failed", { error: retryErrorText });
+      }
+
+      // Cancel the payment authorization since booking failed
+      logStep("Canceling payment authorization due to booking failure");
       try {
         await stripe.paymentIntents.cancel(paymentIntentId, {
           cancellation_reason: "abandoned",

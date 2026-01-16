@@ -279,6 +279,96 @@ serve(async (req) => {
     if (!acuityResponse.ok) {
       const errorText = await acuityResponse.text();
       logStep("Acuity booking failed", { status: acuityResponse.status, error: errorText });
+
+      // Check if the error is about invalid intake form fields
+      // If so, retry WITHOUT the fields (they may not be required for this appointment type)
+      if (errorText.includes("invalid_fields") || errorText.includes("does not exist on this appointment")) {
+        logStep("Retrying without intake form fields");
+        delete appointmentData.fields;
+
+        const retryResponse = await fetch('https://acuityscheduling.com/api/v1/appointments', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Basic ${acuityAuth}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(appointmentData),
+        });
+
+        if (retryResponse.ok) {
+          const retryAppointment = await retryResponse.json();
+          logStep("Acuity appointment created on retry (without intake fields)", { appointmentId: retryAppointment.id });
+
+          // Deduct session from package
+          const { error: updateError } = await supabaseAdmin
+            .from('user_packages')
+            .update({
+              remaining_sessions: userPackage.remaining_sessions - 1,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', packageId)
+            .eq('user_id', userId);
+
+          if (updateError) {
+            logStep("Failed to deduct session", { error: updateError });
+          } else {
+            logStep("Session deducted from package", {
+              newRemaining: userPackage.remaining_sessions - 1
+            });
+
+            const newRemaining = userPackage.remaining_sessions - 1;
+
+            // Send emails
+            await sendCreditUsedConfirmation(
+              supabaseUrl,
+              supabaseServiceKey,
+              email,
+              firstName,
+              userPackage.package_name,
+              retryAppointment,
+              newRemaining,
+              userPackage.total_sessions
+            );
+
+            if (newRemaining <= 2 && newRemaining > 0) {
+              await sendLowSessionsReminder(email, firstName, userPackage.package_name, newRemaining);
+            }
+
+            if (newRemaining === 0) {
+              await sendCreditsDepletedEmail(
+                supabaseUrl,
+                supabaseServiceKey,
+                email,
+                firstName,
+                userPackage.package_name,
+                userPackage.total_sessions
+              );
+            }
+          }
+
+          return new Response(JSON.stringify({
+            success: true,
+            appointment: {
+              id: retryAppointment.id,
+              datetime: retryAppointment.datetime,
+              type: retryAppointment.type,
+              calendar: retryAppointment.calendar,
+              firstName: retryAppointment.firstName,
+              lastName: retryAppointment.lastName,
+              email: retryAppointment.email,
+            },
+            remainingSessions: userPackage.remaining_sessions - 1,
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 200,
+          });
+        }
+
+        // Retry also failed
+        const retryErrorText = await retryResponse.text();
+        logStep("Retry also failed", { error: retryErrorText });
+      }
+
       throw new Error(`Failed to book appointment: ${errorText}`);
     }
 
