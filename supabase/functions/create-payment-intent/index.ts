@@ -120,11 +120,12 @@ serve(async (req) => {
       intakeFormFields: intakeFormFields || "", // Acuity intake form fields as JSON string
     };
 
-    // Create PaymentIntent
+    // Create PaymentIntent with manual capture - payment is authorized but not captured until booking succeeds
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amountInCents,
       currency: "eur",
       customer: customerId,
+      capture_method: "manual", // Authorize only - capture after successful Acuity booking
       description: `${appointmentTypeName || "Therapy Session"} with ${calendarName || "therapist"} on ${new Date(datetime).toLocaleDateString()}`,
       metadata: bookingMetadata,
       automatic_payment_methods: {

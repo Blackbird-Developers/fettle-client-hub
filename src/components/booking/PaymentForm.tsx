@@ -65,10 +65,12 @@ export function PaymentForm({ paymentIntentId, amount, onSuccess, onBack }: Paym
         throw new Error(paymentError.message || 'Payment failed');
       }
 
-      if (paymentIntent?.status === 'succeeded') {
+      // With manual capture, status will be 'requires_capture' after card authorization
+      if (paymentIntent?.status === 'requires_capture' || paymentIntent?.status === 'succeeded') {
         setPaymentSucceeded(true);
 
-        // Now create the booking in Acuity
+        // Now create the booking in Acuity and capture the payment
+        // If Acuity booking fails, the payment authorization will be canceled
         const { data, error } = await supabase.functions.invoke('confirm-payment-and-book', {
           body: { paymentIntentId },
         });
@@ -83,7 +85,7 @@ export function PaymentForm({ paymentIntentId, amount, onSuccess, onBack }: Paym
 
         onSuccess(data);
       } else {
-        throw new Error('Payment was not completed');
+        throw new Error(`Payment was not completed. Status: ${paymentIntent?.status}`);
       }
     } catch (error) {
       toast({

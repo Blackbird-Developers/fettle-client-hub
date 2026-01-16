@@ -37,13 +37,25 @@ serve(async (req) => {
 
     // Retrieve the PaymentIntent to check status and get metadata
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-    logStep("Retrieved PaymentIntent", { 
-      status: paymentIntent.status, 
-      metadata: paymentIntent.metadata 
+    logStep("Retrieved PaymentIntent", {
+      status: paymentIntent.status,
+      metadata: paymentIntent.metadata
     });
 
-    if (paymentIntent.status !== "succeeded") {
-      throw new Error(`Payment not successful. Status: ${paymentIntent.status}`);
+    // For manual capture, status should be "requires_capture" after card authorization
+    if (paymentIntent.status !== "requires_capture") {
+      // If already succeeded, the payment was already captured - just return success
+      if (paymentIntent.status === "succeeded") {
+        logStep("Payment already captured", { status: paymentIntent.status });
+        return new Response(JSON.stringify({
+          success: true,
+          message: "Payment already processed",
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      throw new Error(`Payment not ready for capture. Status: ${paymentIntent.status}`);
     }
 
     const metadata = paymentIntent.metadata;
@@ -61,9 +73,9 @@ serve(async (req) => {
       intakeFormFields,
     } = metadata;
 
-    // Create appointment in Acuity
+    // STEP 1: Create appointment in Acuity FIRST (before capturing payment)
     const acuityAuth = btoa(`${acuityUserId}:${acuityApiKey}`);
-    
+
     const appointmentBody: Record<string, any> = {
       appointmentTypeID: parseInt(appointmentTypeID),
       datetime,
@@ -100,12 +112,42 @@ serve(async (req) => {
 
     if (!acuityResponse.ok) {
       const errorText = await acuityResponse.text();
-      logStep("Acuity API error", { status: acuityResponse.status, error: errorText });
+      logStep("Acuity API error - canceling payment authorization", { status: acuityResponse.status, error: errorText });
+
+      // IMPORTANT: Cancel the payment authorization since booking failed
+      try {
+        await stripe.paymentIntents.cancel(paymentIntentId, {
+          cancellation_reason: "abandoned",
+        });
+        logStep("Payment authorization canceled due to booking failure");
+      } catch (cancelError) {
+        logStep("Failed to cancel payment authorization", { error: cancelError });
+      }
+
       throw new Error(`Acuity booking failed: ${errorText}`);
     }
 
     const appointment = await acuityResponse.json();
     logStep("Acuity appointment created", { appointmentId: appointment.id });
+
+    // STEP 2: Capture the payment ONLY AFTER successful Acuity booking
+    logStep("Capturing payment after successful booking", { paymentIntentId });
+
+    let capturedPaymentIntent;
+    try {
+      capturedPaymentIntent = await stripe.paymentIntents.capture(paymentIntentId);
+      logStep("Payment captured successfully", {
+        status: capturedPaymentIntent.status,
+        amount: capturedPaymentIntent.amount
+      });
+    } catch (captureError) {
+      // Payment capture failed but booking was created - log this critical error
+      logStep("CRITICAL: Booking created but payment capture failed", {
+        appointmentId: appointment.id,
+        error: captureError
+      });
+      // Still return success since booking was created - payment can be handled manually
+    }
 
     // Get receipt URL from the charge
     let receiptUrl = null;
@@ -152,7 +194,7 @@ serve(async (req) => {
             <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 12px 12px;">
               <p style="font-size: 16px; margin-bottom: 20px;">Hi ${firstName},</p>
               <p style="font-size: 16px; margin-bottom: 20px;">Your therapy session has been successfully booked and paid for.</p>
-              
+
               <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #667eea;">
                 <h3 style="margin: 0 0 15px 0; color: #667eea;">Session Details</h3>
                 <p style="margin: 5px 0;"><strong>Session:</strong> ${appointmentTypeName || 'Therapy Session'}</p>
@@ -160,14 +202,14 @@ serve(async (req) => {
                 <p style="margin: 5px 0;"><strong>Date:</strong> ${formattedDate}</p>
                 <p style="margin: 5px 0;"><strong>Time:</strong> ${formattedTime}</p>
               </div>
-              
+
               <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
                 <p style="margin: 0; color: #2e7d32;"><strong>Amount Paid:</strong> €${amountPaid}</p>
                 ${receiptUrl ? `<p style="margin: 10px 0 0 0;"><a href="${receiptUrl}" style="color: #667eea;">View Receipt</a></p>` : ''}
               </div>
-              
+
               <p style="font-size: 14px; color: #666;">If you need to reschedule or cancel, please contact us at least 24 hours before your appointment.</p>
-              
+
               <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
               <p style="font-size: 12px; color: #999; text-align: center;">Fettle Therapy</p>
             </div>
@@ -200,7 +242,7 @@ serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ 
+    return new Response(JSON.stringify({
       success: true,
       appointment: {
         id: appointment.id,
