@@ -61,13 +61,29 @@ export function PaymentForm({ paymentIntentId, amount, onSuccess, onBack }: Paym
         redirect: 'if_required',
       });
 
+      console.log('[PaymentForm Debug] confirmPayment result:', {
+        error: paymentError,
+        paymentIntentStatus: paymentIntent?.status,
+        paymentIntentId: paymentIntent?.id,
+      });
+
       if (paymentError) {
+        // Check if user just canceled the payment (e.g., closed Google Pay modal)
+        if (paymentError.type === 'card_error' || paymentError.type === 'validation_error') {
+          throw new Error(paymentError.message || 'Payment failed');
+        }
+        // For other errors, still throw but with more detail
+        console.error('[PaymentForm Debug] Payment error:', paymentError);
         throw new Error(paymentError.message || 'Payment failed');
       }
 
       // With manual capture, status will be 'requires_capture' after card authorization
-      if (paymentIntent?.status === 'requires_capture' || paymentIntent?.status === 'succeeded') {
+      // For Google Pay / Apple Pay, it might also return 'processing' briefly or 'succeeded'
+      const validStatuses = ['requires_capture', 'succeeded', 'processing'];
+
+      if (paymentIntent && validStatuses.includes(paymentIntent.status)) {
         setPaymentSucceeded(true);
+        console.log('[PaymentForm Debug] Payment authorized, creating booking...');
 
         // Now create the booking in Acuity and capture the payment
         // If Acuity booking fails, the payment authorization will be canceled
@@ -84,8 +100,30 @@ export function PaymentForm({ paymentIntentId, amount, onSuccess, onBack }: Paym
         });
 
         onSuccess(data);
+      } else if (!paymentIntent) {
+        // paymentIntent is null - this can happen with redirects or if the user canceled
+        // Check if there's no error, meaning the payment might still be processing
+        console.log('[PaymentForm Debug] No paymentIntent returned, checking status via API...');
+
+        // Try to proceed anyway - the backend will verify the actual status
+        setPaymentSucceeded(true);
+
+        const { data, error } = await supabase.functions.invoke('confirm-payment-and-book', {
+          body: { paymentIntentId },
+        });
+
+        if (error) throw error;
+        if (data.error) throw new Error(data.error);
+
+        toast({
+          title: 'Booking Confirmed!',
+          description: 'Your session has been booked successfully.',
+        });
+
+        onSuccess(data);
       } else {
-        throw new Error(`Payment was not completed. Status: ${paymentIntent?.status}`);
+        console.error('[PaymentForm Debug] Unexpected status:', paymentIntent.status);
+        throw new Error(`Payment was not completed. Status: ${paymentIntent.status}`);
       }
     } catch (error) {
       toast({

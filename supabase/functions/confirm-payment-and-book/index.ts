@@ -43,10 +43,34 @@ serve(async (req) => {
     });
 
     // For manual capture, status should be "requires_capture" after card authorization
-    if (paymentIntent.status !== "requires_capture") {
-      // If already succeeded, the payment was already captured - just return success
-      if (paymentIntent.status === "succeeded") {
-        logStep("Payment already captured", { status: paymentIntent.status });
+    // For Google Pay / Apple Pay, it might be "processing" briefly
+    const validStatuses = ["requires_capture", "succeeded", "processing"];
+
+    if (!validStatuses.includes(paymentIntent.status)) {
+      throw new Error(`Payment not ready for capture. Status: ${paymentIntent.status}`);
+    }
+
+    // If already succeeded, the payment was already captured - just return success
+    if (paymentIntent.status === "succeeded") {
+      logStep("Payment already captured", { status: paymentIntent.status });
+      return new Response(JSON.stringify({
+        success: true,
+        message: "Payment already processed",
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    // If processing (Google Pay), wait a moment and re-check
+    if (paymentIntent.status === "processing") {
+      logStep("Payment is processing (Google Pay/Apple Pay), waiting...");
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+
+      const recheckIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      logStep("Rechecked PaymentIntent status", { status: recheckIntent.status });
+
+      if (recheckIntent.status === "succeeded") {
         return new Response(JSON.stringify({
           success: true,
           message: "Payment already processed",
@@ -55,7 +79,10 @@ serve(async (req) => {
           status: 200,
         });
       }
-      throw new Error(`Payment not ready for capture. Status: ${paymentIntent.status}`);
+
+      if (recheckIntent.status !== "requires_capture") {
+        throw new Error(`Payment still not ready after processing. Status: ${recheckIntent.status}`);
+      }
     }
 
     const metadata = paymentIntent.metadata;
