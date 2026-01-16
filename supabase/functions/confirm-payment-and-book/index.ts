@@ -58,6 +58,7 @@ serve(async (req) => {
       phone,
       notes,
       calendarName,
+      intakeFormFields,
     } = metadata;
 
     // Create appointment in Acuity
@@ -74,6 +75,17 @@ serve(async (req) => {
     if (calendarID) appointmentBody.calendarID = parseInt(calendarID);
     if (phone) appointmentBody.phone = phone;
     if (notes) appointmentBody.notes = notes;
+
+    // Add Acuity intake form fields if provided
+    if (intakeFormFields) {
+      try {
+        const fields = JSON.parse(intakeFormFields);
+        appointmentBody.fields = fields;
+        logStep("Adding intake form fields", { fields });
+      } catch (e) {
+        logStep("Failed to parse intake form fields", { intakeFormFields, error: e });
+      }
+    }
 
     logStep("Creating Acuity appointment", appointmentBody);
 

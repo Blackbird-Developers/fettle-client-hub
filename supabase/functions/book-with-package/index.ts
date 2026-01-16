@@ -209,6 +209,7 @@ serve(async (req) => {
       email,
       phone,
       notes,
+      intakeFormFields, // Acuity intake form fields array
     } = body;
 
     logStep("Received booking data", { packageId, appointmentTypeID, datetime });
@@ -247,7 +248,7 @@ serve(async (req) => {
 
     // Book appointment in Acuity
     const acuityAuth = btoa(`${acuityUserId}:${acuityApiKey}`);
-    
+
     const appointmentData: Record<string, any> = {
       appointmentTypeID,
       datetime,
@@ -259,6 +260,12 @@ serve(async (req) => {
     if (calendarID) appointmentData.calendarID = calendarID;
     if (phone) appointmentData.phone = phone;
     if (notes) appointmentData.notes = notes;
+
+    // Add Acuity intake form fields if provided
+    if (intakeFormFields && Array.isArray(intakeFormFields)) {
+      appointmentData.fields = intakeFormFields;
+      logStep("Adding intake form fields", { fields: intakeFormFields });
+    }
 
     const acuityResponse = await fetch('https://acuityscheduling.com/api/v1/appointments', {
       method: 'POST',

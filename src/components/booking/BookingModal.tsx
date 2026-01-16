@@ -42,6 +42,7 @@ import {
     Gift,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Checkbox } from '@/components/ui/checkbox';
 
 // Initialize Stripe with debugging
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as
@@ -103,6 +104,13 @@ export function BookingModal({
         email: '',
         phone: '',
         notes: '',
+    });
+
+    // Intake form checkboxes (required by Acuity)
+    const [intakeForm, setIntakeForm] = useState({
+        over18: false,
+        contactConsent: false,
+        termsAccepted: false,
     });
 
     // Payment state
@@ -386,6 +394,12 @@ export function BookingModal({
                         email: formData.email,
                         phone: formData.phone || undefined,
                         notes: formData.notes || undefined,
+                        // Acuity intake form fields
+                        intakeFormFields: [
+                            { id: 10466116, value: 'yes' }, // Over 18 confirmation
+                            { id: 9292394, value: 'yes' },  // Contact consent
+                            { id: 9292405, value: 'yes' },  // Terms accepted
+                        ],
                     },
                 }
             );
@@ -462,6 +476,12 @@ export function BookingModal({
                 email: formData.email,
                 phone: formData.phone || undefined,
                 notes: formData.notes || undefined,
+                // Acuity intake form fields (JSON stringified for Stripe metadata)
+                intakeFormFields: JSON.stringify([
+                    { id: 10466116, value: 'yes' }, // Over 18 confirmation
+                    { id: 9292394, value: 'yes' },  // Contact consent
+                    { id: 9292405, value: 'yes' },  // Terms accepted
+                ]),
             };
 
             console.log(
@@ -547,6 +567,11 @@ export function BookingModal({
             email: '',
             phone: '',
             notes: '',
+        });
+        setIntakeForm({
+            over18: false,
+            contactConsent: false,
+            termsAccepted: false,
         });
         setClientSecret(null);
         setPaymentIntentId(null);
@@ -945,6 +970,7 @@ export function BookingModal({
                 );
 
             case 'details':
+                const allIntakeFieldsChecked = intakeForm.over18 && intakeForm.contactConsent && intakeForm.termsAccepted;
                 return (
                     <div className="space-y-4">
                         <p className="text-muted-foreground">
@@ -1025,6 +1051,73 @@ export function BookingModal({
                                 rows={3}
                             />
                         </div>
+
+                        {/* Required Intake Form Fields */}
+                        <div className="space-y-3 pt-2 border-t">
+                            <p className="text-sm font-medium text-foreground">Required Confirmations</p>
+
+                            <div className="flex items-start space-x-3">
+                                <Checkbox
+                                    id="over18"
+                                    checked={intakeForm.over18}
+                                    onCheckedChange={(checked) =>
+                                        setIntakeForm((prev) => ({
+                                            ...prev,
+                                            over18: checked === true,
+                                        }))
+                                    }
+                                />
+                                <Label
+                                    htmlFor="over18"
+                                    className="text-sm leading-tight cursor-pointer">
+                                    This service is for over 18's only. Please tick the box to confirm you are over 18.
+                                </Label>
+                            </div>
+
+                            <div className="flex items-start space-x-3">
+                                <Checkbox
+                                    id="contactConsent"
+                                    checked={intakeForm.contactConsent}
+                                    onCheckedChange={(checked) =>
+                                        setIntakeForm((prev) => ({
+                                            ...prev,
+                                            contactConsent: checked === true,
+                                        }))
+                                    }
+                                />
+                                <Label
+                                    htmlFor="contactConsent"
+                                    className="text-sm leading-tight cursor-pointer">
+                                    I agree to be contacted by email and text message by Fettle. Texts are an essential method to send out your appointment log in details, and other relevant information to do with booking.
+                                </Label>
+                            </div>
+
+                            <div className="flex items-start space-x-3">
+                                <Checkbox
+                                    id="termsAccepted"
+                                    checked={intakeForm.termsAccepted}
+                                    onCheckedChange={(checked) =>
+                                        setIntakeForm((prev) => ({
+                                            ...prev,
+                                            termsAccepted: checked === true,
+                                        }))
+                                    }
+                                />
+                                <Label
+                                    htmlFor="termsAccepted"
+                                    className="text-sm leading-tight cursor-pointer">
+                                    Do you accept our terms of use?{' '}
+                                    <a
+                                        href="https://www.fettle.ie/terms-of-use"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-primary hover:underline">
+                                        View Terms & Conditions
+                                    </a>
+                                </Label>
+                            </div>
+                        </div>
+
                         <div className="flex gap-3">
                             <Button
                                 variant="ghost"
@@ -1038,7 +1131,8 @@ export function BookingModal({
                                 disabled={
                                     !formData.firstName ||
                                     !formData.lastName ||
-                                    !formData.email
+                                    !formData.email ||
+                                    !allIntakeFieldsChecked
                                 }>
                                 Review Booking
                             </Button>

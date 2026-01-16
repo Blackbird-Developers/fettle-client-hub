@@ -31,7 +31,7 @@ serve(async (req) => {
     logStep("Raw request body", { body: rawBody });
     
     const body = JSON.parse(rawBody);
-    const { 
+    const {
       appointmentTypeID,
       appointmentTypeName,
       appointmentTypePrice, // Price in EUR from Acuity (e.g., "72.99")
@@ -42,7 +42,8 @@ serve(async (req) => {
       lastName,
       email,
       phone,
-      notes
+      notes,
+      intakeFormFields, // JSON string of Acuity intake form fields
     } = body;
 
     logStep("Parsed booking data", { 
@@ -116,6 +117,7 @@ serve(async (req) => {
       email,
       phone: phone || "",
       notes: notes || "",
+      intakeFormFields: intakeFormFields || "", // Acuity intake form fields as JSON string
     };
 
     // Create PaymentIntent
