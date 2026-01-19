@@ -18,22 +18,28 @@ export default function ForgotPassword() {
     e.preventDefault();
     setIsLoading(true);
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
+    try {
+      // Use custom Edge Function to send password reset email via Resend API
+      const { data, error } = await supabase.functions.invoke('send-password-reset', {
+        body: {
+          email,
+          redirectTo: `${window.location.origin}/reset-password`,
+        },
+      });
 
-    setIsLoading(false);
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
 
-    if (error) {
+      setIsEmailSent(true);
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error.message || "Failed to send reset email",
         variant: "destructive",
       });
-      return;
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsEmailSent(true);
   };
 
   if (isEmailSent) {
