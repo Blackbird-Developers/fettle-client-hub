@@ -111,6 +111,7 @@ export function BookingModal({
         over18: false,
         contactConsent: false,
         termsAccepted: false,
+        youthConsentAcknowledged: false, // Required for Youth Therapy sessions
     });
 
     // Payment state
@@ -381,6 +382,19 @@ export function BookingModal({
 
         setIsSubmitting(true);
         try {
+            // Build intake form fields based on session category
+            const intakeFormFields = sessionCategory === 'youth'
+                ? [
+                    { id: 13686405, value: 'yes' }, // Youth Therapy consent acknowledgment
+                    { id: 9292394, value: 'yes' },  // Contact consent
+                    { id: 9292405, value: 'yes' },  // Terms accepted
+                  ]
+                : [
+                    { id: 10466116, value: 'yes' }, // Over 18 confirmation
+                    { id: 9292394, value: 'yes' },  // Contact consent
+                    { id: 9292405, value: 'yes' },  // Terms accepted
+                  ];
+
             const { data, error } = await supabase.functions.invoke(
                 'book-with-package',
                 {
@@ -394,12 +408,7 @@ export function BookingModal({
                         email: formData.email,
                         phone: formData.phone || undefined,
                         notes: formData.notes || undefined,
-                        // Acuity intake form fields
-                        intakeFormFields: [
-                            { id: 10466116, value: 'yes' }, // Over 18 confirmation
-                            { id: 9292394, value: 'yes' },  // Contact consent
-                            { id: 9292405, value: 'yes' },  // Terms accepted
-                        ],
+                        intakeFormFields,
                     },
                 }
             );
@@ -464,6 +473,19 @@ export function BookingModal({
 
         setIsSubmitting(true);
         try {
+            // Build intake form fields based on session category
+            const intakeFormFields = sessionCategory === 'youth'
+                ? [
+                    { id: 13686405, value: 'yes' }, // Youth Therapy consent acknowledgment
+                    { id: 9292394, value: 'yes' },  // Contact consent
+                    { id: 9292405, value: 'yes' },  // Terms accepted
+                  ]
+                : [
+                    { id: 10466116, value: 'yes' }, // Over 18 confirmation
+                    { id: 9292394, value: 'yes' },  // Contact consent
+                    { id: 9292405, value: 'yes' },  // Terms accepted
+                  ];
+
             const requestBody = {
                 appointmentTypeID: selectedType,
                 appointmentTypeName: selectedTypeData.name,
@@ -477,11 +499,7 @@ export function BookingModal({
                 phone: formData.phone || undefined,
                 notes: formData.notes || undefined,
                 // Acuity intake form fields (JSON stringified for Stripe metadata)
-                intakeFormFields: JSON.stringify([
-                    { id: 10466116, value: 'yes' }, // Over 18 confirmation
-                    { id: 9292394, value: 'yes' },  // Contact consent
-                    { id: 9292405, value: 'yes' },  // Terms accepted
-                ]),
+                intakeFormFields: JSON.stringify(intakeFormFields),
             };
 
             console.log(
@@ -572,6 +590,7 @@ export function BookingModal({
             over18: false,
             contactConsent: false,
             termsAccepted: false,
+            youthConsentAcknowledged: false,
         });
         setClientSecret(null);
         setPaymentIntentId(null);
@@ -970,7 +989,10 @@ export function BookingModal({
                 );
 
             case 'details':
-                const allIntakeFieldsChecked = intakeForm.over18 && intakeForm.contactConsent && intakeForm.termsAccepted;
+                // For Youth Therapy, require youth consent instead of over18
+                const allIntakeFieldsChecked = sessionCategory === 'youth'
+                    ? intakeForm.youthConsentAcknowledged && intakeForm.contactConsent && intakeForm.termsAccepted
+                    : intakeForm.over18 && intakeForm.contactConsent && intakeForm.termsAccepted;
                 return (
                     <div className="space-y-4">
                         <p className="text-muted-foreground">
@@ -1056,23 +1078,44 @@ export function BookingModal({
                         <div className="space-y-3 pt-2 border-t">
                             <p className="text-sm font-medium text-foreground">Required Confirmations</p>
 
-                            <div className="flex items-start space-x-3">
-                                <Checkbox
-                                    id="over18"
-                                    checked={intakeForm.over18}
-                                    onCheckedChange={(checked) =>
-                                        setIntakeForm((prev) => ({
-                                            ...prev,
-                                            over18: checked === true,
-                                        }))
-                                    }
-                                />
-                                <Label
-                                    htmlFor="over18"
-                                    className="text-sm leading-tight cursor-pointer">
-                                    This service is for over 18's only. Please tick the box to confirm you are over 18.
-                                </Label>
-                            </div>
+                            {/* Show Youth Therapy consent for youth sessions, Over 18 for others */}
+                            {sessionCategory === 'youth' ? (
+                                <div className="flex items-start space-x-3">
+                                    <Checkbox
+                                        id="youthConsentAcknowledged"
+                                        checked={intakeForm.youthConsentAcknowledged}
+                                        onCheckedChange={(checked) =>
+                                            setIntakeForm((prev) => ({
+                                                ...prev,
+                                                youthConsentAcknowledged: checked === true,
+                                            }))
+                                        }
+                                    />
+                                    <Label
+                                        htmlFor="youthConsentAcknowledged"
+                                        className="text-sm leading-tight cursor-pointer">
+                                        I acknowledge and agree that I have completed the mandatory consent form for Fettle Youth Therapy.
+                                    </Label>
+                                </div>
+                            ) : (
+                                <div className="flex items-start space-x-3">
+                                    <Checkbox
+                                        id="over18"
+                                        checked={intakeForm.over18}
+                                        onCheckedChange={(checked) =>
+                                            setIntakeForm((prev) => ({
+                                                ...prev,
+                                                over18: checked === true,
+                                            }))
+                                        }
+                                    />
+                                    <Label
+                                        htmlFor="over18"
+                                        className="text-sm leading-tight cursor-pointer">
+                                        This service is for over 18's only. Please tick the box to confirm you are over 18.
+                                    </Label>
+                                </div>
+                            )}
 
                             <div className="flex items-start space-x-3">
                                 <Checkbox
