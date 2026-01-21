@@ -136,13 +136,19 @@ serve(async (req) => {
     `;
 
     const emailResponse = await resend.emails.send({
-      from: "Fettle <noreply@fettle.ie>",
+      from: "Fettle <noreply@notifications.fettle.ie>",
       to: [email],
       subject: "Reset Your Password - Fettle",
       html: emailHtml,
     });
 
-    logStep("Email sent successfully", { emailResponse });
+    logStep("Email response", { emailResponse });
+
+    // Check if Resend returned an error
+    if (emailResponse.error) {
+      logStep("Resend API error", { error: emailResponse.error });
+      throw new Error(emailResponse.error.message || "Failed to send email");
+    }
 
     return new Response(JSON.stringify({
       success: true,
