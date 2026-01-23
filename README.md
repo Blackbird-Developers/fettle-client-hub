@@ -38,4 +38,4 @@ Push your changes to your GitHub repository.
 
 Connect your host (such as Vercel, Netlify, or your custom server).
 
-Configure your domain in your hosting provider's settings.
+Configure your domain in your hosting provider's settings
