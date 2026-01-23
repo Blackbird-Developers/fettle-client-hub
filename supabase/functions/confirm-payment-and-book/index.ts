@@ -44,22 +44,20 @@ serve(async (req) => {
 
     // For manual capture, status should be "requires_capture" after card authorization
     // For Google Pay / Apple Pay, it might be "processing" briefly
+    // "succeeded" means payment was already captured (auto-capture or already processed)
     const validStatuses = ["requires_capture", "succeeded", "processing"];
 
     if (!validStatuses.includes(paymentIntent.status)) {
       throw new Error(`Payment not ready for capture. Status: ${paymentIntent.status}`);
     }
 
-    // If already succeeded, the payment was already captured - just return success
+    // Track whether we need to capture the payment later
+    let needsCapture = paymentIntent.status === "requires_capture";
+
+    // If already succeeded, payment was already captured - still need to create the Acuity appointment
     if (paymentIntent.status === "succeeded") {
-      logStep("Payment already captured", { status: paymentIntent.status });
-      return new Response(JSON.stringify({
-        success: true,
-        message: "Payment already processed",
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 200,
-      });
+      logStep("Payment already captured, proceeding to create Acuity appointment", { status: paymentIntent.status });
+      needsCapture = false;
     }
 
     // If processing (Google Pay), wait a moment and re-check
@@ -71,16 +69,11 @@ serve(async (req) => {
       logStep("Rechecked PaymentIntent status", { status: recheckIntent.status });
 
       if (recheckIntent.status === "succeeded") {
-        return new Response(JSON.stringify({
-          success: true,
-          message: "Payment already processed",
-        }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-
-      if (recheckIntent.status !== "requires_capture") {
+        logStep("Payment succeeded after processing, proceeding to create Acuity appointment");
+        needsCapture = false;
+      } else if (recheckIntent.status === "requires_capture") {
+        needsCapture = true;
+      } else {
         throw new Error(`Payment still not ready after processing. Status: ${recheckIntent.status}`);
       }
     }
@@ -174,16 +167,19 @@ serve(async (req) => {
           logStep("Acuity appointment created on retry", { appointmentId: retryAppointment.id });
 
           // Continue with payment capture using the retry appointment
-          logStep("Capturing payment after successful booking", { paymentIntentId });
-
-          try {
-            await stripe.paymentIntents.capture(paymentIntentId);
-            logStep("Payment captured successfully");
-          } catch (captureError) {
-            logStep("CRITICAL: Booking created but payment capture failed", {
-              appointmentId: retryAppointment.id,
-              error: captureError
-            });
+          if (needsCapture) {
+            logStep("Capturing payment after successful booking", { paymentIntentId });
+            try {
+              await stripe.paymentIntents.capture(paymentIntentId);
+              logStep("Payment captured successfully");
+            } catch (captureError) {
+              logStep("CRITICAL: Booking created but payment capture failed", {
+                appointmentId: retryAppointment.id,
+                error: captureError
+              });
+            }
+          } else {
+            logStep("Payment already captured, skipping capture step");
           }
 
           // Get receipt URL
@@ -242,16 +238,20 @@ serve(async (req) => {
               const finalAppointment = await finalRetryResponse.json();
               logStep("Acuity appointment created on final retry with required field", { appointmentId: finalAppointment.id });
 
-              // Capture payment
-              logStep("Capturing payment after successful booking", { paymentIntentId });
-              try {
-                await stripe.paymentIntents.capture(paymentIntentId);
-                logStep("Payment captured successfully");
-              } catch (captureError) {
-                logStep("CRITICAL: Booking created but payment capture failed", {
-                  appointmentId: finalAppointment.id,
-                  error: captureError
-                });
+              // Capture payment if needed
+              if (needsCapture) {
+                logStep("Capturing payment after successful booking", { paymentIntentId });
+                try {
+                  await stripe.paymentIntents.capture(paymentIntentId);
+                  logStep("Payment captured successfully");
+                } catch (captureError) {
+                  logStep("CRITICAL: Booking created but payment capture failed", {
+                    appointmentId: finalAppointment.id,
+                    error: captureError
+                  });
+                }
+              } else {
+                logStep("Payment already captured, skipping capture step");
               }
 
               // Get receipt URL
@@ -289,15 +289,19 @@ serve(async (req) => {
         }
       }
 
-      // Cancel the payment authorization since booking failed
-      logStep("Canceling payment authorization due to booking failure");
-      try {
-        await stripe.paymentIntents.cancel(paymentIntentId, {
-          cancellation_reason: "abandoned",
-        });
-        logStep("Payment authorization canceled due to booking failure");
-      } catch (cancelError) {
-        logStep("Failed to cancel payment authorization", { error: cancelError });
+      // Cancel the payment authorization since booking failed (only if not already captured)
+      if (needsCapture) {
+        logStep("Canceling payment authorization due to booking failure");
+        try {
+          await stripe.paymentIntents.cancel(paymentIntentId, {
+            cancellation_reason: "abandoned",
+          });
+          logStep("Payment authorization canceled due to booking failure");
+        } catch (cancelError) {
+          logStep("Failed to cancel payment authorization", { error: cancelError });
+        }
+      } else {
+        logStep("Payment already captured - cannot cancel. Manual refund may be needed.");
       }
 
       throw new Error(`Acuity booking failed: ${errorText}`);
@@ -306,23 +310,26 @@ serve(async (req) => {
     const appointment = await acuityResponse.json();
     logStep("Acuity appointment created", { appointmentId: appointment.id });
 
-    // STEP 2: Capture the payment ONLY AFTER successful Acuity booking
-    logStep("Capturing payment after successful booking", { paymentIntentId });
+    // STEP 2: Capture the payment ONLY AFTER successful Acuity booking (if not already captured)
+    if (needsCapture) {
+      logStep("Capturing payment after successful booking", { paymentIntentId });
 
-    let capturedPaymentIntent;
-    try {
-      capturedPaymentIntent = await stripe.paymentIntents.capture(paymentIntentId);
-      logStep("Payment captured successfully", {
-        status: capturedPaymentIntent.status,
-        amount: capturedPaymentIntent.amount
-      });
-    } catch (captureError) {
-      // Payment capture failed but booking was created - log this critical error
-      logStep("CRITICAL: Booking created but payment capture failed", {
-        appointmentId: appointment.id,
-        error: captureError
-      });
-      // Still return success since booking was created - payment can be handled manually
+      try {
+        const capturedPaymentIntent = await stripe.paymentIntents.capture(paymentIntentId);
+        logStep("Payment captured successfully", {
+          status: capturedPaymentIntent.status,
+          amount: capturedPaymentIntent.amount
+        });
+      } catch (captureError) {
+        // Payment capture failed but booking was created - log this critical error
+        logStep("CRITICAL: Booking created but payment capture failed", {
+          appointmentId: appointment.id,
+          error: captureError
+        });
+        // Still return success since booking was created - payment can be handled manually
+      }
+    } else {
+      logStep("Payment already captured, skipping capture step");
     }
 
     // Get receipt URL from the charge
