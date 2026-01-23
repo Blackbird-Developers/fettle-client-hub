@@ -173,11 +173,13 @@ export function BookingModal({
     const filteredAppointmentTypes = useMemo(() => {
         if (preselectedCalendarName && !ignorePreselectedTherapist) {
             // When rebooking, show only session types for the specific therapist
-            const therapistFirstName = preselectedCalendarName.split(' ')[0];
+            // Trim the name as some calendars (like Ken Gallagher) have trailing spaces from Acuity API
+            const trimmedCalendarName = preselectedCalendarName.trim();
+            const therapistFirstName = trimmedCalendarName.split(' ')[0];
             return types.filter((type) => {
                 const nameLower = type.name.toLowerCase();
                 const therapistNameLower = therapistFirstName.toLowerCase();
-                const fullNameLower = preselectedCalendarName.toLowerCase();
+                const fullNameLower = trimmedCalendarName.toLowerCase();
 
                 switch (sessionCategory) {
                     case 'couples':
@@ -327,9 +329,10 @@ export function BookingModal({
     };
 
     // Get the therapist name - either from calendar data or extracted from type name for couples/youth
+    // Trim the name as some calendars (like Ken Gallagher) have trailing spaces from Acuity API
     const getTherapistDisplayName = (): string | null => {
         if (selectedCalendarData?.name) {
-            return selectedCalendarData.name;
+            return selectedCalendarData.name.trim();
         }
         if (
             selectedTypeData &&
@@ -504,7 +507,7 @@ export function BookingModal({
                 appointmentTypePrice: selectedTypeData.price,
                 datetime: selectedTime,
                 calendarID: selectedCalendar,
-                calendarName: selectedCalendarData?.name,
+                calendarName: selectedCalendarData?.name?.trim(),
                 firstName: formData.firstName,
                 lastName: formData.lastName,
                 email: formData.email,
