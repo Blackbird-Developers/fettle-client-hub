@@ -94,6 +94,7 @@ export function BookingModal({
         preselectedCalendarId || null
     );
     const [selectedDate, setSelectedDate] = useState<Date | undefined>();
+    const [viewingMonth, setViewingMonth] = useState<Date>(new Date()); // Track which month the calendar is showing
     const [selectedTime, setSelectedTime] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [ignorePreselectedTherapist, setIgnorePreselectedTherapist] =
@@ -155,11 +156,11 @@ export function BookingModal({
     const { calendars, loading: calendarsLoading } = useAcuityCalendars();
     const { appointments } = useAcuityAppointments(profile?.email);
 
-    const currentMonth = format(new Date(), 'yyyy-MM');
+    // Use viewingMonth for availability query - this updates when user navigates calendar
     const { dates: availableDates, loading: datesLoading } =
         useAcuityAvailability(
             selectedType,
-            selectedDate ? format(selectedDate, 'yyyy-MM') : currentMonth,
+            format(viewingMonth, 'yyyy-MM'),
             selectedCalendar
         );
 
@@ -593,6 +594,7 @@ export function BookingModal({
         setSelectedType(null);
         setSelectedCalendar(preselectedCalendarId || null);
         setSelectedDate(undefined);
+        setViewingMonth(new Date()); // Reset calendar view to current month
         setSelectedTime(null);
         setFormData({
             firstName: '',
@@ -914,6 +916,8 @@ export function BookingModal({
                                 <Calendar
                                     mode="single"
                                     selected={selectedDate}
+                                    month={viewingMonth}
+                                    onMonthChange={setViewingMonth}
                                     onSelect={(date) => {
                                         setSelectedDate(date);
                                         if (date) setStep('time');
