@@ -131,6 +131,7 @@ export function BookingModal({
     const [selectedPackageId, setSelectedPackageId] = useState<string | null>(
         null
     );
+    const [hasUserMadePaymentChoice, setHasUserMadePaymentChoice] = useState(false);
 
     const { toast } = useToast();
     const { profile, user } = useAuth();
@@ -141,8 +142,9 @@ export function BookingModal({
         useActivePackages();
 
     // Auto-select package credits when user enters confirm step and has packages available
+    // Only auto-select if user hasn't explicitly made a choice yet
     useEffect(() => {
-        if (step === 'confirm' && totalRemainingSessions > 0 && !packagesLoading && selectedPackageId === null) {
+        if (step === 'confirm' && totalRemainingSessions > 0 && !packagesLoading && !hasUserMadePaymentChoice) {
             // Auto-select package credits as the default choice
             setUsePackageCredits(true);
             const firstPackage = activePackages[0];
@@ -150,7 +152,7 @@ export function BookingModal({
                 setSelectedPackageId(firstPackage.id);
             }
         }
-    }, [step, totalRemainingSessions, packagesLoading, activePackages, selectedPackageId]);
+    }, [step, totalRemainingSessions, packagesLoading, activePackages, hasUserMadePaymentChoice]);
 
     const { types, loading: typesLoading } = useAcuityAppointmentTypes();
     const { calendars, loading: calendarsLoading } = useAcuityCalendars();
@@ -617,6 +619,7 @@ export function BookingModal({
         setCouponCode('');
         setUsePackageCredits(false);
         setSelectedPackageId(null);
+        setHasUserMadePaymentChoice(false);
         setIgnorePreselectedTherapist(false);
         onOpenChange(false);
 
@@ -1286,6 +1289,7 @@ export function BookingModal({
                                     type="button"
                                     onClick={() => {
                                         setUsePackageCredits(true);
+                                        setHasUserMadePaymentChoice(true);
                                         // Auto-select first available package
                                         const firstPackage = activePackages[0];
                                         if (firstPackage) {
@@ -1295,7 +1299,7 @@ export function BookingModal({
                                         }
                                     }}
                                     className={cn(
-                                        'w-full p-4 rounded-xl border-2 text-left transition-all',
+                                        'w-full p-4 rounded-xl border-2 text-left transition-all cursor-pointer',
                                         usePackageCredits
                                             ? 'border-success bg-success/5 ring-2 ring-success/20'
                                             : 'border-border hover:border-success/50 hover:bg-success/5'
@@ -1330,11 +1334,12 @@ export function BookingModal({
                                     onClick={() => {
                                         setUsePackageCredits(false);
                                         setSelectedPackageId(null);
+                                        setHasUserMadePaymentChoice(true);
                                     }}
                                     className={cn(
-                                        'w-full p-4 rounded-xl border-2 text-left transition-all',
+                                        'w-full p-4 rounded-xl border-2 text-left transition-all cursor-pointer',
                                         !usePackageCredits
-                                            ? 'border-primary bg-primary/5'
+                                            ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
                                             : 'border-border hover:border-primary/50 hover:bg-primary/5'
                                     )}>
                                     <div className="flex items-center gap-3">

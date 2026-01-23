@@ -255,10 +255,11 @@ serve(async (req) => {
       firstName,
       lastName,
       email,
+      // Phone is required by Acuity - use provided value or placeholder
+      phone: phone || "0000000000",
     };
 
     if (calendarID) appointmentData.calendarID = calendarID;
-    if (phone) appointmentData.phone = phone;
     if (notes) appointmentData.notes = notes;
 
     // Add Acuity intake form fields if provided
