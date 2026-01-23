@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { format, addMonths } from 'date-fns';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements } from '@stripe/react-stripe-js';
@@ -136,8 +136,20 @@ export function BookingModal({
     const queryClient = useQueryClient();
 
     // Fetch user's active packages
-    const { packages: activePackages, totalRemainingSessions } =
+    const { packages: activePackages, totalRemainingSessions, isLoading: packagesLoading } =
         useActivePackages();
+
+    // Auto-select package credits when user enters confirm step and has packages available
+    useEffect(() => {
+        if (step === 'confirm' && totalRemainingSessions > 0 && !packagesLoading && selectedPackageId === null) {
+            // Auto-select package credits as the default choice
+            setUsePackageCredits(true);
+            const firstPackage = activePackages[0];
+            if (firstPackage) {
+                setSelectedPackageId(firstPackage.id);
+            }
+        }
+    }, [step, totalRemainingSessions, packagesLoading, activePackages, selectedPackageId]);
 
     const { types, loading: typesLoading } = useAcuityAppointmentTypes();
     const { calendars, loading: calendarsLoading } = useAcuityCalendars();
@@ -1242,9 +1254,27 @@ export function BookingModal({
                             </div>
                         </div>
 
-                        {/* Package Credits Option */}
-                        {totalRemainingSessions > 0 && (
+                        {/* Loading state for packages */}
+                        {packagesLoading && (
+                            <div className="flex items-center gap-3 p-4 rounded-xl border-2 border-border bg-accent/30">
+                                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                                <p className="text-sm text-muted-foreground">
+                                    Checking for available session credits...
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Package Credits Option - Show prominently when credits are available */}
+                        {!packagesLoading && totalRemainingSessions > 0 && (
                             <div className="space-y-3">
+                                {/* Highlighted banner when user has credits */}
+                                <div className="bg-success/10 border border-success/30 rounded-lg p-3 flex items-center gap-2">
+                                    <Gift className="h-4 w-4 text-success" />
+                                    <p className="text-sm text-success font-medium">
+                                        You have {totalRemainingSessions} session credit{totalRemainingSessions !== 1 ? 's' : ''} available!
+                                    </p>
+                                </div>
+
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -1260,7 +1290,7 @@ export function BookingModal({
                                     className={cn(
                                         'w-full p-4 rounded-xl border-2 text-left transition-all',
                                         usePackageCredits
-                                            ? 'border-success bg-success/5'
+                                            ? 'border-success bg-success/5 ring-2 ring-success/20'
                                             : 'border-border hover:border-success/50 hover:bg-success/5'
                                     )}>
                                     <div className="flex items-center gap-3">
@@ -1279,7 +1309,7 @@ export function BookingModal({
                                             </div>
                                             <p className="text-sm text-muted-foreground">
                                                 Book using your pre-purchased
-                                                session credits
+                                                session credits - no payment needed
                                             </p>
                                         </div>
                                         {usePackageCredits && (
@@ -1320,8 +1350,9 @@ export function BookingModal({
                             </div>
                         )}
 
-                        {/* Standard payment option when no packages */}
-                        {totalRemainingSessions === 0 &&
+                        {/* Standard payment option when no packages (only show after packages have loaded) */}
+                        {!packagesLoading &&
+                            totalRemainingSessions === 0 &&
                             selectedTypeData?.price &&
                             parseFloat(selectedTypeData.price) > 0 && (
                                 <div className="space-y-3">
