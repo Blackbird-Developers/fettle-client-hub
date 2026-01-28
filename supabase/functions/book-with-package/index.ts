@@ -14,24 +14,23 @@ const logStep = (step: string, details?: any) => {
   console.log(`[BOOK-WITH-PACKAGE] ${step}${detailsStr}`);
 };
 
-// Helper function to deduct minutes from Acuity certificate
-async function deductFromAcuityCertificate(
+// Helper function to get Acuity certificate code for automatic deduction
+// When you pass a certificate code to appointment creation, Acuity auto-deducts
+async function getAcuityCertificateCode(
   acuityUserId: string,
   acuityApiKey: string,
-  stripeSessionId: string | null,
-  sessionMinutes: number = 50
-): Promise<{ success: boolean; error?: string }> {
+  stripeSessionId: string | null
+): Promise<{ code: string | null; error?: string }> {
   // Check if this package is linked to an Acuity certificate
   if (!stripeSessionId || !stripeSessionId.startsWith("acuity-cert-")) {
-    logStep("Package not linked to Acuity certificate, skipping Acuity deduction", { stripeSessionId });
-    return { success: true }; // Not an error, just not an Acuity-synced package
+    logStep("Package not linked to Acuity certificate", { stripeSessionId });
+    return { code: null }; // Not an Acuity-synced package
   }
 
   const certId = stripeSessionId.replace("acuity-cert-", "");
   const authHeader = btoa(`${acuityUserId}:${acuityApiKey}`);
 
   try {
-    // First, get the current certificate to see its type and remaining value
     const getResponse = await fetch(`${ACUITY_API_BASE}/certificates/${certId}`, {
       headers: {
         Authorization: `Basic ${authHeader}`,
@@ -42,74 +41,28 @@ async function deductFromAcuityCertificate(
     if (!getResponse.ok) {
       if (getResponse.status === 404) {
         logStep("Acuity certificate not found, may have been deleted", { certId });
-        return { success: true }; // Certificate doesn't exist in Acuity anymore
+        return { code: null }; // Certificate doesn't exist in Acuity anymore
       }
       const errorText = await getResponse.text();
       logStep("Failed to fetch Acuity certificate", { certId, status: getResponse.status, error: errorText });
-      return { success: false, error: `Failed to fetch certificate: ${getResponse.status}` };
+      return { code: null, error: `Failed to fetch certificate: ${getResponse.status}` };
     }
 
     const certificate = await getResponse.json();
-    logStep("Fetched Acuity certificate", {
+    logStep("Fetched Acuity certificate for booking", {
       certId,
+      certificateCode: certificate.certificate,
       type: certificate.type,
       remainingMinutes: certificate.remainingMinutes,
       remainingCounts: certificate.remainingCounts
     });
 
-    // Determine what to deduct based on certificate type
-    let updateData: Record<string, any> = {};
-
-    if (certificate.type === "minutes" && certificate.remainingMinutes !== null) {
-      const newMinutes = Math.max(0, certificate.remainingMinutes - sessionMinutes);
-      updateData.remainingMinutes = newMinutes;
-      logStep("Deducting minutes from Acuity certificate", {
-        certId,
-        oldMinutes: certificate.remainingMinutes,
-        deducting: sessionMinutes,
-        newMinutes
-      });
-    } else if (certificate.remainingCounts !== null) {
-      const newCounts = Math.max(0, certificate.remainingCounts - 1);
-      updateData.remainingCounts = newCounts;
-      logStep("Deducting count from Acuity certificate", {
-        certId,
-        oldCounts: certificate.remainingCounts,
-        newCounts
-      });
-    } else {
-      logStep("Certificate has no deductible value, skipping", { certId, certificate });
-      return { success: true };
-    }
-
-    // Update the certificate in Acuity
-    const updateResponse = await fetch(`${ACUITY_API_BASE}/certificates/${certId}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Basic ${authHeader}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(updateData),
-    });
-
-    if (!updateResponse.ok) {
-      const errorText = await updateResponse.text();
-      logStep("Failed to update Acuity certificate", { certId, status: updateResponse.status, error: errorText });
-      return { success: false, error: `Failed to update certificate: ${updateResponse.status}` };
-    }
-
-    const updatedCert = await updateResponse.json();
-    logStep("Acuity certificate updated successfully", {
-      certId,
-      newRemainingMinutes: updatedCert.remainingMinutes,
-      newRemainingCounts: updatedCert.remainingCounts
-    });
-
-    return { success: true };
+    // Return the certificate code - Acuity will auto-deduct when this is used in booking
+    return { code: certificate.certificate };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    logStep("Error deducting from Acuity certificate", { certId, error: errorMessage });
-    return { success: false, error: errorMessage };
+    logStep("Error fetching Acuity certificate", { certId, error: errorMessage });
+    return { code: null, error: errorMessage };
   }
 }
 
@@ -342,10 +295,21 @@ serve(async (req) => {
       throw new Error("This package has expired");
     }
 
-    logStep("Package verified", { 
-      packageId, 
-      remainingSessions: userPackage.remaining_sessions 
+    logStep("Package verified", {
+      packageId,
+      remainingSessions: userPackage.remaining_sessions
     });
+
+    // Check if package is linked to Acuity certificate and get code for auto-deduction
+    const certResult = await getAcuityCertificateCode(
+      acuityUserId,
+      acuityApiKey,
+      userPackage.stripe_session_id
+    );
+    const acuityCertificateCode = certResult.code;
+    if (acuityCertificateCode) {
+      logStep("Will use Acuity certificate for booking", { certificateCode: acuityCertificateCode });
+    }
 
     // Book appointment in Acuity
     const acuityAuth = btoa(`${acuityUserId}:${acuityApiKey}`);
@@ -362,6 +326,12 @@ serve(async (req) => {
 
     if (calendarID) appointmentData.calendarID = calendarID;
     if (notes) appointmentData.notes = notes;
+
+    // If package is linked to Acuity certificate, include code for auto-deduction
+    if (acuityCertificateCode) {
+      appointmentData.certificate = acuityCertificateCode;
+      logStep("Adding certificate to appointment for auto-deduction", { certificate: acuityCertificateCode });
+    }
 
     // Add Acuity intake form fields if provided
     if (intakeFormFields && Array.isArray(intakeFormFields)) {
@@ -418,15 +388,9 @@ serve(async (req) => {
               newRemaining: userPackage.remaining_sessions - 1
             });
 
-            // Also deduct from Acuity certificate if this package is synced from Acuity
-            const acuityDeductResult = await deductFromAcuityCertificate(
-              acuityUserId,
-              acuityApiKey,
-              userPackage.stripe_session_id,
-              50 // 50 minutes per session
-            );
-            if (!acuityDeductResult.success) {
-              logStep("Acuity deduction failed (non-blocking)", { error: acuityDeductResult.error });
+            // Note: Acuity certificate is auto-deducted when certificate code is passed to appointment
+            if (acuityCertificateCode) {
+              logStep("Acuity certificate was auto-deducted via appointment booking");
             }
 
             const newRemaining = userPackage.remaining_sessions - 1;
@@ -506,15 +470,9 @@ serve(async (req) => {
         newRemaining: userPackage.remaining_sessions - 1
       });
 
-      // Also deduct from Acuity certificate if this package is synced from Acuity
-      const acuityDeductResult = await deductFromAcuityCertificate(
-        acuityUserId,
-        acuityApiKey,
-        userPackage.stripe_session_id,
-        50 // 50 minutes per session
-      );
-      if (!acuityDeductResult.success) {
-        logStep("Acuity deduction failed (non-blocking)", { error: acuityDeductResult.error });
+      // Note: Acuity certificate is auto-deducted when certificate code is passed to appointment
+      if (acuityCertificateCode) {
+        logStep("Acuity certificate was auto-deducted via appointment booking");
       }
 
       // Send emails for package bookings
