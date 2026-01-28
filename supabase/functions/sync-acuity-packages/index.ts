@@ -26,10 +26,13 @@ interface AcuityCertificate {
   productID: number;
   name: string;
   email: string;
-  remainingCounts: number;
+  type: "counts" | "minutes" | "value";
+  remainingCounts: number | null;
+  remainingMinutes: number | null;
+  remainingValue: number | null;
   appointmentTypeIDs: number[];
-  createdDate: string;
-  expirationDate: string | null;
+  createdDate?: string;
+  expiration: string | null;
 }
 
 interface Profile {
@@ -170,30 +173,45 @@ serve(async (req) => {
       );
     }
 
-    // Get all profiles to match emails to user IDs
-    const emailsToMatch = [...new Set(certificates.map((c) => c.email.toLowerCase()))];
+    // Build email to user_id mapping
+    const emailToUserId = new Map<string, string>();
 
-    const { data: profiles, error: profilesError } = await supabaseAdmin
-      .from("profiles")
-      .select("id, email")
-      .in("email", emailsToMatch);
+    // If we have an authenticated user, use their ID directly
+    // Acuity often returns empty email in certificate objects
+    if (userId && userEmail) {
+      emailToUserId.set(userEmail.toLowerCase(), userId);
+      logStep("Using authenticated user for matching", { userId, email: userEmail });
+    } else {
+      // For batch sync without auth, get profiles for certificates that have emails
+      const emailsToMatch = [...new Set(
+        certificates
+          .map((c) => c.email?.toLowerCase())
+          .filter((e): e is string => !!e && e.length > 0)
+      )];
 
-    if (profilesError) {
-      logStep("Error fetching profiles", { error: profilesError });
-      throw new Error("Failed to fetch user profiles");
+      if (emailsToMatch.length > 0) {
+        const { data: profiles, error: profilesError } = await supabaseAdmin
+          .from("profiles")
+          .select("id, email")
+          .in("email", emailsToMatch);
+
+        if (profilesError) {
+          logStep("Error fetching profiles", { error: profilesError });
+          throw new Error("Failed to fetch user profiles");
+        }
+
+        (profiles as Profile[] || []).forEach((profile) => {
+          if (profile.email) {
+            emailToUserId.set(profile.email.toLowerCase(), profile.id);
+          }
+        });
+      }
     }
 
-    // Create email to user_id mapping
-    const emailToUserId = new Map<string, string>();
-    (profiles as Profile[] || []).forEach((profile) => {
-      if (profile.email) {
-        emailToUserId.set(profile.email.toLowerCase(), profile.id);
-      }
-    });
-
-    logStep("Matched profiles", {
+    logStep("Profile matching ready", {
       totalCertificates: certificates.length,
-      matchedProfiles: emailToUserId.size
+      matchedProfiles: emailToUserId.size,
+      hasAuthUser: !!userId
     });
 
     let syncedCount = 0;
@@ -202,10 +220,19 @@ serve(async (req) => {
 
     // Process each certificate
     for (const cert of certificates) {
-      const certUserId = emailToUserId.get(cert.email.toLowerCase());
+      // Determine user ID: use authenticated user if available, otherwise try to match by email
+      let certUserId: string | undefined;
+
+      if (userId && userEmail) {
+        // When syncing for authenticated user, all certificates belong to them
+        // (since we queried Acuity with their email)
+        certUserId = userId;
+      } else if (cert.email && cert.email.length > 0) {
+        certUserId = emailToUserId.get(cert.email.toLowerCase());
+      }
 
       if (!certUserId) {
-        logStep("No matching user for certificate", { email: cert.email, certId: cert.id });
+        logStep("No matching user for certificate", { email: cert.email || "(empty)", certId: cert.id });
         skippedCount++;
         continue;
       }
@@ -213,6 +240,27 @@ serve(async (req) => {
       // Determine package info from productID or name
       const productIdStr = String(cert.productID);
       const packageInfo = PACKAGE_MAPPING[productIdStr];
+
+      // Calculate remaining sessions based on certificate type
+      // Minutes-based: 50 min = 1 session
+      // Counts-based: direct count
+      let remainingSessions: number;
+      if (cert.type === "minutes" && cert.remainingMinutes !== null) {
+        remainingSessions = Math.floor(cert.remainingMinutes / 50);
+      } else if (cert.remainingCounts !== null) {
+        remainingSessions = cert.remainingCounts;
+      } else {
+        // Default to package info or skip
+        remainingSessions = packageInfo?.sessions || 0;
+      }
+
+      logStep("Processing certificate", {
+        certId: cert.id,
+        type: cert.type,
+        remainingMinutes: cert.remainingMinutes,
+        remainingCounts: cert.remainingCounts,
+        calculatedSessions: remainingSessions
+      });
 
       // Generate a unique identifier for this Acuity certificate
       const acuityCertId = `acuity-cert-${cert.id}`;
@@ -227,11 +275,11 @@ serve(async (req) => {
 
       if (existingPackage) {
         // Update remaining sessions if changed
-        if (existingPackage.remaining_sessions !== cert.remainingCounts) {
+        if (existingPackage.remaining_sessions !== remainingSessions) {
           const { error: updateError } = await supabaseAdmin
             .from("user_packages")
             .update({
-              remaining_sessions: cert.remainingCounts,
+              remaining_sessions: remainingSessions,
               updated_at: new Date().toISOString(),
             })
             .eq("id", existingPackage.id);
@@ -243,7 +291,7 @@ serve(async (req) => {
             logStep("Updated package sessions", {
               certId: cert.id,
               oldRemaining: existingPackage.remaining_sessions,
-              newRemaining: cert.remainingCounts
+              newRemaining: remainingSessions
             });
             syncedCount++;
           }
@@ -253,7 +301,7 @@ serve(async (req) => {
         }
       } else {
         // Create new package entry
-        const totalSessions = packageInfo?.sessions || cert.remainingCounts;
+        const totalSessions = packageInfo?.sessions || remainingSessions;
         const packageName = packageInfo?.name || cert.name || "Acuity Package";
 
         const { error: insertError } = await supabaseAdmin
@@ -263,10 +311,10 @@ serve(async (req) => {
             package_id: productIdStr,
             package_name: packageName,
             total_sessions: totalSessions,
-            remaining_sessions: cert.remainingCounts,
+            remaining_sessions: remainingSessions,
             amount_paid: packageInfo?.price || 0,
             stripe_session_id: acuityCertId, // Use this field to track Acuity cert ID
-            expires_at: cert.expirationDate || null,
+            expires_at: cert.expiration || null,
           });
 
         if (insertError) {
