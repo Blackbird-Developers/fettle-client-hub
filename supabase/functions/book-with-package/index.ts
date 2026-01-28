@@ -7,10 +7,111 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const ACUITY_API_BASE = "https://acuityscheduling.com/api/v1";
+
 const logStep = (step: string, details?: any) => {
   const detailsStr = details ? ` - ${JSON.stringify(details)}` : '';
   console.log(`[BOOK-WITH-PACKAGE] ${step}${detailsStr}`);
 };
+
+// Helper function to deduct minutes from Acuity certificate
+async function deductFromAcuityCertificate(
+  acuityUserId: string,
+  acuityApiKey: string,
+  stripeSessionId: string | null,
+  sessionMinutes: number = 50
+): Promise<{ success: boolean; error?: string }> {
+  // Check if this package is linked to an Acuity certificate
+  if (!stripeSessionId || !stripeSessionId.startsWith("acuity-cert-")) {
+    logStep("Package not linked to Acuity certificate, skipping Acuity deduction", { stripeSessionId });
+    return { success: true }; // Not an error, just not an Acuity-synced package
+  }
+
+  const certId = stripeSessionId.replace("acuity-cert-", "");
+  const authHeader = btoa(`${acuityUserId}:${acuityApiKey}`);
+
+  try {
+    // First, get the current certificate to see its type and remaining value
+    const getResponse = await fetch(`${ACUITY_API_BASE}/certificates/${certId}`, {
+      headers: {
+        Authorization: `Basic ${authHeader}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!getResponse.ok) {
+      if (getResponse.status === 404) {
+        logStep("Acuity certificate not found, may have been deleted", { certId });
+        return { success: true }; // Certificate doesn't exist in Acuity anymore
+      }
+      const errorText = await getResponse.text();
+      logStep("Failed to fetch Acuity certificate", { certId, status: getResponse.status, error: errorText });
+      return { success: false, error: `Failed to fetch certificate: ${getResponse.status}` };
+    }
+
+    const certificate = await getResponse.json();
+    logStep("Fetched Acuity certificate", {
+      certId,
+      type: certificate.type,
+      remainingMinutes: certificate.remainingMinutes,
+      remainingCounts: certificate.remainingCounts
+    });
+
+    // Determine what to deduct based on certificate type
+    let updateData: Record<string, any> = {};
+
+    if (certificate.type === "minutes" && certificate.remainingMinutes !== null) {
+      const newMinutes = Math.max(0, certificate.remainingMinutes - sessionMinutes);
+      updateData.remainingMinutes = newMinutes;
+      logStep("Deducting minutes from Acuity certificate", {
+        certId,
+        oldMinutes: certificate.remainingMinutes,
+        deducting: sessionMinutes,
+        newMinutes
+      });
+    } else if (certificate.remainingCounts !== null) {
+      const newCounts = Math.max(0, certificate.remainingCounts - 1);
+      updateData.remainingCounts = newCounts;
+      logStep("Deducting count from Acuity certificate", {
+        certId,
+        oldCounts: certificate.remainingCounts,
+        newCounts
+      });
+    } else {
+      logStep("Certificate has no deductible value, skipping", { certId, certificate });
+      return { success: true };
+    }
+
+    // Update the certificate in Acuity
+    const updateResponse = await fetch(`${ACUITY_API_BASE}/certificates/${certId}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Basic ${authHeader}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(updateData),
+    });
+
+    if (!updateResponse.ok) {
+      const errorText = await updateResponse.text();
+      logStep("Failed to update Acuity certificate", { certId, status: updateResponse.status, error: errorText });
+      return { success: false, error: `Failed to update certificate: ${updateResponse.status}` };
+    }
+
+    const updatedCert = await updateResponse.json();
+    logStep("Acuity certificate updated successfully", {
+      certId,
+      newRemainingMinutes: updatedCert.remainingMinutes,
+      newRemainingCounts: updatedCert.remainingCounts
+    });
+
+    return { success: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logStep("Error deducting from Acuity certificate", { certId, error: errorMessage });
+    return { success: false, error: errorMessage };
+  }
+}
 
 async function sendLowSessionsReminder(email: string, firstName: string, packageName: string, remainingSessions: number) {
   const resendApiKey = Deno.env.get("RESEND_API_KEY");
@@ -317,6 +418,17 @@ serve(async (req) => {
               newRemaining: userPackage.remaining_sessions - 1
             });
 
+            // Also deduct from Acuity certificate if this package is synced from Acuity
+            const acuityDeductResult = await deductFromAcuityCertificate(
+              acuityUserId,
+              acuityApiKey,
+              userPackage.stripe_session_id,
+              50 // 50 minutes per session
+            );
+            if (!acuityDeductResult.success) {
+              logStep("Acuity deduction failed (non-blocking)", { error: acuityDeductResult.error });
+            }
+
             const newRemaining = userPackage.remaining_sessions - 1;
 
             // Send emails
@@ -390,13 +502,24 @@ serve(async (req) => {
       logStep("Failed to deduct session", { error: updateError });
       // Note: appointment is already booked, log error but continue
     } else {
-      logStep("Session deducted from package", { 
-        newRemaining: userPackage.remaining_sessions - 1 
+      logStep("Session deducted from package", {
+        newRemaining: userPackage.remaining_sessions - 1
       });
+
+      // Also deduct from Acuity certificate if this package is synced from Acuity
+      const acuityDeductResult = await deductFromAcuityCertificate(
+        acuityUserId,
+        acuityApiKey,
+        userPackage.stripe_session_id,
+        50 // 50 minutes per session
+      );
+      if (!acuityDeductResult.success) {
+        logStep("Acuity deduction failed (non-blocking)", { error: acuityDeductResult.error });
+      }
 
       // Send emails for package bookings
       const newRemaining = userPackage.remaining_sessions - 1;
-      
+
       // Send credit used confirmation email
       await sendCreditUsedConfirmation(
         supabaseUrl,
