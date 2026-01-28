@@ -7,10 +7,87 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const ACUITY_API_BASE = "https://acuityscheduling.com/api/v1";
+
+// Package mapping for Acuity certificate creation
+const PACKAGE_APPOINTMENT_TYPES: Record<string, number[]> = {
+  "1122832": [], // 3 Session Bundle - empty means all appointment types
+  "996385": [],  // 6 Session Bundle
+  "1197875": [], // 9 Session Bundle
+};
+
 const logStep = (step: string, details?: any) => {
   const detailsStr = details ? ` - ${JSON.stringify(details)}` : '';
   console.log(`[CONFIRM-PACKAGE-PAYMENT] ${step}${detailsStr}`);
 };
+
+// Helper function to create certificate in Acuity
+async function createAcuityCertificate(
+  email: string,
+  firstName: string,
+  lastName: string,
+  packageId: string,
+  packageName: string,
+  sessions: number
+): Promise<{ success: boolean; certificateId?: number; error?: string }> {
+  const acuityUserId = Deno.env.get("ACUITY_USER_ID");
+  const acuityApiKey = Deno.env.get("ACUITY_API_KEY");
+
+  if (!acuityUserId || !acuityApiKey) {
+    return { success: false, error: "Acuity credentials not configured" };
+  }
+
+  const authHeader = btoa(`${acuityUserId}:${acuityApiKey}`);
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+    const certificateData = {
+      productID: parseInt(packageId, 10),
+      name: `${firstName} ${lastName}`,
+      email: email,
+      remainingCounts: sessions,
+      appointmentTypeIDs: PACKAGE_APPOINTMENT_TYPES[packageId] || [],
+    };
+
+    logStep("Creating Acuity certificate", certificateData);
+
+    const response = await fetch(`${ACUITY_API_BASE}/certificates`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${authHeader}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(certificateData),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      if (response.status === 504) {
+        logStep("Acuity API timeout (504) - certificate creation skipped");
+        return { success: false, error: "Acuity API timeout - certificate will sync later" };
+      }
+      const errorText = await response.text();
+      logStep("Acuity certificate creation failed", { status: response.status, error: errorText });
+      return { success: false, error: `Acuity API error: ${response.status}` };
+    }
+
+    const certificate = await response.json();
+    logStep("Acuity certificate created successfully", { certificateId: certificate.id });
+    return { success: true, certificateId: certificate.id };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      logStep("Acuity API request timed out");
+      return { success: false, error: "Acuity API timeout" };
+    }
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logStep("Error creating Acuity certificate", { error: errorMessage });
+    return { success: false, error: errorMessage };
+  }
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -111,6 +188,24 @@ serve(async (req) => {
 
     logStep("Package saved to database", { packageId: insertedPackage.id });
 
+    // Export to Acuity: Create certificate for two-way sync
+    // This allows users to use their credits in both systems
+    const acuityCertResult = await createAcuityCertificate(
+      metadata.email || "",
+      metadata.firstName || "",
+      metadata.lastName || "",
+      packageId,
+      packageName,
+      sessions
+    );
+
+    if (acuityCertResult.success) {
+      logStep("Acuity certificate created", { certificateId: acuityCertResult.certificateId });
+    } else {
+      // Soft failure - don't block the UI, certificate will sync later
+      logStep("Acuity certificate creation skipped", { reason: acuityCertResult.error });
+    }
+
     // Get receipt URL if available
     let receiptUrl: string | undefined;
     if (paymentIntent.latest_charge) {
@@ -133,6 +228,13 @@ serve(async (req) => {
         expiresAt: expiresAt.toISOString(),
       },
       receiptUrl,
+      acuitySync: {
+        success: acuityCertResult.success,
+        certificateId: acuityCertResult.certificateId,
+        message: acuityCertResult.success
+          ? "Certificate created in Acuity"
+          : acuityCertResult.error,
+      },
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,

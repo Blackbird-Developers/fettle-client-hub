@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -19,6 +20,45 @@ export interface UserPackage {
 
 export function useUserPackages() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const hasSyncedRef = useRef(false);
+
+  // Background sync with Acuity - runs silently without blocking UI
+  useEffect(() => {
+    if (!user?.id || hasSyncedRef.current) return;
+
+    hasSyncedRef.current = true;
+
+    // Small delay to not interfere with initial data fetch
+    const timer = setTimeout(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) return;
+
+        // Fire the sync request
+        const result = await supabase.functions.invoke('sync-acuity-packages', {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        if (result.error) {
+          console.log('[Acuity Sync] Background sync skipped:', result.error.message);
+        } else if (result.data?.synced > 0) {
+          console.log(`[Acuity Sync] Synced ${result.data.synced} packages from Acuity`);
+          // Refetch packages to show newly synced data
+          queryClient.invalidateQueries({ queryKey: ['user-packages', user.id] });
+        } else if (result.data?.skipped) {
+          console.log('[Acuity Sync] Sync skipped due to API timeout');
+        }
+      } catch (err) {
+        // Silent failure - don't disrupt user experience
+        console.log('[Acuity Sync] Background sync failed silently:', err);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [user?.id, queryClient]);
 
   return useQuery({
     queryKey: ['user-packages', user?.id],
