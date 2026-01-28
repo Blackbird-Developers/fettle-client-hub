@@ -265,13 +265,22 @@ serve(async (req) => {
       // Generate a unique identifier for this Acuity certificate
       const acuityCertId = `acuity-cert-${cert.id}`;
 
-      // Check if we already have this certificate synced
-      const { data: existingPackage } = await supabaseAdmin
+      // Check if we already have this certificate synced (check globally, not just for this user)
+      const { data: existingPackages } = await supabaseAdmin
         .from("user_packages")
-        .select("id, remaining_sessions")
-        .eq("user_id", certUserId)
-        .eq("stripe_session_id", acuityCertId)
-        .maybeSingle();
+        .select("id, user_id, remaining_sessions")
+        .eq("stripe_session_id", acuityCertId);
+
+      const existingPackage = existingPackages?.find((p: { id: string; user_id: string; remaining_sessions: number }) => p.user_id === certUserId);
+
+      if (existingPackages && existingPackages.length > 0) {
+        logStep("Found existing packages with this cert ID", {
+          certId: cert.id,
+          acuityCertId,
+          existingCount: existingPackages.length,
+          matchesUser: !!existingPackage
+        });
+      }
 
       if (existingPackage) {
         // Update remaining sessions if changed
@@ -299,10 +308,27 @@ serve(async (req) => {
           logStep("Package already synced and up to date", { certId: cert.id });
           skippedCount++;
         }
+      } else if (existingPackages && existingPackages.length > 0) {
+        // Certificate exists but for a different user - skip to avoid duplicates
+        logStep("Certificate already synced to different user, skipping", {
+          certId: cert.id,
+          existingUserId: existingPackages[0].user_id,
+          requestedUserId: certUserId
+        });
+        skippedCount++;
       } else {
         // Create new package entry
         const totalSessions = packageInfo?.sessions || remainingSessions;
         const packageName = packageInfo?.name || cert.name || "Acuity Package";
+
+        logStep("Inserting new package", {
+          certId: cert.id,
+          acuityCertId,
+          userId: certUserId,
+          packageName,
+          totalSessions,
+          remainingSessions
+        });
 
         const { error: insertError } = await supabaseAdmin
           .from("user_packages")
