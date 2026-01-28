@@ -1,5 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -18,72 +17,10 @@ export interface UserPackage {
   updated_at: string;
 }
 
-// Sync cooldown: only sync once per hour per user
-const SYNC_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
-
-function getSyncKey(userId: string): string {
-  return `acuity-sync-${userId}`;
-}
-
-function shouldSync(userId: string): boolean {
-  const key = getSyncKey(userId);
-  const lastSync = localStorage.getItem(key);
-  if (!lastSync) return true;
-
-  const lastSyncTime = parseInt(lastSync, 10);
-  return Date.now() - lastSyncTime > SYNC_COOLDOWN_MS;
-}
-
-function markSynced(userId: string): void {
-  const key = getSyncKey(userId);
-  localStorage.setItem(key, Date.now().toString());
-}
+// Note: Acuity sync is now handled in AuthContext (once per browser session)
 
 export function useUserPackages() {
   const { user } = useAuth();
-  const queryClient = useQueryClient();
-
-  // Background sync with Acuity - runs once per hour max
-  useEffect(() => {
-    if (!user?.id || !shouldSync(user.id)) return;
-
-    // Mark as synced immediately to prevent duplicate calls
-    markSynced(user.id);
-
-    // Small delay to not interfere with initial data fetch
-    const timer = setTimeout(async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.access_token) return;
-
-        console.log('[Acuity Sync] Starting background sync...');
-
-        // Fire the sync request
-        const result = await supabase.functions.invoke('sync-acuity-packages', {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        });
-
-        if (result.error) {
-          console.log('[Acuity Sync] Background sync skipped:', result.error.message);
-        } else if (result.data?.synced > 0) {
-          console.log(`[Acuity Sync] Synced ${result.data.synced} packages from Acuity`);
-          // Refetch packages to show newly synced data
-          queryClient.invalidateQueries({ queryKey: ['user-packages', user.id] });
-        } else if (result.data?.skipped) {
-          console.log('[Acuity Sync] Sync skipped due to API timeout');
-        } else {
-          console.log('[Acuity Sync] No new packages to sync');
-        }
-      } catch (err) {
-        // Silent failure - don't disrupt user experience
-        console.log('[Acuity Sync] Background sync failed silently:', err);
-      }
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [user?.id, queryClient]);
 
   return useQuery({
     queryKey: ['user-packages', user?.id],

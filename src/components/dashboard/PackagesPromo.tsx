@@ -2,11 +2,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Gift, TrendingUp, Sparkles, ArrowRight } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { PackageBookingModal } from "@/components/booking/PackageBookingModal";
+import { getAndClearPackagesIntent } from "@/pages/Packages";
 
 export function PackagesPromo() {
   const [bookingOpen, setBookingOpen] = useState(false);
+
+  // Check for packages intent (from /packages redirect)
+  useEffect(() => {
+    if (getAndClearPackagesIntent()) {
+      setBookingOpen(true);
+    }
+  }, []);
 
   return (
     <Card className="border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-background animate-fade-in overflow-hidden relative" style={{ animationDelay: "0.3s" }}>

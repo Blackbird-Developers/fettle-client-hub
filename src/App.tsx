@@ -18,6 +18,7 @@ import NotFound from "./pages/NotFound";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsConditions from "./pages/TermsConditions";
 import Admin from "./pages/Admin";
+import Packages from "./pages/Packages";
 
 const queryClient = new QueryClient();
 
@@ -42,6 +43,7 @@ const App = () => (
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsConditions />} />
+            <Route path="/packages" element={<Packages />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

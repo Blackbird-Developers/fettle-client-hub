@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Profile {
   id: string;
@@ -24,11 +25,24 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Session-based sync: clears when browser closes, persists across page navigations
+const SYNC_SESSION_KEY = 'acuity-sync-done';
+
+function hasAlreadySyncedThisSession(): boolean {
+  return sessionStorage.getItem(SYNC_SESSION_KEY) === 'true';
+}
+
+function markSyncedThisSession(): void {
+  sessionStorage.setItem(SYNC_SESSION_KEY, 'true');
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const syncTriggeredRef = useRef(false);
 
   useEffect(() => {
     // Set up auth state listener FIRST
@@ -52,9 +66,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      
+
       if (session?.user) {
         fetchProfile(session.user.id);
+        // Trigger Acuity sync once per browser session
+        syncAcuityPackages(session.access_token, session.user.id);
       }
       setLoading(false);
     });
@@ -71,6 +87,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (!error && data) {
       setProfile(data);
+    }
+  };
+
+  // Sync Acuity packages once per browser session
+  const syncAcuityPackages = async (accessToken: string, userId: string) => {
+    // Prevent multiple sync attempts in the same render cycle
+    if (syncTriggeredRef.current || hasAlreadySyncedThisSession()) return;
+
+    syncTriggeredRef.current = true;
+    markSyncedThisSession();
+
+    try {
+      console.log('[Acuity Sync] Starting session sync...');
+
+      const result = await supabase.functions.invoke('sync-acuity-packages', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (result.error) {
+        console.log('[Acuity Sync] Sync skipped:', result.error.message);
+      } else if (result.data?.synced > 0) {
+        console.log(`[Acuity Sync] Synced ${result.data.synced} packages from Acuity`);
+        // Invalidate packages query to refresh data across the app
+        queryClient.invalidateQueries({ queryKey: ['user-packages', userId] });
+      } else if (result.data?.skipped) {
+        console.log('[Acuity Sync] Sync skipped due to API timeout');
+      } else {
+        console.log('[Acuity Sync] No new packages to sync');
+      }
+    } catch (err) {
+      console.log('[Acuity Sync] Sync failed silently:', err);
     }
   };
 
