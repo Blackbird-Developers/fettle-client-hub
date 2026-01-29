@@ -96,7 +96,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Update timezone if it's different from browser's timezone
       const browserTimezone = getBrowserTimezone();
-      console.log('[Timezone] Current:', data.timezone, '| Browser:', browserTimezone);
       if (data.timezone !== browserTimezone) {
         updateTimezone(userId, browserTimezone);
       }
@@ -105,17 +104,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Update user's timezone in the database
   const updateTimezone = async (userId: string, timezone: string) => {
-    console.log('[Timezone] Attempting to update timezone to:', timezone);
     const { error } = await supabase
       .from('profiles')
       .update({ timezone })
       .eq('user_id', userId);
 
-    if (error) {
-      console.error('[Timezone] Failed to update:', error.message);
-    } else {
+    if (!error) {
       setProfile(prev => prev ? { ...prev, timezone } : null);
-      console.log('[Timezone] Successfully updated to:', timezone);
     }
   };
 
