@@ -91,7 +91,11 @@ serve(async (req) => {
       notes,
       calendarName,
       intakeFormFields,
+      timezone,
     } = metadata;
+
+    // Default timezone if none provided
+    const userTimezone = timezone || 'Europe/Dublin';
 
     // STEP 1: Create appointment in Acuity FIRST (before capturing payment)
     const acuityAuth = btoa(`${acuityUserId}:${acuityApiKey}`);
@@ -355,11 +359,17 @@ serve(async (req) => {
           year: 'numeric',
           month: 'long',
           day: 'numeric',
+          timeZone: userTimezone,
         });
         const formattedTime = sessionDate.toLocaleTimeString('en-IE', {
           hour: '2-digit',
           minute: '2-digit',
+          timeZone: userTimezone,
         });
+        const timezoneAbbr = sessionDate.toLocaleTimeString('en-IE', {
+          timeZoneName: 'short',
+          timeZone: userTimezone,
+        }).split(' ').pop() || '';
 
         const amountPaid = (paymentIntent.amount / 100).toFixed(2);
 
@@ -383,7 +393,7 @@ serve(async (req) => {
                 <p style="margin: 5px 0;"><strong>Session:</strong> ${appointmentTypeName || 'Therapy Session'}</p>
                 <p style="margin: 5px 0;"><strong>Therapist:</strong> ${calendarName || 'Your therapist'}</p>
                 <p style="margin: 5px 0;"><strong>Date:</strong> ${formattedDate}</p>
-                <p style="margin: 5px 0;"><strong>Time:</strong> ${formattedTime}</p>
+                <p style="margin: 5px 0;"><strong>Time:</strong> ${formattedTime} ${timezoneAbbr}</p>
               </div>
 
               <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 20px;">

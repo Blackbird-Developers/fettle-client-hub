@@ -9,7 +9,13 @@ interface Profile {
   email: string;
   first_name: string | null;
   last_name: string | null;
+  timezone: string | null;
   created_at: string;
+}
+
+// Detect user's browser timezone
+function getBrowserTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
 interface AuthContextType {
@@ -87,6 +93,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (!error && data) {
       setProfile(data);
+
+      // Update timezone if it's different from browser's timezone
+      const browserTimezone = getBrowserTimezone();
+      if (data.timezone !== browserTimezone) {
+        updateTimezone(userId, browserTimezone);
+      }
+    }
+  };
+
+  // Update user's timezone in the database
+  const updateTimezone = async (userId: string, timezone: string) => {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ timezone })
+      .eq('user_id', userId);
+
+    if (!error) {
+      setProfile(prev => prev ? { ...prev, timezone } : null);
+      console.log('[Timezone] Updated to:', timezone);
     }
   };
 

@@ -44,6 +44,7 @@ serve(async (req) => {
       phone,
       notes,
       intakeFormFields, // JSON string of Acuity intake form fields
+      timezone, // User's timezone for email formatting
     } = body;
 
     logStep("Parsed booking data", { 
@@ -118,6 +119,7 @@ serve(async (req) => {
       phone: phone || "",
       notes: notes || "",
       intakeFormFields: intakeFormFields || "", // Acuity intake form fields as JSON string
+      timezone: timezone || "Europe/Dublin", // User's timezone for email formatting
     };
 
     // Create PaymentIntent with manual capture - payment is authorized but not captured until booking succeeds

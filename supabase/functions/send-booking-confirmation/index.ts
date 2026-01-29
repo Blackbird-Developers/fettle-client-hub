@@ -18,25 +18,40 @@ interface BookingEmailRequest {
   amount: number;
   currency: string;
   receiptUrl?: string;
+  timezone?: string;
 }
 
-const formatDate = (datetime: string) => {
+// Default to Europe/Dublin (Ireland) if no timezone provided
+const DEFAULT_TIMEZONE = 'Europe/Dublin';
+
+const formatDate = (datetime: string, timezone: string) => {
   const date = new Date(datetime);
-  return date.toLocaleDateString('en-IE', { 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric' 
+  return date.toLocaleDateString('en-IE', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: timezone
   });
 };
 
-const formatTime = (datetime: string) => {
+const formatTime = (datetime: string, timezone: string) => {
   const date = new Date(datetime);
-  return date.toLocaleTimeString('en-IE', { 
-    hour: 'numeric', 
+  return date.toLocaleTimeString('en-IE', {
+    hour: 'numeric',
     minute: '2-digit',
-    hour12: true 
+    hour12: true,
+    timeZone: timezone
   });
+};
+
+// Get short timezone name (e.g., "CET", "IST", "GMT")
+const getTimezoneAbbr = (datetime: string, timezone: string) => {
+  const date = new Date(datetime);
+  return date.toLocaleTimeString('en-IE', {
+    timeZoneName: 'short',
+    timeZone: timezone
+  }).split(' ').pop() || '';
 };
 
 const formatAmount = (amount: number, currency: string) => {
@@ -52,19 +67,24 @@ const handler = async (req: Request): Promise<Response> => {
   }
 
   try {
-    const { 
-      to, 
-      firstName, 
-      sessionType, 
-      therapistName, 
-      datetime, 
+    const {
+      to,
+      firstName,
+      sessionType,
+      therapistName,
+      datetime,
       duration,
       amount,
       currency,
-      receiptUrl 
+      receiptUrl,
+      timezone
     }: BookingEmailRequest = await req.json();
 
-    console.log("Sending booking confirmation to:", to);
+    // Use provided timezone or default to Ireland
+    const userTimezone = timezone || DEFAULT_TIMEZONE;
+    const timezoneAbbr = getTimezoneAbbr(datetime, userTimezone);
+
+    console.log("Sending booking confirmation to:", to, "timezone:", userTimezone);
 
     const emailHtml = `
 <!DOCTYPE html>
@@ -110,12 +130,12 @@ const handler = async (req: Request): Promise<Response> => {
         
         <div style="margin-bottom: 16px;">
           <p style="color: #666; font-size: 12px; text-transform: uppercase; margin: 0 0 4px 0;">Date</p>
-          <p style="color: #1a1a1a; font-size: 16px; margin: 0; font-weight: 500;">${formatDate(datetime)}</p>
+          <p style="color: #1a1a1a; font-size: 16px; margin: 0; font-weight: 500;">${formatDate(datetime, userTimezone)}</p>
         </div>
-        
+
         <div style="margin-bottom: 16px;">
           <p style="color: #666; font-size: 12px; text-transform: uppercase; margin: 0 0 4px 0;">Time</p>
-          <p style="color: #1a1a1a; font-size: 16px; margin: 0; font-weight: 500;">${formatTime(datetime)} (${duration} minutes)</p>
+          <p style="color: #1a1a1a; font-size: 16px; margin: 0; font-weight: 500;">${formatTime(datetime, userTimezone)} ${timezoneAbbr} (${duration} minutes)</p>
         </div>
         
         <div style="border-top: 1px solid #e0e0e0; padding-top: 16px; margin-top: 16px;">
@@ -161,7 +181,7 @@ const handler = async (req: Request): Promise<Response> => {
     const emailResponse = await resend.emails.send({
       from: "Fettle <noreply@fettle.ie>",
       to: [to],
-      subject: `Booking Confirmed: ${sessionType} on ${formatDate(datetime)}`,
+      subject: `Booking Confirmed: ${sessionType} on ${formatDate(datetime, userTimezone)}`,
       html: emailHtml,
     });
 

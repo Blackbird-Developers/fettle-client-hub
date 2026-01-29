@@ -427,6 +427,8 @@ export function BookingModal({
                         phone: formData.phone || undefined,
                         notes: formData.notes || undefined,
                         intakeFormFields,
+                        // User's timezone for email formatting
+                        timezone: profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
                     },
                 }
             );
@@ -518,6 +520,8 @@ export function BookingModal({
                 notes: formData.notes || undefined,
                 // Acuity intake form fields (JSON stringified for Stripe metadata)
                 intakeFormFields: JSON.stringify(intakeFormFields),
+                // User's timezone for email formatting
+                timezone: profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
             };
 
             console.log(

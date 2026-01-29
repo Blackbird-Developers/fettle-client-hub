@@ -133,6 +133,9 @@ async function sendLowSessionsReminder(email: string, firstName: string, package
   }
 }
 
+// Default timezone if none provided
+const DEFAULT_TIMEZONE = 'Europe/Dublin';
+
 async function sendCreditUsedConfirmation(
   supabaseUrl: string,
   supabaseServiceKey: string,
@@ -141,9 +144,16 @@ async function sendCreditUsedConfirmation(
   packageName: string,
   appointment: any,
   remainingSessions: number,
-  totalSessions: number
+  totalSessions: number,
+  timezone: string = DEFAULT_TIMEZONE
 ) {
   try {
+    const userTimezone = timezone || DEFAULT_TIMEZONE;
+    const timezoneAbbr = new Date(appointment.datetime).toLocaleTimeString('en-IE', {
+      timeZoneName: 'short',
+      timeZone: userTimezone
+    }).split(' ').pop() || '';
+
     const response = await fetch(`${supabaseUrl}/functions/v1/send-credit-used-confirmation`, {
       method: 'POST',
       headers: {
@@ -154,16 +164,18 @@ async function sendCreditUsedConfirmation(
         email,
         firstName,
         packageName,
-        sessionDate: new Date(appointment.datetime).toLocaleDateString('en-IE', { 
-          weekday: 'long', 
-          year: 'numeric', 
-          month: 'long', 
-          day: 'numeric' 
+        sessionDate: new Date(appointment.datetime).toLocaleDateString('en-IE', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          timeZone: userTimezone
         }),
-        sessionTime: new Date(appointment.datetime).toLocaleTimeString('en-IE', { 
-          hour: '2-digit', 
-          minute: '2-digit' 
-        }),
+        sessionTime: new Date(appointment.datetime).toLocaleTimeString('en-IE', {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: userTimezone
+        }) + ` ${timezoneAbbr}`,
         therapistName: appointment.calendar || 'Your Therapist',
         remainingSessions,
         totalSessions,
@@ -264,6 +276,7 @@ serve(async (req) => {
       phone,
       notes,
       intakeFormFields, // Acuity intake form fields array
+      timezone, // User's timezone for email formatting
     } = body;
 
     logStep("Received booking data", { packageId, appointmentTypeID, datetime });
@@ -404,7 +417,8 @@ serve(async (req) => {
               userPackage.package_name,
               retryAppointment,
               newRemaining,
-              userPackage.total_sessions
+              userPackage.total_sessions,
+              timezone
             );
 
             if (newRemaining <= 2 && newRemaining > 0) {
@@ -487,7 +501,8 @@ serve(async (req) => {
         userPackage.package_name,
         appointment,
         newRemaining,
-        userPackage.total_sessions
+        userPackage.total_sessions,
+        timezone
       );
       
       // Send low credit reminder if 2 or fewer sessions remaining (but not 0)
