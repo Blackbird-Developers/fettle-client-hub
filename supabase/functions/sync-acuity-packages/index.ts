@@ -268,10 +268,10 @@ serve(async (req) => {
       // Check if we already have this certificate synced (check globally, not just for this user)
       const { data: existingPackages } = await supabaseAdmin
         .from("user_packages")
-        .select("id, user_id, remaining_sessions")
+        .select("id, user_id, remaining_sessions, expires_at")
         .eq("stripe_session_id", acuityCertId);
 
-      const existingPackage = existingPackages?.find((p: { id: string; user_id: string; remaining_sessions: number }) => p.user_id === certUserId);
+      const existingPackage = existingPackages?.find((p: { id: string; user_id: string; remaining_sessions: number; expires_at: string | null }) => p.user_id === certUserId);
 
       if (existingPackages && existingPackages.length > 0) {
         logStep("Found existing packages with this cert ID", {
@@ -283,12 +283,17 @@ serve(async (req) => {
       }
 
       if (existingPackage) {
-        // Update remaining sessions if changed
-        if (existingPackage.remaining_sessions !== remainingSessions) {
+        // Update remaining sessions and/or expires_at if changed
+        const newExpiresAt = cert.expiration || null;
+        const sessionsChanged = existingPackage.remaining_sessions !== remainingSessions;
+        const expirationChanged = existingPackage.expires_at !== newExpiresAt;
+
+        if (sessionsChanged || expirationChanged) {
           const { error: updateError } = await supabaseAdmin
             .from("user_packages")
             .update({
               remaining_sessions: remainingSessions,
+              expires_at: newExpiresAt,
               updated_at: new Date().toISOString(),
             })
             .eq("id", existingPackage.id);
@@ -297,10 +302,12 @@ serve(async (req) => {
             logStep("Error updating package", { error: updateError, certId: cert.id });
             errors.push(`Failed to update cert ${cert.id}: ${updateError.message}`);
           } else {
-            logStep("Updated package sessions", {
+            logStep("Updated package", {
               certId: cert.id,
               oldRemaining: existingPackage.remaining_sessions,
-              newRemaining: remainingSessions
+              newRemaining: remainingSessions,
+              oldExpiresAt: existingPackage.expires_at,
+              newExpiresAt: newExpiresAt
             });
             syncedCount++;
           }
