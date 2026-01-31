@@ -139,12 +139,28 @@
   .shadow-soft {
     box-shadow: var(--shadow-soft);
   }
-  
+
   .shadow-card {
     box-shadow: var(--shadow-card);
   }
-  
+
   .shadow-elevated {
     box-shadow: var(--shadow-elevated);
+  }
+
+  /* Thin visible scrollbar for dialog overflow */
+  .dialog-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .dialog-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .dialog-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .dialog-scrollbar::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
   }
 }
