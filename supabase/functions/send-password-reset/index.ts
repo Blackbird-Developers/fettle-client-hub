@@ -61,7 +61,7 @@ serve(async (req) => {
       logStep("Failed to generate reset link", { error: linkError.message });
       // Check if the error is due to user not existing
       const msg = linkError.message?.toLowerCase() || "";
-      if (msg.includes("user not found") || msg.includes("unable to validate")) {
+      if (msg.includes("not found") || msg.includes("unable to validate")) {
         throw new Error("no_account");
       }
       throw new Error(linkError.message);
