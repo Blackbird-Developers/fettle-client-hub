@@ -171,7 +171,7 @@ serve(async (req) => {
         error: error.message
       }),
       {
-        status: isNoAccount ? 400 : 500,
+        status: isNoAccount ? 200 : 500,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       }
     );
