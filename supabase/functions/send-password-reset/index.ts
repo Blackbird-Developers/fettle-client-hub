@@ -59,6 +59,11 @@ serve(async (req) => {
 
     if (linkError) {
       logStep("Failed to generate reset link", { error: linkError.message });
+      // Check if the error is due to user not existing
+      const msg = linkError.message?.toLowerCase() || "";
+      if (msg.includes("user not found") || msg.includes("unable to validate")) {
+        throw new Error("no_account");
+      }
       throw new Error(linkError.message);
     }
 
@@ -159,13 +164,14 @@ serve(async (req) => {
     });
   } catch (error: any) {
     logStep("ERROR", { message: error.message });
+    const isNoAccount = error.message === "no_account";
     return new Response(
       JSON.stringify({
         success: false,
         error: error.message
       }),
       {
-        status: 500,
+        status: isNoAccount ? 400 : 500,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       }
     );

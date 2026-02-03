@@ -105,6 +105,7 @@ export function BookingModal({
         email: '',
         phone: '',
         notes: '',
+        partnerName: '',
     });
 
     // Intake form checkboxes (required by Acuity)
@@ -407,6 +408,13 @@ export function BookingModal({
                     { id: 9292394, value: 'yes' },  // Contact consent
                     { id: 9292405, value: 'yes' },  // Terms accepted
                   ]
+                : sessionCategory === 'couples'
+                ? [
+                    { id: 10466116, value: 'yes' },                    // Over 18 confirmation
+                    { id: 9292394, value: 'yes' },                     // Contact consent
+                    { id: 9292405, value: 'yes' },                     // Terms accepted
+                    { id: 10104284, value: formData.partnerName },     // Partner's name & pronouns
+                  ]
                 : [
                     { id: 10466116, value: 'yes' }, // Over 18 confirmation
                     { id: 9292394, value: 'yes' },  // Contact consent
@@ -499,6 +507,13 @@ export function BookingModal({
                     { id: 13686405, value: 'yes' }, // Youth Therapy consent acknowledgment
                     { id: 9292394, value: 'yes' },  // Contact consent
                     { id: 9292405, value: 'yes' },  // Terms accepted
+                  ]
+                : sessionCategory === 'couples'
+                ? [
+                    { id: 10466116, value: 'yes' },                    // Over 18 confirmation
+                    { id: 9292394, value: 'yes' },                     // Contact consent
+                    { id: 9292405, value: 'yes' },                     // Terms accepted
+                    { id: 10104284, value: formData.partnerName },     // Partner's name & pronouns
                   ]
                 : [
                     { id: 10466116, value: 'yes' }, // Over 18 confirmation
@@ -1084,6 +1099,22 @@ export function BookingModal({
                                 placeholder="+353 87 123 4567"
                             />
                         </div>
+                        {sessionCategory === 'couples' && (
+                            <div className="space-y-2">
+                                <Label htmlFor="partnerName">Partner's Name & Pronouns</Label>
+                                <Input
+                                    id="partnerName"
+                                    value={formData.partnerName}
+                                    onChange={(e) =>
+                                        setFormData((prev) => ({
+                                            ...prev,
+                                            partnerName: e.target.value,
+                                        }))
+                                    }
+                                    placeholder="e.g. Jane Doe (she/her)"
+                                />
+                            </div>
+                        )}
                         <div className="space-y-2">
                             <Label htmlFor="notes">Notes (optional)</Label>
                             <Textarea
@@ -1201,7 +1232,8 @@ export function BookingModal({
                                     !formData.firstName ||
                                     !formData.lastName ||
                                     !formData.email ||
-                                    !allIntakeFieldsChecked
+                                    !allIntakeFieldsChecked ||
+                                    (sessionCategory === 'couples' && !formData.partnerName)
                                 }>
                                 Review Booking
                             </Button>

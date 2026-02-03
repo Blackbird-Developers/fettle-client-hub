@@ -109,7 +109,7 @@ serve(async (req) => {
     };
 
     if (calendarID) appointmentBody.calendarID = parseInt(calendarID);
-    if (phone) appointmentBody.phone = phone;
+    appointmentBody.phone = phone || "0000000000";
     if (notes) appointmentBody.notes = notes;
 
     // Add Acuity intake form fields if provided

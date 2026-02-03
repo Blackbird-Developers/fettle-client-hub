@@ -32,9 +32,13 @@ export default function ForgotPassword() {
 
       setIsEmailSent(true);
     } catch (error: any) {
+      const message = error.message || "";
+      const isNoAccount = message.includes("no_account");
       toast({
-        title: "Error",
-        description: error.message || "Failed to send reset email",
+        title: isNoAccount ? "Account not found" : "Error",
+        description: isNoAccount
+          ? "We couldn't find an account with that email. If you're an existing Fettle client, you may need to create a new account on our platform first."
+          : message || "Failed to send reset email",
         variant: "destructive",
       });
     } finally {
