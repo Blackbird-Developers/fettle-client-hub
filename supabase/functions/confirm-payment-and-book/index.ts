@@ -226,8 +226,13 @@ serve(async (req) => {
             const requiredFieldId = parseInt(requiredFieldMatch[1]);
             logStep("Found required field, retrying with it", { requiredFieldId });
 
-            // Add the required field with 'yes' value
-            appointmentBody.fields = [{ id: requiredFieldId, value: 'yes' }];
+            // Add the required field to existing fields (preserve others already present)
+            const existingFields: { id: number; value: string }[] = appointmentBody.fields || [];
+            const fieldAlreadyPresent = existingFields.some((f) => f.id === requiredFieldId);
+            appointmentBody.fields = fieldAlreadyPresent
+              ? existingFields
+              : [...existingFields, { id: requiredFieldId, value: 'yes' }];
+            logStep("Fields for final retry", { fields: appointmentBody.fields });
 
             const finalRetryResponse = await fetch("https://acuityscheduling.com/api/v1/appointments", {
               method: "POST",
