@@ -44,13 +44,17 @@ export function useUserPackages() {
   });
 }
 
+// Returns true if a package has an expiry date in the past
+const isPackageExpired = (pkg: UserPackage): boolean =>
+  pkg.expires_at !== null && new Date(pkg.expires_at) < new Date();
+
 export function useActivePackages() {
   const { data: packages, ...rest } = useUserPackages();
 
-  // Filter to only packages with remaining sessions
-  // Note: Credits don't expire, so we don't filter by expires_at
+  // Filter to only packages with remaining sessions that have not expired
   const activePackages = packages?.filter(pkg => {
     if (pkg.remaining_sessions <= 0) return false;
+    if (isPackageExpired(pkg)) return false;
     return true;
   }) || [];
 
@@ -72,14 +76,21 @@ export function usePackageStats() {
 
   // All packages (including depleted)
   const allPackages = packages || [];
-  
-  // Active packages with remaining sessions
-  const activePackages = allPackages.filter(pkg => pkg.remaining_sessions > 0);
-  
-  // Depleted packages (had sessions, now at 0)
+
+  // Active: has sessions remaining and not expired
+  const activePackages = allPackages.filter(
+    pkg => pkg.remaining_sessions > 0 && !isPackageExpired(pkg)
+  );
+
+  // Depleted: all sessions used up
   const depletedPackages = allPackages.filter(pkg => pkg.remaining_sessions === 0);
 
-  // Calculate totals
+  // Expired but still had sessions remaining — user couldn't use them in time
+  const expiredWithCreditsPackages = allPackages.filter(
+    pkg => pkg.remaining_sessions > 0 && isPackageExpired(pkg)
+  );
+
+  // Calculate totals (only from non-expired active packages)
   const totalRemainingSessions = activePackages.reduce(
     (sum, pkg) => sum + pkg.remaining_sessions,
     0
@@ -97,22 +108,27 @@ export function usePackageStats() {
 
   // Has ever purchased a package
   const hasPackageHistory = allPackages.length > 0;
-  
-  // Has active credits
+
+  // Has usable (non-expired) credits
   const hasActiveCredits = totalRemainingSessions > 0;
-  
-  // Has depleted all credits (had packages but none remaining)
-  const allCreditsDepleted = hasPackageHistory && !hasActiveCredits;
+
+  // Has packages that expired with credits still on them
+  const hasExpiredCredits = expiredWithCreditsPackages.length > 0;
+
+  // All credits depleted: has history but no active or expired-with-credits packages
+  const allCreditsDepleted = hasPackageHistory && !hasActiveCredits && !hasExpiredCredits;
 
   return {
     allPackages,
     activePackages,
     depletedPackages,
+    expiredWithCreditsPackages,
     totalRemainingSessions,
     totalSessionsUsed,
     totalSessionsPurchased,
     hasPackageHistory,
     hasActiveCredits,
+    hasExpiredCredits,
     allCreditsDepleted,
     ...rest,
   };

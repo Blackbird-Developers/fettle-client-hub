@@ -458,12 +458,13 @@ export function BookingModal({
             });
         } catch (error) {
             console.error('Package booking error:', error);
+            const errorMessage = error instanceof Error ? error.message : 'Failed to book session';
+            const isExpired = errorMessage.toLowerCase().includes('expired');
             toast({
-                title: 'Booking Failed',
-                description:
-                    error instanceof Error
-                        ? error.message
-                        : 'Failed to book session',
+                title: isExpired ? 'Package Expired' : 'Booking Failed',
+                description: isExpired
+                    ? 'This package has expired and can no longer be used. For assistance, please contact support at hello@fettle.ie'
+                    : errorMessage,
                 variant: 'destructive',
             });
         } finally {
