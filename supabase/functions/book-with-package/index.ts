@@ -240,25 +240,25 @@ serve(async (req) => {
     const acuityApiKey = Deno.env.get("ACUITY_API_KEY");
 
     if (!supabaseUrl || !supabaseServiceKey || !supabaseAnonKey) {
-      throw new Error("Supabase configuration missing");
+      throw new Error("Our booking system is temporarily unavailable. Please contact hello@fettle.ie for support.");
     }
 
     if (!acuityUserId || !acuityApiKey) {
-      throw new Error("Acuity configuration missing");
+      throw new Error("Our scheduling system is temporarily unavailable. Please contact hello@fettle.ie for support.");
     }
 
     // Authenticate user
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      throw new Error("No authorization header");
+      throw new Error("You are not logged in. Please sign in and try again.");
     }
 
     const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
     const token = authHeader.replace("Bearer ", "");
     const { data: userData, error: userError } = await supabaseAuth.auth.getUser(token);
-    
+
     if (userError || !userData.user) {
-      throw new Error("User not authenticated");
+      throw new Error("Your session has expired. Please sign in again and retry.");
     }
 
     const userId = userData.user.id;
@@ -282,7 +282,7 @@ serve(async (req) => {
     logStep("Received booking data", { packageId, appointmentTypeID, datetime });
 
     if (!packageId || !appointmentTypeID || !datetime || !firstName || !lastName || !email) {
-      throw new Error("Missing required fields");
+      throw new Error("Please fill in all required booking details (name, email, session type, and time).");
     }
 
     // Use service role to access/update packages
@@ -297,15 +297,15 @@ serve(async (req) => {
       .single();
 
     if (packageError || !userPackage) {
-      throw new Error("Package not found");
+      throw new Error("We couldn't find this package on your account. Please contact hello@fettle.ie for support.");
     }
 
     if (userPackage.remaining_sessions <= 0) {
-      throw new Error("No remaining sessions in this package");
+      throw new Error("You have no remaining sessions in this package. Please purchase a new package or contact hello@fettle.ie for support.");
     }
 
     if (userPackage.expires_at && new Date(userPackage.expires_at) < new Date()) {
-      throw new Error("This package has expired");
+      throw new Error("This package has expired and can no longer be used. Please contact hello@fettle.ie for support.");
     }
 
     logStep("Package verified", {
@@ -338,7 +338,11 @@ serve(async (req) => {
     };
 
     if (calendarID) appointmentData.calendarID = calendarID;
-    if (notes) appointmentData.notes = notes;
+
+    // Add bundle info to notes so it shows on the Acuity appointment
+    const creditsAfterBooking = userPackage.remaining_sessions - 1;
+    const bundleNote = `[Bundle: ${userPackage.package_name} | Credits remaining: ${creditsAfterBooking}/${userPackage.total_sessions}]`;
+    appointmentData.notes = notes ? `${notes}\n\n${bundleNote}` : bundleNote;
 
     // If package is linked to Acuity certificate, include code for auto-deduction
     if (acuityCertificateCode) {
@@ -460,7 +464,19 @@ serve(async (req) => {
         logStep("Retry also failed", { error: retryErrorText });
       }
 
-      throw new Error(`Failed to book appointment: ${errorText}`);
+      // Parse Acuity error for user-friendly message
+      let userMessage = "We couldn't complete your booking at this time.";
+      if (errorText.includes("not available")) {
+        userMessage = "This time slot is no longer available. Please select a different time.";
+      } else if (errorText.includes("already booked") || errorText.includes("conflict")) {
+        userMessage = "This time slot has already been booked. Please select a different time.";
+      } else if (errorText.includes("past")) {
+        userMessage = "This time slot is in the past. Please select a future time.";
+      } else if (errorText.includes("required_field")) {
+        userMessage = "Some required information is missing. Please try again or contact hello@fettle.ie for support.";
+      }
+      logStep("Acuity user-facing error", { original: errorText, userMessage });
+      throw new Error(`${userMessage} Please contact hello@fettle.ie for support.`);
     }
 
     const appointment = await acuityResponse.json();

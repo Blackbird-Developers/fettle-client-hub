@@ -458,13 +458,21 @@ export function BookingModal({
             });
         } catch (error) {
             console.error('Package booking error:', error);
-            const errorMessage = error instanceof Error ? error.message : 'Failed to book session';
+            const errorMessage = error instanceof Error ? error.message : 'Failed to book session. Please contact hello@fettle.ie for support.';
             const isExpired = errorMessage.toLowerCase().includes('expired');
+            const isNoSessions = errorMessage.toLowerCase().includes('no remaining');
+            const isNotFound = errorMessage.toLowerCase().includes('couldn\'t find');
+            const isAuth = errorMessage.toLowerCase().includes('sign in') || errorMessage.toLowerCase().includes('session has expired');
+
+            let title = 'Booking Failed';
+            if (isExpired) title = 'Package Expired';
+            else if (isNoSessions) title = 'No Sessions Remaining';
+            else if (isNotFound) title = 'Package Not Found';
+            else if (isAuth) title = 'Authentication Required';
+
             toast({
-                title: isExpired ? 'Package Expired' : 'Booking Failed',
-                description: isExpired
-                    ? 'This package has expired and can no longer be used. For assistance, please contact support at hello@fettle.ie'
-                    : errorMessage,
+                title,
+                description: errorMessage,
                 variant: 'destructive',
             });
         } finally {
@@ -590,12 +598,12 @@ export function BookingModal({
             }
         } catch (error) {
             console.error('[Stripe Debug] Error:', error);
+            const errorMessage = error instanceof Error
+                ? error.message
+                : 'Failed to initialize payment. Please try again or contact hello@fettle.ie for support.';
             toast({
                 title: 'Payment Setup Failed',
-                description:
-                    error instanceof Error
-                        ? error.message
-                        : 'Failed to initialize payment. Please try again.',
+                description: errorMessage,
                 variant: 'destructive',
             });
         } finally {

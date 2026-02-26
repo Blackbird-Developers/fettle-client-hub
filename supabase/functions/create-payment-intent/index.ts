@@ -25,7 +25,7 @@ serve(async (req) => {
       prefix: stripeKey ? stripeKey.substring(0, 10) + '...' : 'NOT SET' 
     });
     
-    if (!stripeKey) throw new Error("RESTRICTED_API_KEY is not set");
+    if (!stripeKey) throw new Error("Our payment system is temporarily unavailable. Please contact hello@fettle.ie for support.");
 
     const rawBody = await req.text();
     logStep("Raw request body", { body: rawBody });
@@ -67,7 +67,7 @@ serve(async (req) => {
         hasLastName: !!lastName,
         hasEmail: !!email
       });
-      throw new Error("Missing required booking fields");
+      throw new Error("Please fill in all required booking details (name, email, session type, and time).");
     }
 
     // Parse price - Acuity returns price as string like "72.99"
@@ -78,7 +78,7 @@ serve(async (req) => {
     });
     
     if (priceValue <= 0) {
-      throw new Error("Invalid or missing price for this appointment type");
+      throw new Error("This session type does not have a valid price. Please contact hello@fettle.ie for support.");
     }
 
     // Convert to cents for Stripe

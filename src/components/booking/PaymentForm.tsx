@@ -123,12 +123,20 @@ export function PaymentForm({ paymentIntentId, amount, onSuccess, onBack }: Paym
         onSuccess(data);
       } else {
         console.error('[PaymentForm Debug] Unexpected status:', paymentIntent.status);
-        throw new Error(`Payment was not completed. Status: ${paymentIntent.status}`);
+        throw new Error('Your payment could not be completed. Please try again or contact hello@fettle.ie for support.');
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Something went wrong. Please contact hello@fettle.ie for support.';
+      const isSlotError = errorMessage.toLowerCase().includes('time slot') || errorMessage.toLowerCase().includes('no longer available');
+      const isCardError = errorMessage.toLowerCase().includes('card') || errorMessage.toLowerCase().includes('payment details');
+
+      let title = 'Payment Failed';
+      if (isSlotError) title = 'Time Slot Unavailable';
+      else if (isCardError) title = 'Card Error';
+
       toast({
-        title: 'Payment Failed',
-        description: error instanceof Error ? error.message : 'Something went wrong',
+        title,
+        description: errorMessage,
         variant: 'destructive',
       });
       setPaymentSucceeded(false);

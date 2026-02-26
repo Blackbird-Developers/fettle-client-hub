@@ -24,13 +24,13 @@ serve(async (req) => {
     const acuityApiKey = Deno.env.get("ACUITY_API_KEY");
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
 
-    if (!stripeKey) throw new Error("RESTRICTED_API_KEY is not set");
-    if (!acuityUserId || !acuityApiKey) throw new Error("Acuity credentials not set");
+    if (!stripeKey) throw new Error("Our payment system is temporarily unavailable. Please contact hello@fettle.ie for support.");
+    if (!acuityUserId || !acuityApiKey) throw new Error("Our scheduling system is temporarily unavailable. Please contact hello@fettle.ie for support.");
 
     const { paymentIntentId } = await req.json();
 
     if (!paymentIntentId) {
-      throw new Error("Missing paymentIntentId");
+      throw new Error("Payment information is missing. Please try again or contact hello@fettle.ie for support.");
     }
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
@@ -48,7 +48,7 @@ serve(async (req) => {
     const validStatuses = ["requires_capture", "succeeded", "processing"];
 
     if (!validStatuses.includes(paymentIntent.status)) {
-      throw new Error(`Payment not ready for capture. Status: ${paymentIntent.status}`);
+      throw new Error("Your payment could not be processed. Please try again or contact hello@fettle.ie for support.");
     }
 
     // Track whether we need to capture the payment later
@@ -74,7 +74,7 @@ serve(async (req) => {
       } else if (recheckIntent.status === "requires_capture") {
         needsCapture = true;
       } else {
-        throw new Error(`Payment still not ready after processing. Status: ${recheckIntent.status}`);
+        throw new Error("Your payment is still being processed. Please wait a moment and try again, or contact hello@fettle.ie for support.");
       }
     }
 
@@ -313,7 +313,18 @@ serve(async (req) => {
         logStep("Payment already captured - cannot cancel. Manual refund may be needed.");
       }
 
-      throw new Error(`Acuity booking failed: ${errorText}`);
+      // Parse Acuity error for user-friendly message
+      let userMessage = "We couldn't complete your booking at this time.";
+      if (errorText.includes("not available")) {
+        userMessage = "This time slot is no longer available. Please select a different time.";
+      } else if (errorText.includes("already booked") || errorText.includes("conflict")) {
+        userMessage = "This time slot has already been booked by someone else. Please select a different time.";
+      } else if (errorText.includes("past")) {
+        userMessage = "This time slot is in the past. Please select a future time.";
+      } else if (errorText.includes("required_field")) {
+        userMessage = "Some required information is missing. Please try again.";
+      }
+      throw new Error(`${userMessage} Your card has not been charged. Please contact hello@fettle.ie for support.`);
     }
 
     const appointment = await acuityResponse.json();
