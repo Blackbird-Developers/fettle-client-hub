@@ -351,9 +351,15 @@ serve(async (req) => {
     }
 
     // Add Acuity intake form fields if provided
+    // Filter out entries with empty/null values — Acuity treats empty strings as "not submitted"
     if (intakeFormFields && Array.isArray(intakeFormFields)) {
-      appointmentData.fields = intakeFormFields;
-      logStep("Adding intake form fields", { fields: intakeFormFields });
+      const validFields = intakeFormFields.filter(
+        (f: { id: number; value: any }) => f.value !== null && f.value !== undefined && f.value !== ''
+      );
+      if (validFields.length > 0) {
+        appointmentData.fields = validFields;
+        logStep("Adding intake form fields", { fields: validFields });
+      }
     }
 
     const acuityResponse = await fetch('https://acuityscheduling.com/api/v1/appointments', {

@@ -399,6 +399,16 @@ export function BookingModal({
             return;
         }
 
+        // Guard: partner name is required for couples sessions
+        if (sessionCategory === 'couples' && !formData.partnerName.trim()) {
+            toast({
+                title: 'Partner name required',
+                description: "Please go back to the details step and enter your partner's name.",
+                variant: 'destructive',
+            });
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             // Build intake form fields based on session category
