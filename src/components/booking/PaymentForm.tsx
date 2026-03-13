@@ -55,9 +55,26 @@ export function PaymentForm({ paymentIntentId, amount, onSuccess, onBack }: Paym
       console.log('Elements submitted successfully');
       console.log('Confirming payment with Stripe...');
 
+      // Save booking data to sessionStorage BEFORE confirmPayment — if the payment
+      // method (Revolut, PayPal, etc.) requires a redirect, the page will reload
+      // and all React state will be lost. We persist it here so we can recover on return.
+      try {
+        sessionStorage.setItem('fettleRedirectPayment', JSON.stringify({
+          type: 'session',
+          paymentIntentId,
+          savedAt: Date.now(),
+        }));
+      } catch (e) {
+        console.error('Failed to save redirect payment data:', e);
+      }
+
       // Then confirm payment with Stripe
+      const returnUrl = window.location.origin + window.location.pathname;
       const { error: paymentError, paymentIntent } = await stripe.confirmPayment({
         elements,
+        confirmParams: {
+          return_url: returnUrl,
+        },
         redirect: 'if_required',
       });
 
