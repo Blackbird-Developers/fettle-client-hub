@@ -94,9 +94,10 @@ export function PaymentForm({ paymentIntentId, amount, onSuccess, onBack }: Paym
         throw new Error(paymentError.message || 'Payment failed');
       }
 
-      // With manual capture, status will be 'requires_capture' after card authorization
-      // For Google Pay / Apple Pay, it might also return 'processing' briefly or 'succeeded'
-      const validStatuses = ['requires_capture', 'succeeded', 'processing'];
+      // Auto-capture: status will be 'succeeded' for most payment methods
+      // 'requires_capture' only if manual capture was used (legacy)
+      // 'processing' can appear briefly for Google Pay / Apple Pay
+      const validStatuses = ['succeeded', 'requires_capture', 'processing'];
 
       if (paymentIntent && validStatuses.includes(paymentIntent.status)) {
         setPaymentSucceeded(true);

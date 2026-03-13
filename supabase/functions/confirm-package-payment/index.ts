@@ -199,8 +199,23 @@ serve(async (req) => {
       sessions
     );
 
-    if (acuityCertResult.success) {
+    if (acuityCertResult.success && acuityCertResult.certificateId) {
       logStep("Acuity certificate created", { certificateId: acuityCertResult.certificateId });
+
+      // Link the DB row to the Acuity certificate so that:
+      // 1. sync-acuity-packages recognises this row and won't create a duplicate
+      // 2. book-with-package can auto-deduct from the Acuity certificate
+      const acuityCertId = `acuity-cert-${acuityCertResult.certificateId}`;
+      const { error: linkError } = await supabaseAdmin
+        .from('user_packages')
+        .update({ stripe_session_id: acuityCertId })
+        .eq('id', insertedPackage.id);
+
+      if (linkError) {
+        logStep("Failed to link Acuity cert to package row", { error: linkError });
+      } else {
+        logStep("Linked package row to Acuity certificate", { acuityCertId });
+      }
     } else {
       // Soft failure - don't block the UI, certificate will sync later
       logStep("Acuity certificate creation skipped", { reason: acuityCertResult.error });

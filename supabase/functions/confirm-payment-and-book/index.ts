@@ -298,7 +298,7 @@ serve(async (req) => {
         }
       }
 
-      // Cancel the payment authorization since booking failed (only if not already captured)
+      // Reverse the payment since booking failed
       if (needsCapture) {
         logStep("Canceling payment authorization due to booking failure");
         try {
@@ -310,7 +310,14 @@ serve(async (req) => {
           logStep("Failed to cancel payment authorization", { error: cancelError });
         }
       } else {
-        logStep("Payment already captured - cannot cancel. Manual refund may be needed.");
+        // Payment was auto-captured (Revolut, PayPal, etc.) — issue a full refund
+        logStep("Payment already captured — issuing automatic refund due to booking failure");
+        try {
+          await stripe.refunds.create({ payment_intent: paymentIntentId });
+          logStep("Refund issued successfully");
+        } catch (refundError) {
+          logStep("CRITICAL: Booking failed AND refund failed — manual refund needed", { error: refundError });
+        }
       }
 
       // Parse Acuity error for user-friendly message
@@ -324,7 +331,10 @@ serve(async (req) => {
       } else if (errorText.includes("required_field")) {
         userMessage = "Some required information is missing. Please try again.";
       }
-      throw new Error(`${userMessage} Your card has not been charged. Please contact hello@fettle.ie for support.`);
+      const chargeNote = needsCapture
+        ? "Your card has not been charged."
+        : "A full refund has been issued to your payment method.";
+      throw new Error(`${userMessage} ${chargeNote} Please contact hello@fettle.ie for support.`);
     }
 
     const appointment = await acuityResponse.json();

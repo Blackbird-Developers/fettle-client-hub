@@ -122,12 +122,13 @@ serve(async (req) => {
       timezone: timezone || "Europe/Dublin", // User's timezone for email formatting
     };
 
-    // Create PaymentIntent with manual capture - payment is authorized but not captured until booking succeeds
+    // Create PaymentIntent with auto-capture to support all payment methods
+    // (Revolut Pay, PayPal etc. do NOT support manual capture)
+    // If Acuity booking fails after payment, a refund is issued instead
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amountInCents,
       currency: "eur",
       customer: customerId,
-      capture_method: "manual", // Authorize only - capture after successful Acuity booking
       description: `${appointmentTypeName || "Therapy Session"} with ${calendarName || "therapist"} on ${new Date(datetime).toLocaleDateString()}`,
       metadata: bookingMetadata,
       automatic_payment_methods: {

@@ -324,42 +324,92 @@ serve(async (req) => {
         });
         skippedCount++;
       } else {
-        // Create new package entry
-        const totalSessions = packageInfo?.sessions || remainingSessions;
-        const packageName = packageInfo?.name || cert.name || "Acuity Package";
+        // Before inserting a new row, check if this Acuity cert was created by
+        // confirm-package-payment but not yet linked (stripe_session_id = pi_...).
+        // Match by: same user, same package_id, created within 1 hour of each other.
+        const certCreatedDate = cert.createdDate ? new Date(cert.createdDate) : null;
+        let linkedExisting = false;
 
-        logStep("Inserting new package", {
-          certId: cert.id,
-          acuityCertId,
-          userId: certUserId,
-          packageName,
-          totalSessions,
-          remainingSessions
-        });
+        if (certCreatedDate) {
+          const windowStart = new Date(certCreatedDate.getTime() - 60 * 60 * 1000).toISOString();
+          const windowEnd = new Date(certCreatedDate.getTime() + 60 * 60 * 1000).toISOString();
 
-        const { error: insertError } = await supabaseAdmin
-          .from("user_packages")
-          .insert({
-            user_id: certUserId,
-            package_id: productIdStr,
-            package_name: packageName,
-            total_sessions: totalSessions,
-            remaining_sessions: remainingSessions,
-            amount_paid: packageInfo?.price || 0,
-            stripe_session_id: acuityCertId, // Use this field to track Acuity cert ID
-            expires_at: cert.expiration || null,
-          });
+          const { data: piRows } = await supabaseAdmin
+            .from("user_packages")
+            .select("id, stripe_session_id, remaining_sessions")
+            .eq("user_id", certUserId)
+            .eq("package_id", productIdStr)
+            .like("stripe_session_id", "pi_%")
+            .gte("created_at", windowStart)
+            .lte("created_at", windowEnd);
 
-        if (insertError) {
-          logStep("Error inserting package", { error: insertError, certId: cert.id });
-          errors.push(`Failed to insert cert ${cert.id}: ${insertError.message}`);
-        } else {
-          logStep("Created new package from Acuity certificate", {
+          if (piRows && piRows.length > 0) {
+            // Found a matching app-created row — link it to this Acuity cert
+            const piRow = piRows[0];
+            const { error: linkError } = await supabaseAdmin
+              .from("user_packages")
+              .update({
+                stripe_session_id: acuityCertId,
+                remaining_sessions: remainingSessions,
+                expires_at: cert.expiration || null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", piRow.id);
+
+            if (linkError) {
+              logStep("Error linking pi_ row to Acuity cert", { error: linkError, piRowId: piRow.id, certId: cert.id });
+            } else {
+              logStep("Linked existing app-created package to Acuity certificate", {
+                piRowId: piRow.id,
+                oldStripeSessionId: piRow.stripe_session_id,
+                newStripeSessionId: acuityCertId,
+                oldRemaining: piRow.remaining_sessions,
+                newRemaining: remainingSessions,
+              });
+              linkedExisting = true;
+              syncedCount++;
+            }
+          }
+        }
+
+        if (!linkedExisting) {
+          // Create new package entry
+          const totalSessions = packageInfo?.sessions || remainingSessions;
+          const packageName = packageInfo?.name || cert.name || "Acuity Package";
+
+          logStep("Inserting new package", {
             certId: cert.id,
+            acuityCertId,
             userId: certUserId,
-            packageName
+            packageName,
+            totalSessions,
+            remainingSessions
           });
-          syncedCount++;
+
+          const { error: insertError } = await supabaseAdmin
+            .from("user_packages")
+            .insert({
+              user_id: certUserId,
+              package_id: productIdStr,
+              package_name: packageName,
+              total_sessions: totalSessions,
+              remaining_sessions: remainingSessions,
+              amount_paid: packageInfo?.price || 0,
+              stripe_session_id: acuityCertId, // Use this field to track Acuity cert ID
+              expires_at: cert.expiration || null,
+            });
+
+          if (insertError) {
+            logStep("Error inserting package", { error: insertError, certId: cert.id });
+            errors.push(`Failed to insert cert ${cert.id}: ${insertError.message}`);
+          } else {
+            logStep("Created new package from Acuity certificate", {
+              certId: cert.id,
+              userId: certUserId,
+              packageName
+            });
+            syncedCount++;
+          }
         }
       }
     }
