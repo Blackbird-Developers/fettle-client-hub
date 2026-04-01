@@ -83,7 +83,7 @@ export function PackagePaymentForm({
         throw new Error(paymentError.message || 'Payment failed');
       }
 
-      if (paymentIntent?.status === 'succeeded') {
+      if (paymentIntent && (paymentIntent.status === 'succeeded' || paymentIntent.status === 'requires_capture')) {
         setPaymentSucceeded(true);
 
         // Confirm and save the package
@@ -95,8 +95,15 @@ export function PackagePaymentForm({
         if (data.error) throw new Error(data.error);
 
         onSuccess(data);
+      } else if (paymentIntent?.status === 'processing') {
+        // Some payment methods (bank debits) take time to process
+        toast({
+          title: 'Payment Processing',
+          description: 'Your payment is being processed. Your package will be activated once it clears.',
+        });
+        setPaymentSucceeded(true);
       } else {
-        throw new Error('Payment was not completed');
+        throw new Error(`Payment was not completed (status: ${paymentIntent?.status})`);
       }
     } catch (error) {
       toast({

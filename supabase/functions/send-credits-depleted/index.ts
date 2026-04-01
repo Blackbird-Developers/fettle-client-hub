@@ -39,7 +39,7 @@ serve(async (req) => {
     logStep("Sending credits depleted email", { email, totalSessionsCompleted });
 
     await resend.emails.send({
-      from: "Fettle <onboarding@resend.dev>",
+      from: "Fettle <noreply@notifications.fettle.ie>",
       to: [email],
       subject: "You've completed your session package! 🎉",
       html: `

@@ -78,7 +78,7 @@ serve(async (req) => {
         `).join('');
 
         await resend.emails.send({
-          from: "Fettle <onboarding@resend.dev>",
+          from: "Fettle <noreply@notifications.fettle.ie>",
           to: [profile.email],
           subject: `Your Monthly Credit Summary - ${totalRemaining} sessions available`,
           html: `

@@ -77,7 +77,7 @@ async function sendLowSessionsReminder(email: string, firstName: string, package
 
   try {
     await resend.emails.send({
-      from: "Fettle <onboarding@resend.dev>",
+      from: "Fettle <noreply@notifications.fettle.ie>",
       to: [email],
       subject: `Only ${remainingSessions} Session${remainingSessions === 1 ? '' : 's'} Remaining in Your Package`,
       html: `

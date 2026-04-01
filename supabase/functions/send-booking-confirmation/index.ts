@@ -179,7 +179,7 @@ const handler = async (req: Request): Promise<Response> => {
     `;
 
     const emailResponse = await resend.emails.send({
-      from: "Fettle <noreply@fettle.ie>",
+      from: "Fettle <noreply@notifications.fettle.ie>",
       to: [to],
       subject: `Booking Confirmed: ${sessionType} on ${formatDate(datetime, userTimezone)}`,
       html: emailHtml,

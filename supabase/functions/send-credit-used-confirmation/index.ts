@@ -55,7 +55,7 @@ serve(async (req) => {
     const progressPercent = Math.round((remainingSessions / totalSessions) * 100);
 
     const emailResponse = await resend.emails.send({
-      from: "Fettle <onboarding@resend.dev>",
+      from: "Fettle <noreply@notifications.fettle.ie>",
       to: [email],
       subject: `Session Booked - ${remainingSessions} credits remaining`,
       html: `

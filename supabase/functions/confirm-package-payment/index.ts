@@ -159,8 +159,65 @@ serve(async (req) => {
 
     logStep("Package details", { packageId, packageName, sessions });
 
-    // Save to user_packages table
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Idempotency check: if this payment intent was already processed, return the existing package
+    // Check for exact paymentIntentId match first
+    const { data: existingByPi } = await supabaseAdmin
+      .from('user_packages')
+      .select('id, package_name, total_sessions, remaining_sessions, expires_at, stripe_session_id')
+      .eq('stripe_session_id', paymentIntentId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (existingByPi) {
+      logStep("Payment already processed (exact pi match)", { id: existingByPi.id });
+      return new Response(JSON.stringify({
+        success: true,
+        package: {
+          id: existingByPi.id,
+          name: existingByPi.package_name,
+          sessions: existingByPi.total_sessions,
+          remaining: existingByPi.remaining_sessions,
+          expiresAt: existingByPi.expires_at,
+        },
+        alreadyProcessed: true,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    // Also check if this function already ran and linked an Acuity cert (within last 5 min)
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: recentLinked } = await supabaseAdmin
+      .from('user_packages')
+      .select('id, package_name, total_sessions, remaining_sessions, expires_at')
+      .eq('user_id', userId)
+      .eq('package_id', packageId)
+      .like('stripe_session_id', 'acuity-cert-%')
+      .gte('created_at', fiveMinAgo)
+      .maybeSingle();
+
+    if (recentLinked) {
+      logStep("Payment already processed (recently linked to Acuity cert)", { id: recentLinked.id });
+      return new Response(JSON.stringify({
+        success: true,
+        package: {
+          id: recentLinked.id,
+          name: recentLinked.package_name,
+          sessions: recentLinked.total_sessions,
+          remaining: recentLinked.remaining_sessions,
+          expiresAt: recentLinked.expires_at,
+        },
+        alreadyProcessed: true,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    // Save to user_packages table
 
     // Calculate expiry date (1 year from now)
     const expiresAt = new Date();

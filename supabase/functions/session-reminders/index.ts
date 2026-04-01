@@ -128,7 +128,7 @@ serve(async (req: Request): Promise<Response> => {
           const firstName = profile.first_name || 'there';
 
           const emailResponse = await resend.emails.send({
-            from: "Fettle Therapy <reminders@fettle.ie>",
+            from: "Fettle <noreply@notifications.fettle.ie>",
             to: [profile.email],
             subject: "We miss you! Time to book your next session?",
             html: `

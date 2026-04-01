@@ -9,6 +9,7 @@ interface RedirectState {
   isHandling: boolean;
   status: 'idle' | 'processing' | 'success' | 'error';
   message?: string;
+  type?: 'session' | 'package';
 }
 
 /**
@@ -111,7 +112,7 @@ export function usePaymentRedirectReturn() {
             description: 'Your session has been booked successfully.',
           });
 
-          setState({ isHandling: false, status: 'success' });
+          setState({ isHandling: false, status: 'success', type: 'session' });
         } else if (savedData.type === 'package') {
           const { data, error: fnError } = await supabase.functions.invoke('confirm-package-payment', {
             body: { paymentIntentId },
@@ -125,7 +126,7 @@ export function usePaymentRedirectReturn() {
             description: 'Your package has been activated successfully.',
           });
 
-          setState({ isHandling: false, status: 'success' });
+          setState({ isHandling: false, status: 'success', type: 'package' });
         }
       } else if (paymentIntent.status === 'processing') {
         toast({

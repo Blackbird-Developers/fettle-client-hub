@@ -443,7 +443,7 @@ serve(async (req) => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            from: "Fettle <noreply@fettle.ie>",
+            from: "Fettle <noreply@notifications.fettle.ie>",
             to: [email],
             subject: `Booking Confirmed: ${appointmentTypeName || 'Therapy Session'} on ${formattedDate}`,
             html: emailHtml,

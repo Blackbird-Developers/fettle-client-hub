@@ -198,7 +198,7 @@ serve(async (req) => {
     `;
 
     const emailResponse = await resend.emails.send({
-      from: "Fettle Therapy <notifications@fettle.ie>",
+      from: "Fettle <noreply@notifications.fettle.ie>",
       to: [email],
       subject: `🎉 Your ${packageName} is confirmed - ${sessions} sessions ready to book!`,
       html: emailHtml,

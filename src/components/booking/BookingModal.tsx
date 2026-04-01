@@ -1707,7 +1707,17 @@ export function BookingModal({
     return (
         <Dialog
             open={open}
-            onOpenChange={step === 'success' ? handleClose : onOpenChange}>
+            onOpenChange={(newOpen) => {
+                if (!newOpen && (step === 'payment' || isSubmitting)) {
+                    // Prevent closing during payment or while booking is being submitted
+                    return;
+                }
+                if (step === 'success') {
+                    handleClose();
+                } else {
+                    onOpenChange(newOpen);
+                }
+            }}>
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle>{getStepTitle()}</DialogTitle>
