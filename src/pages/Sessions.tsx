@@ -23,8 +23,9 @@ import { useAcuityAppointments, AcuityAppointment } from "@/hooks/useAcuity";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Calendar, Clock, User, Video, MapPin, X, Loader2, AlertTriangle, RefreshCw } from "lucide-react";
+import { Plus, Calendar, Clock, User, Video, MapPin, X, Loader2, AlertTriangle, RefreshCw, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toSlug } from "@/components/dashboard/MyTherapist";
 
 function AcuitySessionCard({ 
   appointment, 
@@ -113,9 +114,20 @@ function AcuitySessionCard({
             <div className="flex-1 min-w-0 overflow-hidden">
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="min-w-0 flex-1">
-                  <h3 className="font-heading font-semibold text-card-foreground text-base sm:text-lg truncate">
-                    {appointment.calendar}
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-heading font-semibold text-card-foreground text-base sm:text-lg truncate">
+                      {appointment.calendar}
+                    </h3>
+                    <a
+                      href={`https://fettle.ie/our-therapists/${toSlug(appointment.calendar)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:text-primary/80 shrink-0"
+                      title={`View ${appointment.calendar}'s profile`}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  </div>
                   <p className="text-sm text-muted-foreground truncate">{appointment.type}</p>
                 </div>
                 <div className="shrink-0">
@@ -218,17 +230,34 @@ function AcuitySessionCard({
                 </div>
               )}
 
-              {/* Rebook button for past sessions (completed or cancelled) */}
-              {!isUpcoming && onRebook && (
+              {/* Rebook & View Profile buttons for past sessions (completed or cancelled) */}
+              {!isUpcoming && (
                 <div className="flex flex-wrap gap-2 sm:gap-3 mt-4">
-                  <Button 
-                    size="sm" 
+                  {onRebook && (
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      className="gap-1.5 text-xs sm:text-sm"
+                      onClick={() => onRebook(appointment.calendarID, appointment.calendar)}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      Rebook with {appointment.calendar.split(' ')[0]}
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
                     variant="outline"
                     className="gap-1.5 text-xs sm:text-sm"
-                    onClick={() => onRebook(appointment.calendarID, appointment.calendar)}
+                    asChild
                   >
-                    <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                    Rebook with {appointment.calendar.split(' ')[0]}
+                    <a
+                      href={`https://fettle.ie/our-therapists/${toSlug(appointment.calendar)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      View Profile
+                    </a>
                   </Button>
                 </div>
               )}
