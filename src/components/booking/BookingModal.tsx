@@ -40,10 +40,12 @@ import {
     CheckCircle,
     Gift,
     Star,
+    ExternalLink,
+    ArrowRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
-import { TherapistAvatar } from '@/components/dashboard/MyTherapist';
+import { TherapistAvatar, toSlug } from '@/components/dashboard/MyTherapist';
 import { useTherapistImages, type TherapistProfile } from '@/hooks/useTherapistImages';
 
 // Initialize Stripe with debugging
@@ -732,13 +734,13 @@ export function BookingModal({
         const imageUrl = therapistImages.get(therapist.id);
         const accreditationText = getAccreditationText(tProfile?.accreditation || null);
         const tags = (tProfile?.tags || []).slice(0, 3);
+        const profileUrl = `https://fettle.ie/our-therapists/${toSlug(therapist.name)}`;
 
         return (
-            <button
+            <div
                 key={therapist.id}
-                onClick={() => handleSelectTherapist(therapist.id)}
                 className={cn(
-                    'w-full p-4 rounded-xl border-2 text-left transition-all hover:border-primary/50 hover:bg-accent/50',
+                    'w-full p-4 rounded-xl border-2 text-left transition-all',
                     selectedCalendar === therapist.id
                         ? 'border-primary bg-primary/5'
                         : 'border-border'
@@ -783,7 +785,35 @@ export function BookingModal({
                         )}
                     </div>
                 </div>
-            </button>
+
+                {/* Action buttons */}
+                <div className="flex gap-2 mt-3">
+                    <Button
+                        size="sm"
+                        className="flex-1 gap-1.5"
+                        onClick={() => handleSelectTherapist(therapist.id)}
+                    >
+                        Book Now
+                        <ArrowRight className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 gap-1.5"
+                        asChild
+                    >
+                        <a
+                            href={profileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            View Profile
+                        </a>
+                    </Button>
+                </div>
+            </div>
         );
     };
 
