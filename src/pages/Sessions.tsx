@@ -23,20 +23,23 @@ import { useAcuityAppointments, AcuityAppointment } from "@/hooks/useAcuity";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Calendar, Clock, User, Video, MapPin, X, Loader2, AlertTriangle, RefreshCw, ExternalLink } from "lucide-react";
+import { Plus, Calendar, Clock, Video, MapPin, X, Loader2, AlertTriangle, RefreshCw, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { toSlug } from "@/components/dashboard/MyTherapist";
+import { toSlug, TherapistAvatar } from "@/components/dashboard/MyTherapist";
+import { useTherapistImages } from "@/hooks/useTherapistImages";
 
 function AcuitySessionCard({ 
   appointment, 
   onCancel,
   onRebook,
-  clientEmail
+  clientEmail,
+  therapistImageUrl,
 }: { 
   appointment: AcuityAppointment; 
   onCancel?: () => void;
   onRebook?: (calendarId: number, calendarName: string) => void;
   clientEmail?: string;
+  therapistImageUrl?: string;
 }) {
   const [isCancelling, setIsCancelling] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
@@ -106,9 +109,12 @@ function AcuitySessionCard({
         <CardContent className="p-4 sm:p-6">
           <div className="flex gap-3 sm:gap-4 flex-col sm:flex-row sm:items-start">
             {/* Therapist Avatar */}
-            <div className="h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-              <User className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-            </div>
+            <TherapistAvatar
+              name={appointment.calendar}
+              calendarId={appointment.calendarID}
+              imageUrl={therapistImageUrl}
+              size="md"
+            />
 
             {/* Session Details */}
             <div className="flex-1 min-w-0 overflow-hidden">
@@ -337,7 +343,8 @@ function SessionSkeleton() {
 export default function Sessions() {
   const { user } = useAuth();
   const { appointments, loading, error, refetch } = useAcuityAppointments(user?.email);
-  
+  const { images: therapistImages } = useTherapistImages();
+
   // State for rebook modal
   const [rebookOpen, setRebookOpen] = useState(false);
   const [rebookCalendarId, setRebookCalendarId] = useState<number | undefined>();
@@ -417,6 +424,7 @@ export default function Sessions() {
                 appointment={appointment} 
                 onCancel={refetch}
                 clientEmail={user?.email}
+                therapistImageUrl={therapistImages.get(appointment.calendarID)}
               />
             ))
           ) : (
@@ -442,6 +450,7 @@ export default function Sessions() {
                 appointment={appointment} 
                 clientEmail={user?.email}
                 onRebook={handleRebook}
+                therapistImageUrl={therapistImages.get(appointment.calendarID)}
               />
             ))
           ) : (

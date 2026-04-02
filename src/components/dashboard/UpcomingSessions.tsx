@@ -3,12 +3,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronRight, Calendar, Clock, User, Video, MapPin } from "lucide-react";
+import { ChevronRight, Calendar, Clock, Video, MapPin } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAcuityAppointments, AcuityAppointment } from "@/hooks/useAcuity";
 import { useAuth } from "@/contexts/AuthContext";
+import { TherapistAvatar } from "@/components/dashboard/MyTherapist";
+import { useTherapistImages } from "@/hooks/useTherapistImages";
 
-function CompactSessionCard({ appointment }: { appointment: AcuityAppointment }) {
+function CompactSessionCard({ appointment, therapistImageUrl }: { appointment: AcuityAppointment; therapistImageUrl?: string }) {
   const dateTime = parseISO(appointment.datetime);
   const isVideo = appointment.location?.toLowerCase().includes('video') || 
                   appointment.location?.toLowerCase().includes('online') ||
@@ -18,9 +20,12 @@ function CompactSessionCard({ appointment }: { appointment: AcuityAppointment })
     <Card className="group transition-all duration-300 hover:shadow-elevated border-border/50">
       <CardContent className="p-4">
         <div className="flex gap-4 items-center">
-          <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-            <User className="h-5 w-5 text-primary" />
-          </div>
+          <TherapistAvatar
+            name={appointment.calendar}
+            calendarId={appointment.calendarID}
+            imageUrl={therapistImageUrl}
+            size="sm"
+          />
 
           <div className="flex-1 min-w-0 overflow-hidden">
             <div className="flex items-start justify-between gap-2 mb-1">
@@ -90,6 +95,7 @@ function SessionSkeleton() {
 export function UpcomingSessions() {
   const { user } = useAuth();
   const { appointments, loading, error } = useAcuityAppointments(user?.email);
+  const { images: therapistImages } = useTherapistImages();
   
   const upcomingSessions = appointments
     .filter(apt => !apt.canceled && !isPast(parseISO(apt.datetime)))
@@ -128,7 +134,11 @@ export function UpcomingSessions() {
           </Card>
         ) : upcomingSessions.length > 0 ? (
           upcomingSessions.map((appointment) => (
-            <CompactSessionCard key={appointment.id} appointment={appointment} />
+            <CompactSessionCard
+              key={appointment.id}
+              appointment={appointment}
+              therapistImageUrl={therapistImages.get(appointment.calendarID)}
+            />
           ))
         ) : (
           <Card className="border-border/50">

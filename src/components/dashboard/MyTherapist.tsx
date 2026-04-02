@@ -1,11 +1,12 @@
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { User, ExternalLink, CalendarPlus } from "lucide-react";
+import { ExternalLink, CalendarPlus } from "lucide-react";
 import { useAcuityAppointments } from "@/hooks/useAcuity";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTherapistImages } from "@/hooks/useTherapistImages";
 import { BookingModal } from "@/components/booking/BookingModal";
 import {
   Carousel,
@@ -25,15 +26,82 @@ export function toSlug(name: string): string {
     .replace(/\s+/g, "-");
 }
 
+// Get initials from a therapist name
+function getInitials(name: string): string {
+  const parts = name.trim().split(" ");
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return name.substring(0, 2).toUpperCase();
+}
+
 interface TherapistInfo {
   name: string;
   id: number;
   count: number;
 }
 
+/** Reusable therapist avatar with image from fettle.ie API, falls back to initials */
+export function TherapistAvatar({
+  name,
+  calendarId,
+  imageUrl,
+  size = "md",
+}: {
+  name: string;
+  calendarId?: number;
+  imageUrl?: string;
+  size?: "sm" | "md" | "lg";
+}) {
+  const [imgError, setImgError] = useState(false);
+
+  // Reset error state when imageUrl changes
+  useEffect(() => {
+    setImgError(false);
+  }, [imageUrl]);
+
+  const sizeClasses = {
+    sm: "h-10 w-10",
+    md: "h-14 w-14",
+    lg: "h-16 w-16",
+  };
+  const textClasses = {
+    sm: "text-sm",
+    md: "text-base",
+    lg: "text-lg",
+  };
+
+  const showImage = imageUrl && !imgError;
+
+  return (
+    <div
+      className={cn(
+        sizeClasses[size],
+        "rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center",
+        !showImage && "bg-primary/10"
+      )}
+    >
+      {showImage ? (
+        <img
+          src={imageUrl}
+          alt={name}
+          className="h-full w-full object-cover"
+          onError={() => setImgError(true)}
+          referrerPolicy="no-referrer"
+        />
+      ) : (
+        <span className={cn(textClasses[size], "text-primary font-semibold")}>
+          {getInitials(name)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function MyTherapist() {
   const { user } = useAuth();
   const { appointments, loading } = useAcuityAppointments(user?.email);
+  const { images: therapistImages } = useTherapistImages();
   const [bookingOpen, setBookingOpen] = useState(false);
   const [selectedTherapist, setSelectedTherapist] = useState<TherapistInfo | null>(null);
   const [api, setApi] = useState<CarouselApi>();
@@ -47,7 +115,7 @@ export function MyTherapist() {
       setActiveIndex(api.selectedScrollSnap());
     };
 
-    onSelect(); // set initial
+    onSelect();
     api.on("select", onSelect);
     return () => {
       api.off("select", onSelect);
@@ -98,11 +166,57 @@ export function MyTherapist() {
 
   if (therapists.length === 0) return null;
 
+  // Render a single therapist card (used for both single and carousel)
+  const renderTherapistCard = (therapist: TherapistInfo) => {
+    const profileUrl = `https://fettle.ie/our-therapists/${toSlug(therapist.name)}`;
+    const imageUrl = therapistImages.get(therapist.id);
+
+    return (
+      <div>
+        <div className="flex items-center gap-4 mb-4">
+          <TherapistAvatar
+            name={therapist.name}
+            calendarId={therapist.id}
+            imageUrl={imageUrl}
+            size="md"
+          />
+          <div className="min-w-0 flex-1">
+            <h3 className="font-heading font-semibold text-foreground text-base truncate">
+              {therapist.name}
+            </h3>
+            <Badge variant="secondary" className="mt-1 text-xs">
+              {therapist.count} session{therapist.count !== 1 ? "s" : ""} together
+            </Badge>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button
+            size="sm"
+            className="flex-1 gap-1.5"
+            onClick={() => handleBookSession(therapist)}
+          >
+            <CalendarPlus className="h-4 w-4" />
+            Book Session
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-1 gap-1.5"
+            asChild
+          >
+            <a href={profileUrl} target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="h-4 w-4" />
+              View Profile
+            </a>
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   // Single therapist — no carousel needed
   if (therapists.length === 1) {
-    const therapist = therapists[0];
-    const profileUrl = `https://fettle.ie/our-therapists/${toSlug(therapist.name)}`;
-
     return (
       <>
         <Card className="border-border/50 animate-fade-in overflow-hidden">
@@ -110,42 +224,7 @@ export function MyTherapist() {
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
               Your Therapist
             </p>
-
-            <div className="flex items-center gap-4 mb-4">
-              <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                <User className="h-7 w-7 text-primary" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="font-heading font-semibold text-foreground text-base truncate">
-                  {therapist.name}
-                </h3>
-                <Badge variant="secondary" className="mt-1 text-xs">
-                  {therapist.count} session{therapist.count !== 1 ? "s" : ""} together
-                </Badge>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Button
-                size="sm"
-                className="flex-1 gap-1.5"
-                onClick={() => handleBookSession(therapist)}
-              >
-                <CalendarPlus className="h-4 w-4" />
-                Book Session
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="flex-1 gap-1.5"
-                asChild
-              >
-                <a href={profileUrl} target="_blank" rel="noopener noreferrer">
-                  <ExternalLink className="h-4 w-4" />
-                  View Profile
-                </a>
-              </Button>
-            </div>
+            {renderTherapistCard(therapists[0])}
           </CardContent>
         </Card>
 
@@ -174,50 +253,11 @@ export function MyTherapist() {
             className="w-full"
           >
             <CarouselContent className="-ml-2">
-              {therapists.map((therapist) => {
-                const profileUrl = `https://fettle.ie/our-therapists/${toSlug(therapist.name)}`;
-                return (
-                  <CarouselItem key={therapist.id} className="pl-2 basis-full">
-                    <div>
-                      <div className="flex items-center gap-4 mb-4">
-                        <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                          <User className="h-7 w-7 text-primary" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <h3 className="font-heading font-semibold text-foreground text-base truncate">
-                            {therapist.name}
-                          </h3>
-                          <Badge variant="secondary" className="mt-1 text-xs">
-                            {therapist.count} session{therapist.count !== 1 ? "s" : ""} together
-                          </Badge>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <Button
-                          size="sm"
-                          className="flex-1 gap-1.5"
-                          onClick={() => handleBookSession(therapist)}
-                        >
-                          <CalendarPlus className="h-4 w-4" />
-                          Book Session
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="flex-1 gap-1.5"
-                          asChild
-                        >
-                          <a href={profileUrl} target="_blank" rel="noopener noreferrer">
-                            <ExternalLink className="h-4 w-4" />
-                            View Profile
-                          </a>
-                        </Button>
-                      </div>
-                    </div>
-                  </CarouselItem>
-                );
-              })}
+              {therapists.map((therapist) => (
+                <CarouselItem key={therapist.id} className="pl-2 basis-full">
+                  {renderTherapistCard(therapist)}
+                </CarouselItem>
+              ))}
             </CarouselContent>
 
             {/* Active dot indicators */}

@@ -32,7 +32,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { PaymentForm } from './PaymentForm';
 import {
     Clock,
-    User,
     Calendar as CalendarIcon,
     CreditCard,
     Users,
@@ -40,9 +39,12 @@ import {
     Loader2,
     CheckCircle,
     Gift,
+    Star,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
+import { TherapistAvatar } from '@/components/dashboard/MyTherapist';
+import { useTherapistImages, type TherapistProfile } from '@/hooks/useTherapistImages';
 
 // Initialize Stripe with debugging
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as
@@ -158,6 +160,7 @@ export function BookingModal({
     const { types, loading: typesLoading } = useAcuityAppointmentTypes();
     const { calendars, loading: calendarsLoading } = useAcuityCalendars();
     const { appointments } = useAcuityAppointments(profile?.email);
+    const { images: therapistImages, profiles: therapistProfiles } = useTherapistImages();
 
     // Use viewingMonth for availability query - this updates when user navigates calendar
     const { dates: availableDates, loading: datesLoading } =
@@ -700,44 +703,89 @@ export function BookingModal({
         setStep('date');
     };
 
+    /** Format a tag string for display: "cbt" → "CBT", "anxiety" → "Anxiety" */
+    const formatTag = (tag: string) => {
+        const upper = tag.toUpperCase();
+        if (['CBT', 'DBT', 'EMDR', 'ACT', 'LGBTQ+', 'ADHD', 'OCD', 'PTSD'].includes(upper)) return upper;
+        return tag.charAt(0).toUpperCase() + tag.slice(1).toLowerCase();
+    };
+
+    /** Get accreditation display text */
+    const getAccreditationText = (acc: string | null): string | null => {
+        if (!acc) return null;
+        const lower = acc.toLowerCase();
+        if (lower.includes('iacpfull') || lower.includes('iacp full') || lower === 'iacpful') return 'IACP Accredited';
+        if (lower.includes('iahippre') || lower.includes('iahip pre')) return 'IAHIP Pre-Accredited';
+        if (lower.includes('iahipfull') || lower.includes('iahip full')) return 'IAHIP Accredited';
+        if (lower.includes('icp') || lower === 'icp') return 'ICP Registered';
+        if (lower.includes('iacp')) return 'IACP Member';
+        if (lower.includes('iahip')) return 'IAHIP Member';
+        if (acc.trim()) return acc.trim();
+        return null;
+    };
+
     const renderTherapistCard = (
         therapist: AcuityCalendar,
         isPrevious: boolean = false
-    ) => (
-        <button
-            key={therapist.id}
-            onClick={() => handleSelectTherapist(therapist.id)}
-            className={cn(
-                'w-full p-4 rounded-xl border-2 text-left transition-all hover:border-primary/50 hover:bg-accent/50',
-                selectedCalendar === therapist.id
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border'
-            )}>
-            <div className="flex items-start gap-3">
-                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                    <User className="h-5 w-5 text-primary" />
-                </div>
-                <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                        <h4 className="font-semibold text-foreground">
-                            {therapist.name}
-                        </h4>
-                        {isPrevious && (
-                            <Badge variant="secondary" className="text-xs">
-                                <RefreshCw className="h-3 w-3 mr-1" />
-                                Previous
-                            </Badge>
+    ) => {
+        const tProfile = therapistProfiles.get(therapist.id);
+        const imageUrl = therapistImages.get(therapist.id);
+        const accreditationText = getAccreditationText(tProfile?.accreditation || null);
+        const tags = (tProfile?.tags || []).slice(0, 3);
+
+        return (
+            <button
+                key={therapist.id}
+                onClick={() => handleSelectTherapist(therapist.id)}
+                className={cn(
+                    'w-full p-4 rounded-xl border-2 text-left transition-all hover:border-primary/50 hover:bg-accent/50',
+                    selectedCalendar === therapist.id
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border'
+                )}>
+                <div className="flex items-start gap-3">
+                    <TherapistAvatar
+                        name={therapist.name}
+                        calendarId={therapist.id}
+                        imageUrl={imageUrl}
+                        size="md"
+                    />
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                            {isPrevious && (
+                                <Star className="h-4 w-4 text-amber-500 fill-amber-500 shrink-0" />
+                            )}
+                            <h4 className="font-semibold text-foreground truncate">
+                                {therapist.name}
+                            </h4>
+                            {isPrevious && (
+                                <Badge variant="secondary" className="text-xs shrink-0">
+                                    <RefreshCw className="h-3 w-3 mr-1" />
+                                    Previous
+                                </Badge>
+                            )}
+                        </div>
+                        {accreditationText && (
+                            <p className="text-xs text-primary font-medium mt-0.5">
+                                {accreditationText}
+                            </p>
+                        )}
+                        {tags.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                                {tags.map((tag) => (
+                                    <span
+                                        key={tag}
+                                        className="inline-block text-[11px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                        {formatTag(tag)}
+                                    </span>
+                                ))}
+                            </div>
                         )}
                     </div>
-                    {therapist.location && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                            {therapist.location}
-                        </p>
-                    )}
                 </div>
-            </div>
-        </button>
-    );
+            </button>
+        );
+    };
 
     const renderStep = () => {
         switch (step) {
