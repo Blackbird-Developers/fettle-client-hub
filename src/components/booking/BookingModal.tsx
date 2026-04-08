@@ -34,6 +34,7 @@ import {
     Clock,
     Calendar as CalendarIcon,
     CreditCard,
+    User,
     Users,
     RefreshCw,
     Loader2,
