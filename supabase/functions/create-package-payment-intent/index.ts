@@ -109,7 +109,7 @@ serve(async (req) => {
       automatic_payment_methods: {
         enabled: true,
       },
-      description: `${packageInfo.name} - ${packageInfo.sessions} therapy sessions`,
+      description: `[MyFettleHub] ${packageInfo.name} - ${packageInfo.sessions} therapy sessions - ${firstName} ${lastName}`,
     });
 
     logStep("Payment intent created", { 

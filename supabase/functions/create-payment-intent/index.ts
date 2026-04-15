@@ -129,7 +129,7 @@ serve(async (req) => {
       amount: amountInCents,
       currency: "eur",
       customer: customerId,
-      description: `${appointmentTypeName || "Therapy Session"} with ${calendarName || "therapist"} on ${new Date(datetime).toLocaleDateString()}`,
+      description: `[MyFettleHub] ${appointmentTypeName || "Therapy Session"} with ${calendarName || "therapist"} - ${firstName} ${lastName} - ${new Date(datetime).toLocaleDateString()}`,
       metadata: bookingMetadata,
       automatic_payment_methods: {
         enabled: true,
