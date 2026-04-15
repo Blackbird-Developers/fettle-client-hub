@@ -15,6 +15,13 @@ const PACKAGE_MAPPING: Record<string, { name: string; sessions: number; price: n
   "1197875": { name: "9 Session Bundle", sessions: 9, price: 675 },
 };
 
+// Appointment type IDs for Acuity certificate creation (empty = all types)
+const PACKAGE_APPOINTMENT_TYPES: Record<string, number[]> = {
+  "1122832": [],
+  "996385": [],
+  "1197875": [],
+};
+
 const logStep = (step: string, details?: unknown) => {
   const detailsStr = details ? ` - ${JSON.stringify(details)}` : "";
   console.log(`[SYNC-ACUITY-PACKAGES] ${step}${detailsStr}`);
@@ -160,17 +167,7 @@ serve(async (req) => {
 
     if (certificates.length === 0) {
       logStep("No certificates found in Acuity");
-      return new Response(
-        JSON.stringify({
-          success: true,
-          synced: 0,
-          message: "No certificates found to sync",
-        }),
-        {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 200,
-        }
-      );
+      // Don't return early — still need to run push phase below
     }
 
     // Build email to user_id mapping
@@ -414,15 +411,204 @@ serve(async (req) => {
       }
     }
 
-    logStep("Sync completed", { synced: syncedCount, skipped: skippedCount, errors: errors.length });
+    // ================================================================
+    // PHASE 2: PUSH — Create Acuity certs for unlinked pi_ rows
+    // ================================================================
+    // Only runs for authenticated users (we need their email for Acuity)
+    let pushedCount = 0;
+
+    if (userId && userEmail) {
+      logStep("PUSH PHASE: checking for unlinked pi_ rows", { userId });
+
+      // Fetch all pi_ rows for this user
+      const { data: piRows } = await supabaseAdmin
+        .from("user_packages")
+        .select("id, package_id, package_name, total_sessions, remaining_sessions, stripe_session_id, created_at")
+        .eq("user_id", userId)
+        .like("stripe_session_id", "pi_%");
+
+      if (piRows && piRows.length > 0) {
+        logStep("Found unlinked pi_ rows", { count: piRows.length });
+
+        // Get user's profile for name (needed by Acuity)
+        const { data: profileData } = await supabaseAdmin
+          .from("profiles")
+          .select("first_name, last_name")
+          .eq("user_id", userId)
+          .single();
+
+        const firstName = profileData?.first_name || "";
+        const lastName = profileData?.last_name || "";
+
+        // Build a set of acuity-cert IDs already linked to ANY row for this user
+        // This prevents linking a pi_ row to a cert that's already used by another row
+        const { data: linkedRows } = await supabaseAdmin
+          .from("user_packages")
+          .select("stripe_session_id")
+          .eq("user_id", userId)
+          .like("stripe_session_id", "acuity-cert-%");
+
+        const alreadyLinkedCertIds = new Set(
+          (linkedRows || []).map((r: { stripe_session_id: string }) => r.stripe_session_id)
+        );
+
+        for (const piRow of piRows) {
+          // Re-read the row to make sure it's still pi_ (pull phase may have linked it)
+          const { data: freshRow } = await supabaseAdmin
+            .from("user_packages")
+            .select("stripe_session_id")
+            .eq("id", piRow.id)
+            .single();
+
+          if (!freshRow || !freshRow.stripe_session_id.startsWith("pi_")) {
+            logStep("PUSH: row already linked during pull phase, skipping", { rowId: piRow.id });
+            continue;
+          }
+
+          // Try to find an existing Acuity cert that matches this row
+          // Match criteria: same productID + created within 1 hour + not already linked
+          const piCreatedAt = new Date(piRow.created_at);
+          let matchedCertId: number | null = null;
+
+          for (const cert of certificates) {
+            const certIdStr = `acuity-cert-${cert.id}`;
+
+            // Skip certs already linked to another row
+            if (alreadyLinkedCertIds.has(certIdStr)) continue;
+
+            // Must be same product
+            if (String(cert.productID) !== piRow.package_id) continue;
+
+            // Must be created within 1 hour of each other
+            if (cert.createdDate) {
+              const certDate = new Date(cert.createdDate);
+              const diffMs = Math.abs(piCreatedAt.getTime() - certDate.getTime());
+              if (diffMs <= 60 * 60 * 1000) {
+                matchedCertId = cert.id;
+                break;
+              }
+            }
+          }
+
+          if (matchedCertId) {
+            // Found existing cert — just link it
+            const acuityCertId = `acuity-cert-${matchedCertId}`;
+            const { error: linkError } = await supabaseAdmin
+              .from("user_packages")
+              .update({
+                stripe_session_id: acuityCertId,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", piRow.id)
+              .eq("stripe_session_id", freshRow.stripe_session_id); // Optimistic lock
+
+            if (!linkError) {
+              alreadyLinkedCertIds.add(acuityCertId);
+              logStep("PUSH: linked pi_ row to existing Acuity cert", {
+                rowId: piRow.id,
+                certId: matchedCertId,
+              });
+              pushedCount++;
+            } else {
+              logStep("PUSH: failed to link row", { rowId: piRow.id, error: linkError });
+            }
+          } else {
+            // No matching cert found — create one in Acuity
+            if (!firstName && !lastName) {
+              logStep("PUSH: skipping cert creation — no name in profile", { rowId: piRow.id });
+              continue;
+            }
+
+            const packageId = piRow.package_id;
+            const sessions = piRow.remaining_sessions;
+
+            logStep("PUSH: creating Acuity cert for unlinked row", {
+              rowId: piRow.id,
+              packageId,
+              sessions,
+              email: userEmail,
+            });
+
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+              const certData = {
+                productID: parseInt(packageId, 10),
+                name: `${firstName} ${lastName}`.trim(),
+                email: userEmail,
+                remainingCounts: sessions,
+                appointmentTypeIDs: PACKAGE_APPOINTMENT_TYPES[packageId] || [],
+              };
+
+              const certResponse = await fetch(`${ACUITY_API_BASE}/certificates`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Basic ${authHeaderBasic}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(certData),
+                signal: controller.signal,
+              });
+
+              clearTimeout(timeoutId);
+
+              if (!certResponse.ok) {
+                const errText = await certResponse.text();
+                logStep("PUSH: Acuity cert creation failed", { status: certResponse.status, error: errText });
+                continue;
+              }
+
+              const newCert = await certResponse.json();
+              const newCertId = `acuity-cert-${newCert.id}`;
+
+              logStep("PUSH: Acuity cert created", { certId: newCert.id });
+
+              // Link the row — use optimistic lock to prevent races
+              const { error: linkError } = await supabaseAdmin
+                .from("user_packages")
+                .update({
+                  stripe_session_id: newCertId,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", piRow.id)
+                .eq("stripe_session_id", freshRow.stripe_session_id);
+
+              if (!linkError) {
+                alreadyLinkedCertIds.add(newCertId);
+                logStep("PUSH: linked row to new Acuity cert", {
+                  rowId: piRow.id,
+                  newCertId,
+                });
+                pushedCount++;
+              } else {
+                logStep("PUSH: cert created but link failed (will be caught by pull next time)", {
+                  rowId: piRow.id,
+                  certId: newCert.id,
+                  error: linkError,
+                });
+              }
+            } catch (certError) {
+              const msg = certError instanceof Error ? certError.message : String(certError);
+              logStep("PUSH: cert creation error", { rowId: piRow.id, error: msg });
+            }
+          }
+        }
+      } else {
+        logStep("PUSH PHASE: no unlinked pi_ rows found");
+      }
+    }
+
+    logStep("Sync completed", { synced: syncedCount, pushed: pushedCount, skipped: skippedCount, errors: errors.length });
 
     return new Response(
       JSON.stringify({
         success: true,
         synced: syncedCount,
+        pushed: pushedCount,
         skipped: skippedCount,
         errors: errors.length > 0 ? errors : undefined,
-        message: `Synced ${syncedCount} packages from Acuity`,
+        message: `Synced ${syncedCount} from Acuity, pushed ${pushedCount} to Acuity`,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
