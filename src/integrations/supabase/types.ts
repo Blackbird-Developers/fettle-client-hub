@@ -14,6 +14,36 @@ export type Database = {
   }
   public: {
     Tables: {
+      help_article_feedback: {
+        Row: {
+          article_slug: string
+          comment: string | null
+          created_at: string
+          helpful: boolean
+          id: string
+          session_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          article_slug: string
+          comment?: string | null
+          created_at?: string
+          helpful: boolean
+          id?: string
+          session_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          article_slug?: string
+          comment?: string | null
+          created_at?: string
+          helpful?: boolean
+          id?: string
+          session_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string

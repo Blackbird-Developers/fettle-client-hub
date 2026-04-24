@@ -1,5 +1,16 @@
 import { useState } from "react";
-import { Calendar, Home, FileText, User, LogOut, Plus, Menu, X, Shield } from "lucide-react";
+import {
+  Calendar,
+  Home,
+  FileText,
+  User,
+  LogOut,
+  LogIn,
+  Plus,
+  Menu,
+  Shield,
+  HelpCircle,
+} from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -7,21 +18,24 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useIsAdmin } from "@/hooks/useAdmin";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
-const navigation = [
+const authenticatedNavigation = [
   { name: "Dashboard", href: "/dashboard", icon: Home },
   { name: "My Sessions", href: "/sessions", icon: Calendar },
   { name: "Invoices", href: "/invoices", icon: FileText },
   { name: "Profile", href: "/profile", icon: User },
+  { name: "Help Center", href: "/help", icon: HelpCircle },
 ];
 
-const adminNavigation = [
-  { name: "Admin", href: "/admin", icon: Shield },
+const publicNavigation = [
+  { name: "Help Center", href: "/help", icon: HelpCircle },
 ];
+
+const adminNavigation = [{ name: "Admin", href: "/admin", icon: Shield }];
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { profile, signOut } = useAuth();
+  const { profile, user, signOut } = useAuth();
   const { data: isAdmin } = useIsAdmin();
 
   const handleSignOut = async () => {
@@ -30,8 +44,18 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   };
 
   const displayName = profile?.first_name
-    ? `${profile.first_name} ${profile.last_name || ''}`.trim()
-    : profile?.email || 'User';
+    ? `${profile.first_name} ${profile.last_name || ""}`.trim()
+    : profile?.email || "User";
+
+  const navigation = user ? authenticatedNavigation : publicNavigation;
+
+  const bookSessionHref = user
+    ? "/sessions"
+    : `/login?returnTo=${encodeURIComponent("/sessions")}`;
+
+  const currentReturnTo = encodeURIComponent(
+    location.pathname + location.search
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -46,7 +70,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       {/* Navigation - scrollable */}
       <nav className="flex-1 px-3 2xl:px-4 py-4 2xl:py-6 space-y-1.5 2xl:space-y-2 overflow-y-auto">
         {navigation.map((item) => {
-          const isActive = location.pathname === item.href;
+          const isActive =
+            item.href === "/help"
+              ? location.pathname.startsWith("/help")
+              : location.pathname === item.href;
           return (
             <NavLink
               key={item.name}
@@ -66,7 +93,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         })}
 
         {/* Admin Navigation - only visible to admins */}
-        {isAdmin && (
+        {user && isAdmin && (
           <>
             <div className="my-3 border-t border-sidebar-border" />
             {adminNavigation.map((item) => {
@@ -96,36 +123,55 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <div className="flex-shrink-0 bg-sidebar">
         {/* Book Session CTA */}
         <div className="px-3 2xl:px-4 pb-3 2xl:pb-4">
-          <Button className="w-full gap-2 shadow-soft text-sm" size="default" asChild onClick={onNavigate}>
-            <NavLink to="/sessions">
+          <Button
+            className="w-full gap-2 shadow-soft text-sm"
+            size="default"
+            asChild
+            onClick={onNavigate}
+          >
+            <NavLink to={bookSessionHref}>
               <Plus className="h-4 w-4" />
               Book Session
             </NavLink>
           </Button>
         </div>
 
-        {/* User section */}
+        {/* User section OR Log in button */}
         <div className="border-t border-sidebar-border p-3 2xl:p-4">
-          <div className="flex items-center gap-2 2xl:gap-3">
-            <div className="h-8 w-8 2xl:h-10 2xl:w-10 rounded-full bg-primary/10 flex items-center justify-center">
-              <User className="h-4 w-4 2xl:h-5 2xl:w-5 text-primary" />
+          {user ? (
+            <div className="flex items-center gap-2 2xl:gap-3">
+              <div className="h-8 w-8 2xl:h-10 2xl:w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                <User className="h-4 w-4 2xl:h-5 2xl:w-5 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs 2xl:text-sm font-medium text-sidebar-foreground truncate">
+                  {displayName}
+                </p>
+                <p className="text-[10px] 2xl:text-xs text-muted-foreground truncate">
+                  {profile?.email}
+                </p>
+              </div>
+              <button
+                onClick={handleSignOut}
+                className="p-1.5 2xl:p-2 rounded-lg hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-accent-foreground transition-colors"
+                title="Sign out"
+              >
+                <LogOut className="h-3.5 w-3.5 2xl:h-4 2xl:w-4" />
+              </button>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs 2xl:text-sm font-medium text-sidebar-foreground truncate">
-                {displayName}
-              </p>
-              <p className="text-[10px] 2xl:text-xs text-muted-foreground truncate">
-                {profile?.email}
-              </p>
-            </div>
-            <button
-              onClick={handleSignOut}
-              className="p-1.5 2xl:p-2 rounded-lg hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-accent-foreground transition-colors"
-              title="Sign out"
+          ) : (
+            <Button
+              variant="default"
+              className="w-full gap-2 shadow-soft"
+              asChild
+              onClick={onNavigate}
             >
-              <LogOut className="h-3.5 w-3.5 2xl:h-4 2xl:w-4" />
-            </button>
-          </div>
+              <NavLink to={`/login?returnTo=${currentReturnTo}`}>
+                <LogIn className="h-4 w-4" />
+                Log in
+              </NavLink>
+            </Button>
+          )}
         </div>
       </div>
     </div>
@@ -138,13 +184,19 @@ export function MobileHeader() {
   return (
     <header className="xl:hidden flex items-center justify-between h-14 sm:h-16 px-3 sm:px-4 border-b border-border bg-sidebar">
       <div className="flex items-center">
-        <span className="font-heading text-lg sm:text-xl font-bold text-primary">fettle</span>
+        <span className="font-heading text-lg sm:text-xl font-bold text-primary">
+          fettle
+        </span>
         <span className="ml-1 text-xs text-muted-foreground">.ie</span>
       </div>
 
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
-          <Button variant="ghost" size="icon" className="xl:hidden h-9 w-9 sm:h-10 sm:w-10">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="xl:hidden h-9 w-9 sm:h-10 sm:w-10"
+          >
             <Menu className="h-5 w-5 sm:h-6 sm:w-6" />
             <span className="sr-only">Toggle menu</span>
           </Button>

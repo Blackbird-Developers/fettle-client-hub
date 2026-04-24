@@ -20,6 +20,8 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsConditions from "./pages/TermsConditions";
 import Admin from "./pages/Admin";
 import Packages from "./pages/Packages";
+import HelpCenter from "./pages/HelpCenter";
+import HelpArticle from "./pages/HelpArticle";
 
 const queryClient = new QueryClient();
 
@@ -46,6 +48,8 @@ const App = () => (
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsConditions />} />
             <Route path="/packages" element={<Packages />} />
+            <Route path="/help" element={<HelpCenter />} />
+            <Route path="/help/:slug" element={<HelpArticle />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

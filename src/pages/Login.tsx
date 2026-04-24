@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useState, useEffect, useMemo } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,14 +14,24 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const { signIn, signInWithGoogle, user } = useAuth();
 
+  const returnTo = useMemo(() => {
+    const raw = searchParams.get("returnTo");
+    // Only allow safe relative paths (no protocol-relative or external URLs)
+    if (raw && raw.startsWith("/") && !raw.startsWith("//")) {
+      return raw;
+    }
+    return "/dashboard";
+  }, [searchParams]);
+
   useEffect(() => {
     if (user) {
-      navigate("/dashboard");
+      navigate(returnTo);
     }
-  }, [user, navigate]);
+  }, [user, navigate, returnTo]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,7 +55,7 @@ export default function Login() {
       title: "Welcome back!",
       description: "You've successfully signed in.",
     });
-    navigate("/dashboard");
+    navigate(returnTo);
   };
 
   const handleGoogleSignIn = async () => {
