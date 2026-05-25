@@ -56,11 +56,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
-        
+
         // Defer profile fetch with setTimeout to avoid deadlock
         if (session?.user) {
           setTimeout(() => {
-            fetchProfile(session.user.id);
+            fetchProfile(session.user);
           }, 0);
         } else {
           setProfile(null);
@@ -69,13 +69,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 
     // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
 
       if (session?.user) {
-        fetchProfile(session.user.id);
-        // Trigger Acuity sync once per browser session
+        // Ensure profile exists BEFORE Acuity sync — the PUSH phase
+        // needs first_name/last_name to create the cert
+        await fetchProfile(session.user);
         syncAcuityPackages(session.access_token, session.user.id);
       }
       setLoading(false);
@@ -84,21 +85,83 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchProfile = async (userId: string) => {
+  // Extract first/last name from whatever shape auth metadata provides
+  // (matches the handle_new_user DB trigger logic):
+  //   - email/password signup → first_name / last_name
+  //   - Google OAuth          → given_name / family_name
+  //   - anything else         → split `name` / `full_name` on first space
+  const extractNames = (user: User): { first_name: string | null; last_name: string | null } => {
+    const meta = (user.user_metadata || {}) as Record<string, string | undefined>;
+    let first = meta.first_name || meta.given_name || null;
+    let last = meta.last_name || meta.family_name || null;
+
+    if (!first || !last) {
+      const full = (meta.name || meta.full_name || '').trim();
+      if (full) {
+        const spaceIdx = full.indexOf(' ');
+        if (!first) first = spaceIdx > 0 ? full.slice(0, spaceIdx) : full;
+        if (!last && spaceIdx > 0) last = full.slice(spaceIdx + 1).trim() || null;
+      }
+    }
+    return { first_name: first, last_name: last };
+  };
+
+  const fetchProfile = async (user: User) => {
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
-      .eq('user_id', userId)
-      .single();
+      .eq('user_id', user.id)
+      .maybeSingle();
 
-    if (!error && data) {
-      setProfile(data);
+    if (error) {
+      console.error('[Profile] Fetch failed:', error);
+      return;
+    }
 
-      // Update timezone if it's different from browser's timezone
-      const browserTimezone = getBrowserTimezone();
-      if (data.timezone !== browserTimezone) {
-        updateTimezone(userId, browserTimezone);
+    let profileRow = data;
+
+    // Orphaned auth user (pre-trigger signup, or trigger failed). Self-heal
+    // by creating the profile from auth metadata so downstream features
+    // (Acuity sync, bookings, package balance) work.
+    if (!profileRow) {
+      const { first_name, last_name } = extractNames(user);
+      console.log('[Profile] Missing profile — creating from auth metadata', { user_id: user.id, email: user.email });
+
+      const { data: created, error: insertErr } = await supabase
+        .from('profiles')
+        .insert({
+          user_id: user.id,
+          email: user.email ?? '',
+          first_name,
+          last_name,
+        })
+        .select()
+        .single();
+
+      if (insertErr) {
+        // 23505 = unique_violation — another tab/request beat us. Re-read.
+        if (insertErr.code === '23505') {
+          const { data: retry } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('user_id', user.id)
+            .maybeSingle();
+          profileRow = retry ?? null;
+        } else {
+          console.error('[Profile] Insert failed:', insertErr);
+          return;
+        }
+      } else {
+        profileRow = created;
       }
+    }
+
+    if (!profileRow) return;
+    setProfile(profileRow);
+
+    const browserTimezone = getBrowserTimezone();
+    if (profileRow.timezone !== browserTimezone) {
+      updateTimezone(user.id, browserTimezone);
     }
   };
 
