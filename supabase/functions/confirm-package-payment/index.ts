@@ -21,6 +21,86 @@ const logStep = (step: string, details?: any) => {
   console.log(`[CONFIRM-PACKAGE-PAYMENT] ${step}${detailsStr}`);
 };
 
+// Ensure an Acuity Client record exists for this email. Acuity does NOT
+// auto-create a Client when a Certificate is POSTed — without this, the
+// cert sits orphaned in Business Settings → Coupon & Certificate Codes
+// and never appears on the customer's profile until they book an
+// appointment (which is when Acuity creates the Client implicitly). For
+// bundle purchasers who haven't booked yet, the cert is invisible to
+// staff. We mirror what staff have been doing manually by POSTing to
+// /api/v1/clients after the cert is created.
+//
+// GET-first to avoid duplicate Clients. Soft-failure — never throws.
+async function ensureAcuityClient(
+  firstName: string,
+  lastName: string,
+  email: string
+): Promise<{ success: boolean; created: boolean; error?: string }> {
+  const acuityUserId = Deno.env.get("ACUITY_USER_ID");
+  const acuityApiKey = Deno.env.get("ACUITY_API_KEY");
+
+  if (!acuityUserId || !acuityApiKey) {
+    return { success: false, created: false, error: "Acuity credentials not configured" };
+  }
+  if (!email) {
+    return { success: false, created: false, error: "Email required" };
+  }
+  if (!firstName && !lastName) {
+    return { success: false, created: false, error: "First or last name required for Acuity client" };
+  }
+
+  const authHeader = btoa(`${acuityUserId}:${acuityApiKey}`);
+  const headers = {
+    Authorization: `Basic ${authHeader}`,
+    "Content-Type": "application/json",
+  };
+
+  try {
+    // Look for existing Client by email
+    const searchUrl = `${ACUITY_API_BASE}/clients?search=${encodeURIComponent(email)}`;
+    const searchResp = await fetch(searchUrl, { method: "GET", headers });
+
+    if (searchResp.ok) {
+      const found = await searchResp.json();
+      const match = Array.isArray(found) && found.find(
+        (c: { email?: string }) => (c.email || "").toLowerCase() === email.toLowerCase()
+      );
+      if (match) {
+        logStep("Acuity client already exists, skipping create", { email });
+        return { success: true, created: false };
+      }
+    } else {
+      logStep("Acuity client search failed — attempting create anyway", {
+        status: searchResp.status,
+      });
+    }
+
+    logStep("Creating Acuity client", { email, firstName, lastName });
+
+    const createResp = await fetch(`${ACUITY_API_BASE}/clients`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ firstName, lastName, email }),
+    });
+
+    if (!createResp.ok) {
+      const errorText = await createResp.text();
+      logStep("Acuity client creation failed", {
+        status: createResp.status,
+        error: errorText.substring(0, 300),
+      });
+      return { success: false, created: false, error: `Acuity client API ${createResp.status}` };
+    }
+
+    logStep("Acuity client created successfully", { email });
+    return { success: true, created: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logStep("Error ensuring Acuity client", { error: errorMessage });
+    return { success: false, created: false, error: errorMessage };
+  }
+}
+
 // Helper function to create certificate in Acuity
 async function createAcuityCertificate(
   email: string,
@@ -272,6 +352,23 @@ serve(async (req) => {
         logStep("Failed to link Acuity cert to package row", { error: linkError });
       } else {
         logStep("Linked package row to Acuity certificate", { acuityCertId });
+      }
+
+      // Ensure an Acuity Client record exists so the cert is visible on the
+      // customer's profile — Acuity won't auto-create one from a cert alone.
+      try {
+        const clientResult = await ensureAcuityClient(
+          metadata.firstName || "",
+          metadata.lastName || "",
+          metadata.email || ""
+        );
+        if (!clientResult.success) {
+          logStep("Acuity client ensure skipped", { reason: clientResult.error });
+        }
+      } catch (clientErr) {
+        // Defensive: never let Client creation block a successful purchase.
+        const msg = clientErr instanceof Error ? clientErr.message : String(clientErr);
+        logStep("Acuity client ensure threw", { error: msg });
       }
     } else {
       // Soft failure - don't block the UI, certificate will sync later

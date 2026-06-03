@@ -47,6 +47,74 @@ interface Profile {
   email: string;
 }
 
+// Ensure an Acuity Client record exists for this email. Acuity does NOT
+// auto-create a Client when a Certificate is POSTed — without this, a cert
+// pushed by the sync sits orphaned and never appears on the customer's
+// profile until they book an appointment. GET-first to avoid duplicates;
+// soft-failure so a Client API hiccup never breaks the sync.
+async function ensureAcuityClient(
+  authHeaderBasic: string,
+  firstName: string,
+  lastName: string,
+  email: string
+): Promise<{ success: boolean; created: boolean; error?: string }> {
+  if (!email) {
+    return { success: false, created: false, error: "Email required" };
+  }
+  if (!firstName && !lastName) {
+    return { success: false, created: false, error: "First or last name required for Acuity client" };
+  }
+
+  const headers = {
+    Authorization: `Basic ${authHeaderBasic}`,
+    "Content-Type": "application/json",
+  };
+
+  try {
+    const searchUrl = `${ACUITY_API_BASE}/clients?search=${encodeURIComponent(email)}`;
+    const searchResp = await fetch(searchUrl, { method: "GET", headers });
+
+    if (searchResp.ok) {
+      const found = await searchResp.json();
+      const match = Array.isArray(found) && found.find(
+        (c: { email?: string }) => (c.email || "").toLowerCase() === email.toLowerCase()
+      );
+      if (match) {
+        logStep("PUSH: Acuity client already exists, skipping create", { email });
+        return { success: true, created: false };
+      }
+    } else {
+      logStep("PUSH: Acuity client search failed — attempting create anyway", {
+        status: searchResp.status,
+      });
+    }
+
+    logStep("PUSH: creating Acuity client", { email, firstName, lastName });
+
+    const createResp = await fetch(`${ACUITY_API_BASE}/clients`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ firstName, lastName, email }),
+    });
+
+    if (!createResp.ok) {
+      const errorText = await createResp.text();
+      logStep("PUSH: Acuity client creation failed", {
+        status: createResp.status,
+        error: errorText.substring(0, 300),
+      });
+      return { success: false, created: false, error: `Acuity client API ${createResp.status}` };
+    }
+
+    logStep("PUSH: Acuity client created successfully", { email });
+    return { success: true, created: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logStep("PUSH: error ensuring Acuity client", { error: errorMessage });
+    return { success: false, created: false, error: errorMessage };
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -563,6 +631,15 @@ serve(async (req) => {
               const newCertId = `acuity-cert-${newCert.id}`;
 
               logStep("PUSH: Acuity cert created", { certId: newCert.id });
+
+              // Ensure Acuity Client record exists so the cert is visible on
+              // the customer's profile. Soft-fail; never blocks the sync.
+              try {
+                await ensureAcuityClient(authHeaderBasic, firstName, lastName, userEmail);
+              } catch (clientErr) {
+                const msg = clientErr instanceof Error ? clientErr.message : String(clientErr);
+                logStep("PUSH: Acuity client ensure threw", { error: msg });
+              }
 
               // Link the row — use optimistic lock to prevent races
               const { error: linkError } = await supabaseAdmin
