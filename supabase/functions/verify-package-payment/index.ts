@@ -223,7 +223,10 @@ serve(async (req) => {
       amountPaid,
     });
 
-    // Get the authenticated user from the request
+    // Resolve user_id. JWT is preferred, but Stripe-hosted checkout often
+    // takes long enough (3DS, mobile in-app browsers) that the session has
+    // expired by the time we redirect back. Fall back to looking the user
+    // up by the email stored in metadata so we don't lose fulfillment.
     const authHeader = req.headers.get("Authorization");
     let userId: string | null = null;
 
@@ -232,104 +235,140 @@ serve(async (req) => {
       const token = authHeader.replace("Bearer ", "");
       const { data: userData } = await supabaseAuth.auth.getUser(token);
       userId = userData.user?.id || null;
-      logStep("User authenticated", { userId });
+      if (userId) logStep("User resolved from JWT", { userId });
     }
 
-    // Save package to database
-    if (supabaseUrl && supabaseServiceKey && userId) {
-      try {
-        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-        
-        // Check if this session has already been processed
-        const { data: existingPackage } = await supabaseAdmin
+    if (!supabaseUrl || !supabaseServiceKey) {
+      throw new Error("Supabase service credentials missing");
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+    if (!userId && metadata.email) {
+      // JWT missing/expired — try email lookup
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('user_id')
+        .ilike('email', metadata.email)
+        .maybeSingle();
+      if (profile?.user_id) {
+        userId = profile.user_id;
+        logStep("User resolved from email fallback", { userId, email: metadata.email });
+      }
+    }
+
+    if (!userId) {
+      // No user_id means we cannot create a user_packages row. Fail loudly
+      // instead of returning success, so the caller sees a real error and
+      // staff can recover the orphaned payment.
+      throw new Error(
+        "Could not resolve user_id from JWT or metadata email — payment captured but cannot be linked to a user"
+      );
+    }
+
+    // Save package to database — re-throw on DB errors so a 500 surfaces to
+    // the UI instead of a misleading "success".
+    try {
+      // Idempotency: skip if this checkout session has already been processed
+      // (matches confirm-package-payment's behaviour).
+      const { data: existingPackage } = await supabaseAdmin
+        .from('user_packages')
+        .select('id')
+        .eq('stripe_session_id', sessionId)
+        .maybeSingle();
+
+      if (existingPackage) {
+        logStep("Package already exists for this session", { id: existingPackage.id });
+      } else {
+        const { data: insertedRow, error: insertError } = await supabaseAdmin
           .from('user_packages')
+          .insert({
+            user_id: userId,
+            package_id: packageId,
+            package_name: packageInfo.name,
+            total_sessions: packageInfo.sessions,
+            remaining_sessions: packageInfo.sessions,
+            amount_paid: amountPaid,
+            stripe_session_id: sessionId,
+            expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+          })
           .select('id')
-          .eq('stripe_session_id', sessionId)
-          .maybeSingle();
+          .single();
 
-        if (!existingPackage) {
-          // Insert new package
-          const { error: insertError } = await supabaseAdmin
+        if (insertError) {
+          logStep("Failed to save package to database", { error: insertError });
+          throw new Error(`Failed to save package: ${insertError.message}`);
+        }
+        logStep("Package saved to database", { id: insertedRow?.id });
+
+        // Create Acuity certificate
+        const acuityCertResult = await createAcuityCertificate(
+          metadata.email || "",
+          metadata.firstName || "",
+          metadata.lastName || "",
+          packageId,
+          packageInfo.sessions
+        );
+
+        if (acuityCertResult.success && acuityCertResult.certificateId) {
+          logStep("Acuity certificate created", { certificateId: acuityCertResult.certificateId });
+
+          // Re-link the row to the Acuity certificate so sync-acuity-packages
+          // and book-with-package recognise it (mirrors confirm-package-payment).
+          const acuityCertId = `acuity-cert-${acuityCertResult.certificateId}`;
+          const { error: linkError } = await supabaseAdmin
             .from('user_packages')
-            .insert({
-              user_id: userId,
-              package_id: packageId,
-              package_name: packageInfo.name,
-              total_sessions: packageInfo.sessions,
-              remaining_sessions: packageInfo.sessions,
-              amount_paid: amountPaid,
-              stripe_session_id: sessionId,
-              expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(), // 1 year expiry
-            });
-
-          if (insertError) {
-            logStep("Failed to save package to database", { error: insertError });
+            .update({ stripe_session_id: acuityCertId })
+            .eq('id', insertedRow.id);
+          if (linkError) {
+            logStep("Failed to link Acuity cert to package row", { error: linkError });
           } else {
-            logStep("Package saved to database");
+            logStep("Linked package row to Acuity certificate", { acuityCertId });
+          }
 
-            // Export to Acuity: Create certificate for two-way sync
-            // This allows users to use their credits in both systems
-            const acuityCertResult = await createAcuityCertificate(
-              metadata.email || "",
+          // Ensure Acuity Client record exists so the cert is visible on
+          // the customer's profile. Soft-fail; never blocks the purchase.
+          try {
+            const clientResult = await ensureAcuityClient(
               metadata.firstName || "",
               metadata.lastName || "",
-              packageId,
-              packageInfo.sessions
+              metadata.email || ""
             );
-
-            if (acuityCertResult.success) {
-              logStep("Acuity certificate created", { certificateId: acuityCertResult.certificateId });
-
-              // Ensure Acuity Client record exists so the cert is visible on
-              // the customer's profile — Acuity does NOT auto-create a Client
-              // from a cert. Soft-fail; never blocks the purchase.
-              try {
-                const clientResult = await ensureAcuityClient(
-                  metadata.firstName || "",
-                  metadata.lastName || "",
-                  metadata.email || ""
-                );
-                if (!clientResult.success) {
-                  logStep("Acuity client ensure skipped", { reason: clientResult.error });
-                }
-              } catch (clientErr) {
-                const msg = clientErr instanceof Error ? clientErr.message : String(clientErr);
-                logStep("Acuity client ensure threw", { error: msg });
-              }
-            } else {
-              // Soft failure - don't block the UI, certificate will sync later
-              logStep("Acuity certificate creation skipped", { reason: acuityCertResult.error });
+            if (!clientResult.success) {
+              logStep("Acuity client ensure skipped", { reason: clientResult.error });
             }
+          } catch (clientErr) {
+            const msg = clientErr instanceof Error ? clientErr.message : String(clientErr);
+            logStep("Acuity client ensure threw", { error: msg });
           }
         } else {
-          logStep("Package already exists for this session");
+          logStep("Acuity certificate creation skipped", { reason: acuityCertResult.error });
         }
-      } catch (dbError) {
-        logStep("Database error", { error: dbError });
-      }
-    }
 
-    // Send confirmation email
-    if (supabaseUrl && supabaseServiceKey) {
-      try {
-        const supabase = createClient(supabaseUrl, supabaseServiceKey);
-        
-        await supabase.functions.invoke('send-package-confirmation', {
-          body: {
-            email: metadata.email,
-            firstName: metadata.firstName,
-            lastName: metadata.lastName,
-            packageName: packageInfo.name,
-            sessions: packageInfo.sessions,
-            amountPaid,
-          },
-        });
-        
-        logStep("Confirmation email sent");
-      } catch (emailError) {
-        logStep("Failed to send confirmation email", { error: emailError });
-        // Don't throw - email failure shouldn't break the flow
+        // Send confirmation email — only on new insert, so re-verifies don't
+        // spam duplicates.
+        try {
+          await supabaseAdmin.functions.invoke('send-package-confirmation', {
+            body: {
+              email: metadata.email,
+              firstName: metadata.firstName,
+              lastName: metadata.lastName,
+              packageName: packageInfo.name,
+              sessions: packageInfo.sessions,
+              amountPaid,
+            },
+          });
+          logStep("Confirmation email sent");
+        } catch (emailError) {
+          const msg = emailError instanceof Error ? emailError.message : String(emailError);
+          logStep("Failed to send confirmation email", { error: msg });
+          // Email failure does not block fulfillment.
+        }
       }
+    } catch (dbError) {
+      // Re-throw — the outer catch turns this into a 500 with a real error
+      // message instead of a misleading "success" response.
+      throw dbError;
     }
 
     return new Response(JSON.stringify({
