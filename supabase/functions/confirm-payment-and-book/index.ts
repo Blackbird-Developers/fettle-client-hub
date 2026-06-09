@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -172,6 +173,72 @@ serve(async (req) => {
       }
     };
 
+    // CONCURRENCY GUARD. The client call, the redirect-return handler, and the
+    // stripe-webhook backstop can all run for this PaymentIntent at the same
+    // time. The metadata idempotency check above is start-of-function only, so
+    // two simultaneous calls both pass it, both create the Acuity appointment,
+    // and one refunds the other's booking (appointment created AND refunded —
+    // the exact bug seen in production). We serialize with an atomic DB claim:
+    // exactly one invocation books; the rest wait for and mirror its outcome.
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    let claimAcquired = true; // fail-open: never block bookings if the lock infra is unavailable
+    if (supabaseUrl && supabaseServiceKey) {
+      try {
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+        const { data, error } = await supabaseAdmin.rpc("claim_booking", {
+          p_payment_intent_id: paymentIntentId,
+        });
+        if (error) {
+          logStep("WARNING: claim_booking failed — proceeding WITHOUT concurrency lock", { error: error.message });
+        } else {
+          claimAcquired = data === true;
+        }
+      } catch (e) {
+        logStep("WARNING: claim_booking threw — proceeding WITHOUT concurrency lock", { error: String(e) });
+      }
+    } else {
+      logStep("WARNING: Supabase service env missing — no concurrency lock available");
+    }
+
+    if (!claimAcquired) {
+      // Another invocation is actively booking this PaymentIntent. We must NOT
+      // book or refund. Wait briefly for the winner to reach a terminal state
+      // (stamped on the PI metadata) and return the SAME result, so this caller
+      // sees a consistent outcome instead of a duplicate booking/refund.
+      logStep("Another invocation holds the booking claim — mirroring its outcome", { paymentIntentId });
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const latest = await stripe.paymentIntents.retrieve(paymentIntentId);
+        if (latest.metadata?.acuity_appointment_id) {
+          logStep("Winner booked — returning success", { appointmentId: latest.metadata.acuity_appointment_id });
+          return new Response(JSON.stringify({
+            success: true,
+            alreadyBooked: true,
+            appointment: { id: latest.metadata.acuity_appointment_id },
+          }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+        }
+        if (latest.metadata?.booking_outcome) {
+          logStep("Winner settled as failed — returning settled response", { outcome: latest.metadata.booking_outcome });
+          return new Response(JSON.stringify({
+            success: false,
+            settled: true,
+            outcome: latest.metadata.booking_outcome,
+            error: "This booking could not be completed and the payment was reversed. Please contact hello@fettle.ie if you need help.",
+          }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+        }
+      }
+      // Winner still working after the wait. Don't book/refund here — tell the
+      // caller it's pending. The webhook backstop (which checks the PI directly)
+      // will retry and reconcile if needed.
+      logStep("Winner still processing after wait — returning pending", { paymentIntentId });
+      return new Response(JSON.stringify({
+        success: true,
+        pending: true,
+        message: "Your payment was received and your booking is being finalized. You'll receive a confirmation email shortly.",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+    }
+
     // From here on the payment is confirmed (captured, or authorized for the
     // legacy manual-capture path). If we fail past this point we owe the
     // customer their money back — recorded for the top-level catch.
@@ -222,8 +289,10 @@ serve(async (req) => {
       // Check if the error is about invalid intake form fields
       // If so, retry WITHOUT the invalid fields
       if (errorText.includes("invalid_fields") || errorText.includes("does not exist on this appointment")) {
-        // Try to extract the invalid field ID from the error
-        const invalidFieldMatch = errorText.match(/"(\d+)" does not exist/);
+        // Try to extract the invalid field ID from the error. Acuity returns
+        // JSON, so the id is wrapped in escaped quotes (\"10466116\"); the
+        // optional backslash lets this match both escaped and raw forms.
+        const invalidFieldMatch = errorText.match(/(\d+)\\?" does not exist/);
         const invalidFieldId = invalidFieldMatch ? parseInt(invalidFieldMatch[1]) : null;
 
         if (invalidFieldId && appointmentBody.fields) {
