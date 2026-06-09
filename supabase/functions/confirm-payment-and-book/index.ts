@@ -289,23 +289,16 @@ serve(async (req) => {
       // Check if the error is about invalid intake form fields
       // If so, retry WITHOUT the invalid fields
       if (errorText.includes("invalid_fields") || errorText.includes("does not exist on this appointment")) {
-        // Try to extract the invalid field ID from the error. Acuity returns
-        // JSON, so the id is wrapped in escaped quotes (\"10466116\"); the
-        // optional backslash lets this match both escaped and raw forms.
-        const invalidFieldMatch = errorText.match(/(\d+)\\?" does not exist/);
-        const invalidFieldId = invalidFieldMatch ? parseInt(invalidFieldMatch[1]) : null;
-
-        if (invalidFieldId && appointmentBody.fields) {
-          // Remove only the invalid field and retry
-          appointmentBody.fields = appointmentBody.fields.filter(
-            (f: { id: number }) => f.id !== invalidFieldId
-          );
-          logStep("Retrying without invalid field", { removedFieldId: invalidFieldId, remainingFields: appointmentBody.fields });
-        } else {
-          // Can't identify the specific field, remove all fields
-          logStep("Retrying without any intake form fields");
-          delete appointmentBody.fields;
-        }
+        // The booking form can send intake field IDs that don't belong to this
+        // appointment type, and there may be SEVERAL invalid ones. Peeling them
+        // off one at a time only fixes the first and then fails again on the
+        // next (which is exactly how a paid booking ended up refunded). Instead,
+        // drop all intake fields and let the booking through — any genuinely
+        // REQUIRED field is re-added by the required_field handler below. These
+        // fields don't exist on this appointment type, so no valid data is lost.
+        const firstInvalid = errorText.match(/(\d+)\\?" does not exist/)?.[1];
+        logStep("Invalid intake field(s) — retrying without any intake fields", { firstInvalid });
+        delete appointmentBody.fields;
 
         const retryResponse = await fetch("https://acuityscheduling.com/api/v1/appointments", {
           method: "POST",
