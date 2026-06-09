@@ -16,6 +16,19 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Cleanup state, visible to the top-level catch. The chosen model is:
+  // book Acuity first; keep the money only if booking succeeds, otherwise
+  // return it. This guarantees that if ANYTHING throws after we reach the
+  // booking stage (Acuity network error, JSON parse failure, etc.) the money
+  // is still returned — closing the gap where an exception would leave the
+  // payment captured with no booking and no refund.
+  let stripeClient: Stripe | null = null;
+  let activePaymentIntentId: string | null = null;
+  let bookingStageReached = false;
+  let captureMode: "manual" | "auto" = "auto";
+  let bookingSucceeded = false;
+  let terminalSettled = false;
+
   try {
     logStep("Function started");
 
@@ -34,6 +47,8 @@ serve(async (req) => {
     }
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
+    stripeClient = stripe;
+    activePaymentIntentId = paymentIntentId;
 
     // Retrieve the PaymentIntent to check status and get metadata
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
@@ -41,6 +56,40 @@ serve(async (req) => {
       status: paymentIntent.status,
       metadata: paymentIntent.metadata
     });
+
+    // IDEMPOTENCY GUARD — this function can be invoked more than once for the
+    // same PaymentIntent: the client call, the redirect-return handler, and the
+    // stripe-webhook backstop can all race. We persist the outcome onto the PI
+    // metadata so repeat calls are no-ops instead of double-booking / double-refunding.
+    if (paymentIntent.metadata?.acuity_appointment_id) {
+      logStep("Already booked — returning existing appointment", {
+        appointmentId: paymentIntent.metadata.acuity_appointment_id,
+      });
+      return new Response(JSON.stringify({
+        success: true,
+        alreadyBooked: true,
+        appointment: { id: paymentIntent.metadata.acuity_appointment_id },
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+    if (paymentIntent.metadata?.booking_outcome) {
+      // A previous run reached a terminal failure (refunded / canceled). Do not
+      // retry booking — return a settled response so callers stop hammering.
+      logStep("Already settled as failed — not re-attempting", {
+        outcome: paymentIntent.metadata.booking_outcome,
+      });
+      return new Response(JSON.stringify({
+        success: false,
+        settled: true,
+        outcome: paymentIntent.metadata.booking_outcome,
+        error: "This booking could not be completed and the payment was already reversed. Please contact hello@fettle.ie if you need help.",
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
 
     // For manual capture, status should be "requires_capture" after card authorization
     // For Google Pay / Apple Pay, it might be "processing" briefly
@@ -96,6 +145,38 @@ serve(async (req) => {
 
     // Default timezone if none provided
     const userTimezone = timezone || 'Europe/Dublin';
+
+    // Persist the booking outcome onto the PaymentIntent so this function is
+    // idempotent across the client call, the redirect-return handler, and the
+    // stripe-webhook backstop (see IDEMPOTENCY GUARD above).
+    const markBooked = async (appointmentId: string | number) => {
+      bookingSucceeded = true; // prevents the catch-block cleanup from refunding a real booking
+      try {
+        await stripe.paymentIntents.update(paymentIntentId, {
+          metadata: { ...metadata, acuity_appointment_id: String(appointmentId) },
+        });
+        logStep("Marked PaymentIntent as booked", { appointmentId });
+      } catch (e) {
+        logStep("WARNING: failed to mark PI as booked (idempotency may be weakened)", { error: String(e) });
+      }
+    };
+    const markSettledFailed = async (outcome: string) => {
+      terminalSettled = true; // money already returned by the caller; don't return it twice
+      try {
+        await stripe.paymentIntents.update(paymentIntentId, {
+          metadata: { ...metadata, booking_outcome: outcome },
+        });
+        logStep("Marked PaymentIntent as settled-failed", { outcome });
+      } catch (e) {
+        logStep("WARNING: failed to mark PI as settled-failed", { error: String(e) });
+      }
+    };
+
+    // From here on the payment is confirmed (captured, or authorized for the
+    // legacy manual-capture path). If we fail past this point we owe the
+    // customer their money back — recorded for the top-level catch.
+    bookingStageReached = true;
+    captureMode = needsCapture ? "manual" : "auto";
 
     // STEP 1: Create appointment in Acuity FIRST (before capturing payment)
     const acuityAuth = btoa(`${acuityUserId}:${acuityApiKey}`);
@@ -169,6 +250,7 @@ serve(async (req) => {
         if (retryResponse.ok) {
           const retryAppointment = await retryResponse.json();
           logStep("Acuity appointment created on retry", { appointmentId: retryAppointment.id });
+          await markBooked(retryAppointment.id);
 
           // Continue with payment capture using the retry appointment
           if (needsCapture) {
@@ -246,6 +328,7 @@ serve(async (req) => {
             if (finalRetryResponse.ok) {
               const finalAppointment = await finalRetryResponse.json();
               logStep("Acuity appointment created on final retry with required field", { appointmentId: finalAppointment.id });
+              await markBooked(finalAppointment.id);
 
               // Capture payment if needed
               if (needsCapture) {
@@ -320,6 +403,10 @@ serve(async (req) => {
         }
       }
 
+      // Mark the PI as terminally settled so the webhook backstop and any client
+      // retry stop re-attempting this booking (and re-attempting the refund).
+      await markSettledFailed(needsCapture ? "failed_canceled" : "failed_refunded");
+
       // Parse Acuity error for user-friendly message
       let userMessage = "We couldn't complete your booking at this time.";
       if (errorText.includes("not available")) {
@@ -339,6 +426,7 @@ serve(async (req) => {
 
     const appointment = await acuityResponse.json();
     logStep("Acuity appointment created", { appointmentId: appointment.id });
+    await markBooked(appointment.id);
 
     // STEP 2: Capture the payment ONLY AFTER successful Acuity booking (if not already captured)
     if (needsCapture) {
@@ -477,6 +565,37 @@ serve(async (req) => {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logStep("ERROR", { message: errorMessage });
+
+    // GUARANTEED MONEY-BACK ON FAILURE.
+    // If we got far enough that the payment was confirmed (booking stage
+    // reached) but did NOT succeed in booking and have NOT already returned the
+    // money on a known failure path, return it now. This covers unexpected
+    // throws — Acuity network errors, timeouts, JSON parse failures — that would
+    // otherwise strand a captured payment with no booking and no refund.
+    if (stripeClient && activePaymentIntentId && bookingStageReached && !bookingSucceeded && !terminalSettled) {
+      logStep("Returning money after unexpected failure", { captureMode, paymentIntentId: activePaymentIntentId });
+      try {
+        if (captureMode === "manual") {
+          await stripeClient.paymentIntents.cancel(activePaymentIntentId, { cancellation_reason: "abandoned" });
+          logStep("Cleanup: canceled authorization — no money was taken");
+        } else {
+          await stripeClient.refunds.create({ payment_intent: activePaymentIntentId });
+          logStep("Cleanup: refunded captured payment");
+        }
+        // Mark terminal so the webhook backstop / client retry don't re-attempt.
+        // Metadata updates merge per-key, so other metadata is preserved.
+        await stripeClient.paymentIntents.update(activePaymentIntentId, {
+          metadata: { booking_outcome: captureMode === "manual" ? "failed_canceled" : "failed_refunded" },
+        });
+      } catch (cleanupError) {
+        // Refund failed — leave NOT marked so the webhook retries this PI.
+        logStep("CRITICAL: failed to return money after error — MANUAL REFUND NEEDED", {
+          paymentIntentId: activePaymentIntentId,
+          error: String(cleanupError),
+        });
+      }
+    }
+
     return new Response(JSON.stringify({ error: errorMessage }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 500,

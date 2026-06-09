@@ -27,6 +27,11 @@ verify_jwt = false
 [functions.confirm-payment-and-book]
 verify_jwt = false
 
+# Stripe calls this server-to-server and cannot present a Supabase JWT;
+# the function authenticates the request via the Stripe webhook signature instead.
+[functions.stripe-webhook]
+verify_jwt = false
+
 [functions.sync-acuity-appointments]
 verify_jwt = false
 
