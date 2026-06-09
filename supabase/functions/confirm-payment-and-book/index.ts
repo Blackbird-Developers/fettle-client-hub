@@ -271,9 +271,15 @@ serve(async (req) => {
       }
     }
 
-    logStep("Creating Acuity appointment", appointmentBody);
-
-    const acuityResponse = await fetch("https://acuityscheduling.com/api/v1/appointments", {
+    // Acuity rejects the whole booking if the intake fields don't match the
+    // appointment type: `invalid_fields` when a field doesn't belong, or
+    // `required_field` when a mandatory one is missing. Different appointment
+    // types / calendars require different fields and we can't know which in
+    // advance, so we ADAPT and LOOP: on each rejection drop the specific invalid
+    // field Acuity names (keeping all the valid ones) or add the required field,
+    // then retry. Every iteration removes or adds at least one field, so the
+    // loop always makes progress and terminates.
+    const postAcuity = () => fetch("https://acuityscheduling.com/api/v1/appointments", {
       method: "POST",
       headers: {
         "Authorization": `Basic ${acuityAuth}`,
@@ -282,180 +288,84 @@ serve(async (req) => {
       body: JSON.stringify(appointmentBody),
     });
 
-    if (!acuityResponse.ok) {
-      const errorText = await acuityResponse.text();
-      logStep("Acuity API error", { status: acuityResponse.status, error: errorText });
+    let appointment: any = null;
+    let lastErrorText = "";
+    const MAX_ACUITY_ATTEMPTS = 12;
 
-      // Check if the error is about invalid intake form fields
-      // If so, retry WITHOUT the invalid fields
-      if (errorText.includes("invalid_fields") || errorText.includes("does not exist on this appointment")) {
-        // The booking form can send intake field IDs that don't belong to this
-        // appointment type, and there may be SEVERAL invalid ones. Peeling them
-        // off one at a time only fixes the first and then fails again on the
-        // next (which is exactly how a paid booking ended up refunded). Instead,
-        // drop all intake fields and let the booking through — any genuinely
-        // REQUIRED field is re-added by the required_field handler below. These
-        // fields don't exist on this appointment type, so no valid data is lost.
-        const firstInvalid = errorText.match(/(\d+)\\?" does not exist/)?.[1];
-        logStep("Invalid intake field(s) — retrying without any intake fields", { firstInvalid });
-        delete appointmentBody.fields;
+    for (let attempt = 1; attempt <= MAX_ACUITY_ATTEMPTS; attempt++) {
+      logStep("Creating Acuity appointment", { attempt, body: appointmentBody });
+      const resp = await postAcuity();
 
-        const retryResponse = await fetch("https://acuityscheduling.com/api/v1/appointments", {
-          method: "POST",
-          headers: {
-            "Authorization": `Basic ${acuityAuth}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(appointmentBody),
-        });
-
-        if (retryResponse.ok) {
-          const retryAppointment = await retryResponse.json();
-          logStep("Acuity appointment created on retry", { appointmentId: retryAppointment.id });
-          await markBooked(retryAppointment.id);
-
-          // Continue with payment capture using the retry appointment
-          if (needsCapture) {
-            logStep("Capturing payment after successful booking", { paymentIntentId });
-            try {
-              await stripe.paymentIntents.capture(paymentIntentId);
-              logStep("Payment captured successfully");
-            } catch (captureError) {
-              logStep("CRITICAL: Booking created but payment capture failed", {
-                appointmentId: retryAppointment.id,
-                error: captureError
-              });
-            }
-          } else {
-            logStep("Payment already captured, skipping capture step");
-          }
-
-          // Get receipt URL
-          let receiptUrl = null;
-          try {
-            const charges = await stripe.charges.list({
-              payment_intent: paymentIntentId,
-              limit: 1,
-            });
-            if (charges.data.length > 0) {
-              receiptUrl = charges.data[0].receipt_url;
-            }
-          } catch (e) {
-            logStep("Could not get receipt URL", { error: e });
-          }
-
-          return new Response(JSON.stringify({
-            success: true,
-            appointment: {
-              id: retryAppointment.id,
-              datetime: retryAppointment.datetime,
-              type: appointmentTypeName,
-              therapist: calendarName,
-            },
-            receiptUrl,
-          }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 200,
-          });
-        }
-
-        // Retry failed - check if it's a required field error
-        const retryErrorText = await retryResponse.text();
-        logStep("Retry failed", { error: retryErrorText });
-
-        // If retry failed due to required field, try to add that field and retry again
-        if (retryErrorText.includes("required_field")) {
-          const requiredFieldMatch = retryErrorText.match(/"fieldID":(\d+)/);
-          if (requiredFieldMatch) {
-            const requiredFieldId = parseInt(requiredFieldMatch[1]);
-            logStep("Found required field, retrying with it", { requiredFieldId });
-
-            // Add the required field to existing fields (preserve others already present)
-            const existingFields: { id: number; value: string }[] = appointmentBody.fields || [];
-            const fieldAlreadyPresent = existingFields.some((f) => f.id === requiredFieldId);
-            appointmentBody.fields = fieldAlreadyPresent
-              ? existingFields
-              : [...existingFields, { id: requiredFieldId, value: 'yes' }];
-            logStep("Fields for final retry", { fields: appointmentBody.fields });
-
-            const finalRetryResponse = await fetch("https://acuityscheduling.com/api/v1/appointments", {
-              method: "POST",
-              headers: {
-                "Authorization": `Basic ${acuityAuth}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(appointmentBody),
-            });
-
-            if (finalRetryResponse.ok) {
-              const finalAppointment = await finalRetryResponse.json();
-              logStep("Acuity appointment created on final retry with required field", { appointmentId: finalAppointment.id });
-              await markBooked(finalAppointment.id);
-
-              // Capture payment if needed
-              if (needsCapture) {
-                logStep("Capturing payment after successful booking", { paymentIntentId });
-                try {
-                  await stripe.paymentIntents.capture(paymentIntentId);
-                  logStep("Payment captured successfully");
-                } catch (captureError) {
-                  logStep("CRITICAL: Booking created but payment capture failed", {
-                    appointmentId: finalAppointment.id,
-                    error: captureError
-                  });
-                }
-              } else {
-                logStep("Payment already captured, skipping capture step");
-              }
-
-              // Get receipt URL
-              let receiptUrl = null;
-              try {
-                const charges = await stripe.charges.list({
-                  payment_intent: paymentIntentId,
-                  limit: 1,
-                });
-                if (charges.data.length > 0) {
-                  receiptUrl = charges.data[0].receipt_url;
-                }
-              } catch (e) {
-                logStep("Could not get receipt URL", { error: e });
-              }
-
-              return new Response(JSON.stringify({
-                success: true,
-                appointment: {
-                  id: finalAppointment.id,
-                  datetime: finalAppointment.datetime,
-                  type: appointmentTypeName,
-                  therapist: calendarName,
-                },
-                receiptUrl,
-              }), {
-                headers: { ...corsHeaders, "Content-Type": "application/json" },
-                status: 200,
-              });
-            }
-
-            const finalErrorText = await finalRetryResponse.text();
-            logStep("Final retry also failed", { error: finalErrorText });
-          }
-        }
+      if (resp.ok) {
+        appointment = await resp.json();
+        logStep("Acuity appointment created", { appointmentId: appointment.id, attempt });
+        break;
       }
 
-      // Reverse the payment since booking failed
+      lastErrorText = await resp.text();
+      logStep("Acuity API error", { status: resp.status, error: lastErrorText, attempt });
+
+      const isInvalidField = lastErrorText.includes("invalid_fields") || lastErrorText.includes("does not exist on this appointment");
+      const isRequiredField = lastErrorText.includes("required_field");
+
+      if (isInvalidField) {
+        // Remove the specific field Acuity flagged, keeping the rest. Acuity
+        // returns JSON, so the id is wrapped in escaped quotes (\"10466116\");
+        // the optional backslash lets the match work on the raw body too.
+        const badId = lastErrorText.match(/(\d+)\\?" does not exist/)?.[1];
+        if (badId && Array.isArray(appointmentBody.fields)) {
+          const before = appointmentBody.fields.length;
+          appointmentBody.fields = appointmentBody.fields.filter((f: { id: number }) => String(f.id) !== badId);
+          if (appointmentBody.fields.length < before) {
+            logStep("Removed invalid intake field, retrying", { removedFieldId: badId, remaining: appointmentBody.fields });
+            if (appointmentBody.fields.length === 0) delete appointmentBody.fields;
+            continue;
+          }
+          // Flagged field wasn't in our payload — drop everything to make progress.
+          logStep("Flagged field not in payload — dropping all intake fields", { badId });
+          delete appointmentBody.fields;
+          continue;
+        }
+        if (appointmentBody.fields) {
+          // Couldn't identify which field — drop them all and retry once.
+          logStep("Could not identify invalid field — dropping all intake fields");
+          delete appointmentBody.fields;
+          continue;
+        }
+        // Already had no fields and it's still invalid_fields → unrecoverable.
+        break;
+      }
+
+      if (isRequiredField) {
+        const reqId = lastErrorText.match(/"fieldID":(\d+)/)?.[1];
+        const existing: { id: number; value: string }[] = appointmentBody.fields || [];
+        if (reqId && !existing.some((f) => String(f.id) === reqId)) {
+          appointmentBody.fields = [...existing, { id: parseInt(reqId), value: "yes" }];
+          logStep("Added required intake field, retrying", { requiredFieldId: reqId, fields: appointmentBody.fields });
+          continue;
+        }
+        // Required field we can't satisfy (no id, or already present) → stop.
+        logStep("Required field could not be satisfied — giving up", { reqId });
+        break;
+      }
+
+      // Any other error (slot unavailable, in the past, conflict, auth) cannot
+      // be fixed by adjusting fields.
+      break;
+    }
+
+    if (!appointment) {
+      // Booking failed after every recovery attempt → return the customer's money.
       if (needsCapture) {
         logStep("Canceling payment authorization due to booking failure");
         try {
-          await stripe.paymentIntents.cancel(paymentIntentId, {
-            cancellation_reason: "abandoned",
-          });
+          await stripe.paymentIntents.cancel(paymentIntentId, { cancellation_reason: "abandoned" });
           logStep("Payment authorization canceled due to booking failure");
         } catch (cancelError) {
           logStep("Failed to cancel payment authorization", { error: cancelError });
         }
       } else {
-        // Payment was auto-captured (Revolut, PayPal, etc.) — issue a full refund
+        // Payment was auto-captured (Revolut, PayPal, etc.) — issue a full refund.
         logStep("Payment already captured — issuing automatic refund due to booking failure");
         try {
           await stripe.refunds.create({ payment_intent: paymentIntentId });
@@ -469,15 +379,14 @@ serve(async (req) => {
       // retry stop re-attempting this booking (and re-attempting the refund).
       await markSettledFailed(needsCapture ? "failed_canceled" : "failed_refunded");
 
-      // Parse Acuity error for user-friendly message
       let userMessage = "We couldn't complete your booking at this time.";
-      if (errorText.includes("not available")) {
+      if (lastErrorText.includes("not available")) {
         userMessage = "This time slot is no longer available. Please select a different time.";
-      } else if (errorText.includes("already booked") || errorText.includes("conflict")) {
+      } else if (lastErrorText.includes("already booked") || lastErrorText.includes("conflict")) {
         userMessage = "This time slot has already been booked by someone else. Please select a different time.";
-      } else if (errorText.includes("past")) {
+      } else if (lastErrorText.includes("past")) {
         userMessage = "This time slot is in the past. Please select a future time.";
-      } else if (errorText.includes("required_field")) {
+      } else if (lastErrorText.includes("required_field")) {
         userMessage = "Some required information is missing. Please try again.";
       }
       const chargeNote = needsCapture
@@ -486,8 +395,6 @@ serve(async (req) => {
       throw new Error(`${userMessage} ${chargeNote} Please contact hello@fettle.ie for support.`);
     }
 
-    const appointment = await acuityResponse.json();
-    logStep("Acuity appointment created", { appointmentId: appointment.id });
     await markBooked(appointment.id);
 
     // STEP 2: Capture the payment ONLY AFTER successful Acuity booking (if not already captured)
