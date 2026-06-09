@@ -66,10 +66,16 @@ serve(async (req) => {
       logStep("Already booked — returning existing appointment", {
         appointmentId: paymentIntent.metadata.acuity_appointment_id,
       });
+      const md = paymentIntent.metadata;
       return new Response(JSON.stringify({
         success: true,
         alreadyBooked: true,
-        appointment: { id: paymentIntent.metadata.acuity_appointment_id },
+        appointment: {
+          id: md.acuity_appointment_id,
+          datetime: md.datetime,
+          type: md.appointmentTypeName,
+          therapist: md.calendarName,
+        },
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
@@ -212,10 +218,16 @@ serve(async (req) => {
         const latest = await stripe.paymentIntents.retrieve(paymentIntentId);
         if (latest.metadata?.acuity_appointment_id) {
           logStep("Winner booked — returning success", { appointmentId: latest.metadata.acuity_appointment_id });
+          const m = latest.metadata;
           return new Response(JSON.stringify({
             success: true,
             alreadyBooked: true,
-            appointment: { id: latest.metadata.acuity_appointment_id },
+            appointment: {
+              id: m.acuity_appointment_id,
+              datetime: m.datetime,
+              type: m.appointmentTypeName,
+              therapist: m.calendarName,
+            },
           }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
         }
         if (latest.metadata?.booking_outcome) {
