@@ -16,7 +16,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { PackagePaymentForm } from './PackagePaymentForm';
-import { Check, Gift, Loader2, Sparkles, TrendingDown, CheckCircle, Receipt, ExternalLink } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Check, Gift, Loader2, Sparkles, TrendingDown, CheckCircle, Receipt, ExternalLink, Heart, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // Initialize Stripe
@@ -30,16 +31,24 @@ interface PackageBookingModalProps {
 
 type Step = 'select' | 'details' | 'payment' | 'success';
 
+type PackageCategory = 'individual' | 'youth' | 'couples';
+
 // Package definitions
 // Acuity links:
-// 3 sessions: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1122832
-// 6 sessions: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=996385
-// 9 sessions: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1197875
+// Individual 3: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1122832
+// Individual 6: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=996385
+// Individual 9: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1197875
+// Youth 3: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1370588
+// Youth 5: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1975510
+// Couples 3: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=2000708
+// Couples 5: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1967869
 const PACKAGES = [
   {
     id: 1122832,
+    category: 'individual' as PackageCategory,
     name: "3 Session Bundle",
     sessions: 3,
+    sessionDuration: 50,
     price: 241.50,
     individualPrice: 85,
     savings: 13.50,
@@ -47,8 +56,10 @@ const PACKAGES = [
   },
   {
     id: 996385,
+    category: 'individual' as PackageCategory,
     name: "6 Session Bundle",
     sessions: 6,
+    sessionDuration: 50,
     price: 468,
     individualPrice: 85,
     savings: 42,
@@ -56,17 +67,70 @@ const PACKAGES = [
   },
   {
     id: 1197875,
+    category: 'individual' as PackageCategory,
     name: "9 Session Bundle",
     sessions: 9,
+    sessionDuration: 50,
     price: 675,
     individualPrice: 85,
     savings: 90,
     popular: false
   },
+  {
+    id: 1370588,
+    category: 'youth' as PackageCategory,
+    name: "Youth Bundle 3 x 60min",
+    sessions: 3,
+    sessionDuration: 60,
+    price: 305,
+    individualPrice: 105,
+    savings: 10,
+    popular: false
+  },
+  {
+    id: 1975510,
+    category: 'youth' as PackageCategory,
+    name: "Youth Bundle 5 x 60min",
+    sessions: 5,
+    sessionDuration: 60,
+    price: 505,
+    individualPrice: 105,
+    savings: 20,
+    popular: true
+  },
+  {
+    id: 2000708,
+    category: 'couples' as PackageCategory,
+    name: "Couples 3 x 60 min",
+    sessions: 3,
+    sessionDuration: 60,
+    price: 320,
+    individualPrice: 110,
+    savings: 10,
+    popular: false
+  },
+  {
+    id: 1967869,
+    category: 'couples' as PackageCategory,
+    name: "Couples 5 x 60 min",
+    sessions: 5,
+    sessionDuration: 60,
+    price: 525,
+    individualPrice: 110,
+    savings: 25,
+    popular: true
+  },
+];
+
+const PACKAGE_CATEGORIES: { key: PackageCategory; label: string; icon: typeof Gift }[] = [
+  { key: 'individual', label: 'Individual', icon: Gift },
+  { key: 'youth', label: 'Youth', icon: Users },
+  { key: 'couples', label: 'Couples', icon: Heart },
 ];
 
 export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalProps) {
   const [step, setStep] = useState<Step>('select');
+  const [packageCategory, setPackageCategory] = useState<PackageCategory>('individual');
   const [selectedPackage, setSelectedPackage] = useState<typeof PACKAGES[0] | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
@@ -117,8 +181,11 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
         },
       });
 
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
+      if (error) {
+        if (data?.error) throw new Error(data.error);
+        throw error;
+      }
+      if (data?.error) throw new Error(data.error);
 
       setClientSecret(data.clientSecret);
       setPaymentIntentId(data.paymentIntentId);
@@ -151,6 +218,7 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
 
   const handleClose = () => {
     setStep('select');
+    setPackageCategory('individual');
     setSelectedPackage(null);
     setFormData({ firstName: '', lastName: '', email: '', phone: '' });
     setClientSecret(null);
@@ -184,67 +252,86 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
             <div className="text-center pb-2">
               <div className="inline-flex items-center gap-2 bg-success/10 text-success px-3 py-1.5 rounded-full text-sm font-medium mb-3">
                 <Gift className="h-4 w-4" />
-                Save up to 25% with bundles
+                Save with session bundles
               </div>
               <p className="text-muted-foreground text-sm">
                 Commit to your wellbeing and save. Choose the package that fits your journey.
               </p>
             </div>
 
-            <div className="space-y-3">
-              {PACKAGES.map((pkg) => {
-                const { savings, percentSaved, fullPrice } = calculateSavings(pkg);
-                
-                return (
-                  <button
-                    key={pkg.id}
-                    onClick={() => handleSelectPackage(pkg)}
-                    className={cn(
-                      "w-full p-4 rounded-xl border-2 text-left transition-all hover:border-primary/50 hover:bg-accent/30 relative",
-                      pkg.popular 
-                        ? "border-primary bg-primary/5" 
-                        : "border-border"
-                    )}
-                  >
-                    {pkg.popular && (
-                      <Badge className="absolute -top-2 right-3 bg-primary text-primary-foreground">
-                        <Sparkles className="h-3 w-3 mr-1" />
-                        Most Popular
-                      </Badge>
-                    )}
-                    
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <h4 className="font-semibold text-lg text-foreground">{pkg.sessions} Sessions</h4>
-                        <p className="text-sm text-muted-foreground">{pkg.sessions} x 50 minute sessions</p>
-                      </div>
-                      <Badge className="bg-success/10 text-success border-success/20">
-                        <TrendingDown className="h-3 w-3 mr-1" />
-                        Save {percentSaved}%
-                      </Badge>
-                    </div>
-                    
-                    <div className="flex items-baseline gap-2 mb-2">
-                      <span className="text-2xl font-bold text-primary">€{pkg.price}</span>
-                      <span className="text-sm text-muted-foreground line-through">€{fullPrice}</span>
-                    </div>
-                    
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Check className="h-3.5 w-3.5 text-success" />
-                        €{Math.round(pkg.price / pkg.sessions)} per session
-                      </span>
-                      <span className="text-success font-medium">
-                        You save €{savings}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            <Tabs value={packageCategory} onValueChange={(value) => setPackageCategory(value as PackageCategory)}>
+              <TabsList className="grid w-full grid-cols-3">
+                {PACKAGE_CATEGORIES.map(({ key, label, icon: Icon }) => (
+                  <TabsTrigger key={key} value={key} className="gap-1.5 text-xs sm:text-sm">
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+
+              {PACKAGE_CATEGORIES.map(({ key }) => (
+                <TabsContent key={key} value={key} className="space-y-3 mt-3">
+                  {PACKAGES.filter((pkg) => pkg.category === key).map((pkg) => {
+                    const { savings, percentSaved, fullPrice } = calculateSavings(pkg);
+
+                    return (
+                      <button
+                        key={pkg.id}
+                        onClick={() => handleSelectPackage(pkg)}
+                        className={cn(
+                          "w-full p-4 rounded-xl border-2 text-left transition-all hover:border-primary/50 hover:bg-accent/30 relative",
+                          pkg.popular
+                            ? "border-primary bg-primary/5"
+                            : "border-border"
+                        )}
+                      >
+                        {pkg.popular && (
+                          <Badge className="absolute -top-2 right-3 bg-primary text-primary-foreground">
+                            <Sparkles className="h-3 w-3 mr-1" />
+                            Most Popular
+                          </Badge>
+                        )}
+
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <h4 className="font-semibold text-lg text-foreground">{pkg.sessions} Sessions</h4>
+                            <p className="text-sm text-muted-foreground">
+                              {pkg.sessions} x {pkg.sessionDuration} minute sessions
+                            </p>
+                          </div>
+                          <Badge className="bg-success/10 text-success border-success/20">
+                            <TrendingDown className="h-3 w-3 mr-1" />
+                            Save {percentSaved}%
+                          </Badge>
+                        </div>
+
+                        <div className="flex items-baseline gap-2 mb-2">
+                          <span className="text-2xl font-bold text-primary">€{pkg.price}</span>
+                          <span className="text-sm text-muted-foreground line-through">€{fullPrice}</span>
+                        </div>
+
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Check className="h-3.5 w-3.5 text-success" />
+                            €{Math.round(pkg.price / pkg.sessions)} per session
+                          </span>
+                          <span className="text-success font-medium">
+                            You save €{savings}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </TabsContent>
+              ))}
+            </Tabs>
 
             <p className="text-xs text-center text-muted-foreground pt-2">
-              Individual sessions are €85 each. Packages give you the flexibility to book sessions when you need them.
+              {packageCategory === 'individual'
+                ? 'Individual sessions are €85 each. Packages give you the flexibility to book sessions when you need them.'
+                : packageCategory === 'youth'
+                  ? 'Youth sessions are €105 each. Bundles apply to youth therapy sessions only.'
+                  : 'Couples sessions are €110 each. Bundles apply to couples therapy sessions only.'}
             </p>
           </div>
         );
@@ -256,8 +343,10 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
               <div className="bg-accent/50 rounded-xl p-4 mb-4">
                 <div className="flex justify-between items-center">
                   <div>
-                    <p className="font-semibold">{selectedPackage.sessions} Session Bundle</p>
-                    <p className="text-sm text-muted-foreground">{selectedPackage.sessions} x 50 min sessions</p>
+                    <p className="font-semibold">{selectedPackage.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedPackage.sessions} x {selectedPackage.sessionDuration} min sessions
+                    </p>
                   </div>
                   <div className="text-right">
                     <p className="text-xl font-bold text-primary">€{selectedPackage.price}</p>

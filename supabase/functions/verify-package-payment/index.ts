@@ -19,6 +19,10 @@ const PACKAGES: Record<string, { name: string; sessions: number; price: number }
   "1122832": { name: "3 Session Bundle", sessions: 3, price: 241.50 },
   "996385": { name: "6 Session Bundle", sessions: 6, price: 468 },
   "1197875": { name: "9 Session Bundle", sessions: 9, price: 675 },
+  "1370588": { name: "Youth Bundle 3 x 60min", sessions: 3, price: 305 },
+  "1975510": { name: "Youth Bundle 5 x 60min", sessions: 5, price: 505 },
+  "2000708": { name: "Couples 3 x 60 min", sessions: 3, price: 320 },
+  "1967869": { name: "Couples 5 x 60 min", sessions: 5, price: 525 },
 };
 
 // Package mapping for Acuity certificate creation
@@ -26,6 +30,10 @@ const PACKAGE_APPOINTMENT_TYPES: Record<string, number[]> = {
   "1122832": [], // 3 Session Bundle - empty means all appointment types
   "996385": [],  // 6 Session Bundle
   "1197875": [], // 9 Session Bundle
+  "1370588": [], // Youth Bundle 3 x 60min
+  "1975510": [], // Youth Bundle 5 x 60min
+  "2000708": [], // Couples 3 x 60 min
+  "1967869": [], // Couples 5 x 60 min
 };
 
 // Ensure an Acuity Client record exists for this email. Acuity does NOT

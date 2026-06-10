@@ -13,13 +13,21 @@ const logStep = (step: string, details?: any) => {
 };
 
 // Package definitions with Acuity IDs
-// 3 sessions: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1122832
-// 6 sessions: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=996385
-// 9 sessions: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1197875
+// Individual 3: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1122832
+// Individual 6: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=996385
+// Individual 9: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1197875
+// Youth 3: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1370588
+// Youth 5: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1975510
+// Couples 3: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=2000708
+// Couples 5: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1967869
 const PACKAGES: Record<number, { name: string; sessions: number; price: number }> = {
   1122832: { name: "3 Session Bundle", sessions: 3, price: 241.50 },
   996385: { name: "6 Session Bundle", sessions: 6, price: 468 },
   1197875: { name: "9 Session Bundle", sessions: 9, price: 675 },
+  1370588: { name: "Youth Bundle 3 x 60min", sessions: 3, price: 305 },
+  1975510: { name: "Youth Bundle 5 x 60min", sessions: 5, price: 505 },
+  2000708: { name: "Couples 3 x 60 min", sessions: 3, price: 320 },
+  1967869: { name: "Couples 5 x 60 min", sessions: 5, price: 525 },
 };
 
 serve(async (req) => {

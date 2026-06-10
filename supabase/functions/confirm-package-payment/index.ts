@@ -14,6 +14,10 @@ const PACKAGE_APPOINTMENT_TYPES: Record<string, number[]> = {
   "1122832": [], // 3 Session Bundle - empty means all appointment types
   "996385": [],  // 6 Session Bundle
   "1197875": [], // 9 Session Bundle
+  "1370588": [], // Youth Bundle 3 x 60min
+  "1975510": [], // Youth Bundle 5 x 60min
+  "2000708": [], // Couples 3 x 60 min
+  "1967869": [], // Couples 5 x 60 min
 };
 
 const logStep = (step: string, details?: any) => {
