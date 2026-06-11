@@ -45,6 +45,7 @@ import {
     ArrowRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getPackageCategory } from '@/lib/packageCategory';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TherapistAvatar, toSlug } from '@/components/dashboard/MyTherapist';
 import { useTherapistImages, type TherapistProfile } from '@/hooks/useTherapistImages';
@@ -144,21 +145,42 @@ export function BookingModal({
     const queryClient = useQueryClient();
 
     // Fetch user's active packages
-    const { packages: activePackages, totalRemainingSessions, isLoading: packagesLoading } =
+    const { packages: activePackages, isLoading: packagesLoading } =
         useActivePackages();
+
+    // Only credits whose bundle category matches the session being booked may
+    // be redeemed — a youth/couples bundle can't pay for an individual session
+    // (and vice versa). Acuity enforces this on newer certificates via
+    // appointmentTypeIDs, and book-with-package enforces it server-side, but we
+    // also scope the UI so users are never offered credits they can't use.
+    const categoryPackages = useMemo(
+        () =>
+            activePackages.filter(
+                (pkg) => getPackageCategory(pkg.package_id) === sessionCategory
+            ),
+        [activePackages, sessionCategory]
+    );
+    const categoryRemainingSessions = useMemo(
+        () =>
+            categoryPackages.reduce(
+                (sum, pkg) => sum + pkg.remaining_sessions,
+                0
+            ),
+        [categoryPackages]
+    );
 
     // Auto-select package credits when user enters confirm step and has packages available
     // Only auto-select if user hasn't explicitly made a choice yet
     useEffect(() => {
-        if (step === 'confirm' && totalRemainingSessions > 0 && !packagesLoading && !hasUserMadePaymentChoice) {
+        if (step === 'confirm' && categoryRemainingSessions > 0 && !packagesLoading && !hasUserMadePaymentChoice) {
             // Auto-select package credits as the default choice
             setUsePackageCredits(true);
-            const firstPackage = activePackages[0];
+            const firstPackage = categoryPackages[0];
             if (firstPackage) {
                 setSelectedPackageId(firstPackage.id);
             }
         }
-    }, [step, totalRemainingSessions, packagesLoading, activePackages, hasUserMadePaymentChoice]);
+    }, [step, categoryRemainingSessions, packagesLoading, categoryPackages, hasUserMadePaymentChoice]);
 
     const { types, loading: typesLoading } = useAcuityAppointmentTypes();
     const { calendars, loading: calendarsLoading } = useAcuityCalendars();
@@ -1409,13 +1431,13 @@ export function BookingModal({
                         )}
 
                         {/* Package Credits Option - Show prominently when credits are available */}
-                        {!packagesLoading && totalRemainingSessions > 0 && (
+                        {!packagesLoading && categoryRemainingSessions > 0 && (
                             <div className="space-y-3">
                                 {/* Highlighted banner when user has credits */}
                                 <div className="bg-success/10 border border-success/30 rounded-lg p-3 flex items-center gap-2">
                                     <Gift className="h-4 w-4 text-success" />
                                     <p className="text-sm text-success font-medium">
-                                        You have {totalRemainingSessions} session credit{totalRemainingSessions !== 1 ? 's' : ''} available!
+                                        You have {categoryRemainingSessions} session credit{categoryRemainingSessions !== 1 ? 's' : ''} available!
                                     </p>
                                 </div>
 
@@ -1424,8 +1446,8 @@ export function BookingModal({
                                     onClick={() => {
                                         setUsePackageCredits(true);
                                         setHasUserMadePaymentChoice(true);
-                                        // Auto-select first available package
-                                        const firstPackage = activePackages[0];
+                                        // Auto-select first available matching-category package
+                                        const firstPackage = categoryPackages[0];
                                         if (firstPackage) {
                                             setSelectedPackageId(
                                                 firstPackage.id
@@ -1448,7 +1470,7 @@ export function BookingModal({
                                                     Use Package Credit
                                                 </p>
                                                 <Badge className="bg-success/10 text-success border-success/20 text-xs">
-                                                    {totalRemainingSessions}{' '}
+                                                    {categoryRemainingSessions}{' '}
                                                     available
                                                 </Badge>
                                             </div>
@@ -1498,7 +1520,7 @@ export function BookingModal({
 
                         {/* Standard payment option when no packages (only show after packages have loaded) */}
                         {!packagesLoading &&
-                            totalRemainingSessions === 0 &&
+                            categoryRemainingSessions === 0 &&
                             selectedTypeData?.price &&
                             parseFloat(selectedTypeData.price) > 0 && (
                                 <div className="space-y-3">

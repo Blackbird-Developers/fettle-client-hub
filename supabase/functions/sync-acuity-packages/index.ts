@@ -19,21 +19,95 @@ const PACKAGE_MAPPING: Record<string, { name: string; sessions: number; price: n
   "1967869": { name: "Couples 5 x 60 min", sessions: 5, price: 525 },
 };
 
-// Appointment type IDs for Acuity certificate creation (empty = all types)
-const PACKAGE_APPOINTMENT_TYPES: Record<string, number[]> = {
-  "1122832": [],
-  "996385": [],
-  "1197875": [],
-  "1370588": [],
-  "1975510": [],
-  "2000708": [],
-  "1967869": [],
+// Maps each bundle's Acuity product ID to its session category, so the
+// certificate we create is redeemable only against that category's
+// appointment types (see resolveAppointmentTypeIDs).
+const PACKAGE_CATEGORY: Record<string, "individual" | "youth" | "couples"> = {
+  "1122832": "individual", // 3 Session Bundle
+  "996385": "individual",  // 6 Session Bundle
+  "1197875": "individual", // 9 Session Bundle
+  "1370588": "youth",      // Youth Bundle 3 x 60min
+  "1975510": "youth",      // Youth Bundle 5 x 60min
+  "2000708": "couples",    // Couples 3 x 60 min
+  "1967869": "couples",    // Couples 5 x 60 min
+};
+
+// Acuity appointment-type name prefixes per category. Mirrors the booking
+// UI's category filter (see BookingModal "filteredAppointmentTypes").
+const CATEGORY_NAME_PREFIX: Record<string, string> = {
+  individual: "Individual Therapy Session",
+  youth: "Youth Therapy - Individual Session",
+  couples: "Couple's Therapy Session",
 };
 
 const logStep = (step: string, details?: unknown) => {
   const detailsStr = details ? ` - ${JSON.stringify(details)}` : "";
   console.log(`[SYNC-ACUITY-PACKAGES] ${step}${detailsStr}`);
 };
+
+// Resolve which Acuity appointment-type IDs a bundle's credits may be redeemed
+// against. Acuity appointment types are per-therapist, so we can't hardcode
+// them — instead we fetch the live list and match the same name prefixes the
+// booking UI uses. Returns [] on any failure or zero matches, which Acuity
+// treats as "all appointment types" — a safe fallback that never produces an
+// unredeemable certificate.
+async function resolveAppointmentTypeIDs(
+  authHeaderBasic: string,
+  packageId: string | number
+): Promise<number[]> {
+  const key = String(packageId);
+  const category = PACKAGE_CATEGORY[key];
+  const prefix = category ? CATEGORY_NAME_PREFIX[category] : undefined;
+  if (!prefix) {
+    logStep("No category for package — certificate will allow all types", { packageId: key });
+    return [];
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const response = await fetch(`${ACUITY_API_BASE}/appointment-types`, {
+      headers: {
+        Authorization: `Basic ${authHeaderBasic}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      logStep("Could not fetch appointment types — certificate will allow all types", {
+        packageId: key,
+        category,
+        status: response.status,
+      });
+      return [];
+    }
+
+    const types = (await response.json()) as Array<{ id: number; name: string }>;
+    const ids = types
+      .filter((t) => (t.name ?? "").trim().startsWith(prefix))
+      .map((t) => t.id);
+
+    if (ids.length === 0) {
+      logStep("No appointment types matched category — certificate will allow all types", {
+        packageId: key,
+        category,
+        prefix,
+      });
+      return [];
+    }
+
+    logStep("Resolved appointment types for certificate", { packageId: key, category, count: ids.length });
+    return ids;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    logStep("Error resolving appointment types — certificate will allow all types", { packageId: key, error: msg });
+    return [];
+  }
+}
 
 interface AcuityCertificate {
   id: number;
@@ -609,12 +683,14 @@ serve(async (req) => {
               const controller = new AbortController();
               const timeoutId = setTimeout(() => controller.abort(), 30000);
 
+              const appointmentTypeIDs = await resolveAppointmentTypeIDs(authHeaderBasic, packageId);
+
               const certData = {
                 productID: parseInt(packageId, 10),
                 name: `${firstName} ${lastName}`.trim(),
                 email: userEmail,
                 remainingCounts: sessions,
-                appointmentTypeIDs: PACKAGE_APPOINTMENT_TYPES[packageId] || [],
+                appointmentTypeIDs,
               };
 
               const certResponse = await fetch(`${ACUITY_API_BASE}/certificates`, {

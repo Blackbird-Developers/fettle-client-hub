@@ -14,6 +14,76 @@ const logStep = (step: string, details?: any) => {
   console.log(`[BOOK-WITH-PACKAGE] ${step}${detailsStr}`);
 };
 
+type PackageCategory = "individual" | "youth" | "couples";
+
+// Maps each bundle's Acuity product ID to its session category. Kept in sync
+// with src/lib/packageCategory.ts and the *-package-* edge functions.
+const PACKAGE_CATEGORY: Record<string, PackageCategory> = {
+  "1122832": "individual", // 3 Session Bundle
+  "996385": "individual",  // 6 Session Bundle
+  "1197875": "individual", // 9 Session Bundle
+  "1370588": "youth",      // Youth Bundle 3 x 60min
+  "1975510": "youth",      // Youth Bundle 5 x 60min
+  "2000708": "couples",    // Couples 3 x 60 min
+  "1967869": "couples",    // Couples 5 x 60 min
+};
+
+// Acuity appointment-type name prefixes per category. Mirrors the booking UI's
+// category filter (see BookingModal "filteredAppointmentTypes").
+const CATEGORY_NAME_PREFIX: Record<PackageCategory, string> = {
+  individual: "Individual Therapy Session",
+  youth: "Youth Therapy - Individual Session",
+  couples: "Couple's Therapy Session",
+};
+
+// Human-readable category labels for user-facing error messages.
+const CATEGORY_LABEL: Record<PackageCategory, string> = {
+  individual: "individual therapy",
+  youth: "youth therapy",
+  couples: "couples therapy",
+};
+
+// Determine the session category of an Acuity appointment type by matching its
+// name against the category prefixes. Returns undefined if it can't be
+// determined (unknown type, fetch failure) so callers can fail open.
+async function getAppointmentTypeCategory(
+  acuityUserId: string,
+  acuityApiKey: string,
+  appointmentTypeID: number | string
+): Promise<PackageCategory | undefined> {
+  try {
+    const authHeader = btoa(`${acuityUserId}:${acuityApiKey}`);
+    const response = await fetch(`${ACUITY_API_BASE}/appointment-types`, {
+      headers: {
+        Authorization: `Basic ${authHeader}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      logStep("Could not fetch appointment types for category check", { status: response.status });
+      return undefined;
+    }
+
+    const types = (await response.json()) as Array<{ id: number; name: string }>;
+    const match = types.find((t) => String(t.id) === String(appointmentTypeID));
+    if (!match) {
+      logStep("Appointment type not found for category check", { appointmentTypeID });
+      return undefined;
+    }
+
+    const name = (match.name ?? "").trim();
+    for (const [category, prefix] of Object.entries(CATEGORY_NAME_PREFIX)) {
+      if (name.startsWith(prefix)) return category as PackageCategory;
+    }
+    return undefined;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    logStep("Error checking appointment type category", { error: msg });
+    return undefined;
+  }
+}
+
 // Helper function to get Acuity certificate code for automatic deduction
 // When you pass a certificate code to appointment creation, Acuity auto-deducts
 async function getAcuityCertificateCode(
@@ -312,6 +382,29 @@ serve(async (req) => {
       packageId,
       remainingSessions: userPackage.remaining_sessions
     });
+
+    // Enforce that the bundle's category matches the session being booked. A
+    // youth/couples bundle's credits must not be spent on an individual session
+    // (or vice versa). Acuity enforces this for newer certificates via
+    // appointmentTypeIDs, but older certs are unrestricted — so we guard here
+    // too. Fail open only when a category genuinely can't be determined.
+    const packageCategory = PACKAGE_CATEGORY[String(userPackage.package_id)];
+    const sessionTypeCategory = await getAppointmentTypeCategory(
+      acuityUserId,
+      acuityApiKey,
+      appointmentTypeID
+    );
+    if (packageCategory && sessionTypeCategory && packageCategory !== sessionTypeCategory) {
+      logStep("Blocked cross-category package redemption", {
+        packageId: userPackage.package_id,
+        packageCategory,
+        appointmentTypeID,
+        sessionTypeCategory,
+      });
+      throw new Error(
+        `These credits are for ${CATEGORY_LABEL[packageCategory]} sessions and can't be used to book a ${CATEGORY_LABEL[sessionTypeCategory]} session. Please choose a matching session type, or pay for this booking instead.`
+      );
+    }
 
     // Check if package is linked to Acuity certificate and get code for auto-deduction
     const certResult = await getAcuityCertificateCode(
