@@ -108,6 +108,10 @@ serve(async (req) => {
 
     // Store booking details in metadata
     const bookingMetadata = {
+      // Origin marker. This Stripe account is shared with the separate [Website]
+      // booking app; the stripe-webhook backstop must ONLY act on payments THIS
+      // app created, or it tries to re-book (and refunds) [Website]'s bookings.
+      source: "myfettlehub",
       appointmentTypeID: appointmentTypeID.toString(),
       appointmentTypeName: appointmentTypeName || "Therapy Session",
       datetime,

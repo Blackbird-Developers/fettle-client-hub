@@ -91,6 +91,26 @@ serve(async (req) => {
     const pi = event.data.object as Stripe.PaymentIntent;
     const md = pi.metadata || {};
 
+    // ORIGIN GUARD. This Stripe account is SHARED with the separate [Website]
+    // booking app, which books + fulfils its own appointments. Stripe broadcasts
+    // payment_intent.succeeded for the whole account, so this webhook also hears
+    // [Website]'s payments. Without this guard we try to re-book a slot [Website]
+    // already booked, Acuity rejects the duplicate, and we refund/cancel a
+    // perfectly good booking. Only ever act on payments THIS app created —
+    // identified by the source marker (create-payment-intent) with the
+    // [MyFettleHub] description as a fallback for payments created before the
+    // marker was added.
+    const isOurs =
+      md.source === "myfettlehub" ||
+      (typeof pi.description === "string" && pi.description.startsWith("[MyFettleHub]"));
+    if (!isOurs) {
+      logStep("PI not originated by MyFettleHub — ignoring (likely [Website])", {
+        paymentIntentId: pi.id,
+        source: md.source || null,
+      });
+      return ack();
+    }
+
     // Already fulfilled or already settled-failed by confirm-payment-and-book?
     if (md.acuity_appointment_id) {
       logStep("Already booked — nothing to do", { paymentIntentId: pi.id, appointmentId: md.acuity_appointment_id });

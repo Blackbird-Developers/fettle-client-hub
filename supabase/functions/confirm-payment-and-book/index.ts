@@ -12,6 +12,81 @@ const logStep = (step: string, details?: any) => {
   console.log(`[CONFIRM-PAYMENT-AND-BOOK] ${step}${detailsStr}`);
 };
 
+// Look for an appointment that ALREADY EXISTS for this customer + slot. Acuity
+// rejects a duplicate booking as "not available / already booked", which is
+// indistinguishable from a real failure — but if the booking already went
+// through (a racing client/redirect/webhook call, or a booking made on another
+// surface that shares this Acuity), refunding it hands the customer a paid
+// session for free. This is the exact production incident the stripe-webhook
+// triggered. Callers must consult this BEFORE returning any money.
+//
+// Returns:
+//   { appointment }        a confident match was found → keep payment, don't refund
+//   { inconclusive: true } Acuity couldn't be queried → caller must NOT refund
+//   {}                     confidently no match → safe to refund
+async function findExistingAcuityAppointment(
+  acuityAuth: string,
+  email: string,
+  datetime: string,
+  appointmentTypeID: string | number,
+): Promise<{ appointment?: any; inconclusive?: boolean }> {
+  // Without an email/time we can't safely match — preserve existing behaviour.
+  if (!email || !datetime) return {};
+
+  const wantMs = new Date(datetime).getTime();
+  if (Number.isNaN(wantMs)) return {};
+
+  try {
+    // ±1 day window (in case of timezone formatting) keeps the result set small.
+    const dayMs = 24 * 60 * 60 * 1000;
+    const minDate = new Date(wantMs - dayMs).toISOString().slice(0, 10);
+    const maxDate = new Date(wantMs + dayMs).toISOString().slice(0, 10);
+    const url =
+      `https://acuityscheduling.com/api/v1/appointments` +
+      `?email=${encodeURIComponent(email)}` +
+      `&minDate=${minDate}&maxDate=${maxDate}&max=100`;
+
+    const resp = await fetch(url, {
+      headers: { Authorization: `Basic ${acuityAuth}`, "Content-Type": "application/json" },
+    });
+
+    if (!resp.ok) {
+      logStep("Existence check: Acuity appointments query failed — inconclusive", { status: resp.status });
+      return { inconclusive: true };
+    }
+
+    const appts = await resp.json();
+    if (!Array.isArray(appts)) {
+      logStep("Existence check: unexpected Acuity response — inconclusive");
+      return { inconclusive: true };
+    }
+
+    // Email is already constrained by the query, so an exact start-time match
+    // (within a minute) is a confident "this is their booking". Type isn't
+    // required — one person can't hold two appointments at the same instant.
+    const wantType = parseInt(String(appointmentTypeID), 10);
+    const match = appts.find((a: any) => {
+      if (a?.canceled === true) return false;
+      const sameTime = a?.datetime && Math.abs(new Date(a.datetime).getTime() - wantMs) < 60 * 1000;
+      return sameTime;
+    });
+
+    if (match) {
+      logStep("Existence check: matched an existing appointment", {
+        appointmentId: match.id,
+        matchedType: match.appointmentTypeID,
+        wantType,
+      });
+      return { appointment: match };
+    }
+
+    return {};
+  } catch (e) {
+    logStep("Existence check threw — inconclusive", { error: String(e) });
+    return { inconclusive: true };
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -301,6 +376,10 @@ serve(async (req) => {
     });
 
     let appointment: any = null;
+    // True when we kept the payment for an appointment that already existed
+    // rather than one we created. Another surface owns that booking (and its
+    // confirmation email), so we skip ours to avoid double-emailing.
+    let recoveredExistingAppointment = false;
     let lastErrorText = "";
     const MAX_ACUITY_ATTEMPTS = 12;
 
@@ -367,7 +446,43 @@ serve(async (req) => {
     }
 
     if (!appointment) {
-      // Booking failed after every recovery attempt → return the customer's money.
+      // RECOVERY BEFORE REFUND. The appointment may already exist — created by a
+      // racing client/redirect/webhook call, or booked on another surface that
+      // shares this Acuity. Acuity rejects the duplicate as "not available /
+      // already booked", which looks like a failure but must NOT trigger a
+      // refund (that gives the customer a paid session for free — the exact
+      // production incident). Verify against Acuity before touching the money.
+      const existing = await findExistingAcuityAppointment(
+        acuityAuth,
+        email,
+        datetime,
+        appointmentTypeID,
+      );
+      if (existing.appointment) {
+        logStep("Recovery: appointment already exists — keeping payment, NOT refunding", {
+          appointmentId: existing.appointment.id,
+        });
+        appointment = existing.appointment;
+        recoveredExistingAppointment = true;
+        await markBooked(appointment.id);
+      } else if (existing.inconclusive) {
+        // Couldn't confirm with Acuity. Refunding now risks clawing back a real
+        // booking, so we DON'T. Leave the PI unsettled (no booking_outcome) and
+        // return pending — the webhook backstop / client retry reconcile once
+        // Acuity is reachable. Return (don't throw) so the money-back catch
+        // block does not fire and refund.
+        logStep("Recovery: existence check inconclusive — leaving unsettled, NOT refunding", { paymentIntentId });
+        return new Response(JSON.stringify({
+          success: true,
+          pending: true,
+          message: "Your payment was received and your booking is being finalized. You'll receive a confirmation email shortly.",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+    }
+
+    if (!appointment) {
+      // Confirmed there is genuinely no appointment for this customer + slot
+      // (e.g. the slot was really taken by someone else) → return the money.
       if (needsCapture) {
         logStep("Canceling payment authorization due to booking failure");
         try {
@@ -445,8 +560,10 @@ serve(async (req) => {
       logStep("Could not get receipt URL", { error: e });
     }
 
-    // Send confirmation email if Resend is configured
-    if (resendApiKey) {
+    // Send confirmation email if Resend is configured. Skip when we merely
+    // recovered a booking that already existed elsewhere — that surface already
+    // confirmed it, so a second email would just confuse the customer.
+    if (resendApiKey && !recoveredExistingAppointment) {
       try {
         const sessionDate = new Date(datetime);
         const formattedDate = sessionDate.toLocaleDateString('en-IE', {

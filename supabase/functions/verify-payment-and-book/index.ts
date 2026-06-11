@@ -13,6 +13,70 @@ const logStep = (step: string, details?: any) => {
   console.log(`[VERIFY-PAYMENT-AND-BOOK] ${step}${detailsStr}`);
 };
 
+// Look for an appointment that ALREADY EXISTS for this customer + slot, so we
+// never refund a payment whose booking actually went through (a racing call,
+// the webhook/confirm path, or a booking on another surface that shares this
+// Acuity). Acuity rejects a duplicate as "not available / already booked",
+// which is indistinguishable from a real failure — refunding it would hand the
+// customer a paid session for free.
+//
+// Returns { appointment } on a confident match, { inconclusive: true } if
+// Acuity couldn't be queried (caller must NOT refund), or {} if confidently no
+// match (safe to refund).
+async function findExistingAcuityAppointment(
+  acuityAuth: string,
+  email: string,
+  datetime: string,
+  appointmentTypeID: string | number,
+): Promise<{ appointment?: any; inconclusive?: boolean }> {
+  if (!email || !datetime) return {};
+
+  const wantMs = new Date(datetime).getTime();
+  if (Number.isNaN(wantMs)) return {};
+
+  try {
+    const dayMs = 24 * 60 * 60 * 1000;
+    const minDate = new Date(wantMs - dayMs).toISOString().slice(0, 10);
+    const maxDate = new Date(wantMs + dayMs).toISOString().slice(0, 10);
+    const url =
+      `${ACUITY_API_BASE}/appointments` +
+      `?email=${encodeURIComponent(email)}` +
+      `&minDate=${minDate}&maxDate=${maxDate}&max=100`;
+
+    const resp = await fetch(url, {
+      headers: { Authorization: `Basic ${acuityAuth}`, "Content-Type": "application/json" },
+    });
+
+    if (!resp.ok) {
+      logStep("Existence check: Acuity appointments query failed — inconclusive", { status: resp.status });
+      return { inconclusive: true };
+    }
+
+    const appts = await resp.json();
+    if (!Array.isArray(appts)) {
+      logStep("Existence check: unexpected Acuity response — inconclusive");
+      return { inconclusive: true };
+    }
+
+    // Email is constrained by the query, so an exact start-time match (within a
+    // minute) is a confident "this is their booking".
+    const match = appts.find((a: any) => {
+      if (a?.canceled === true) return false;
+      return a?.datetime && Math.abs(new Date(a.datetime).getTime() - wantMs) < 60 * 1000;
+    });
+
+    if (match) {
+      logStep("Existence check: matched an existing appointment", { appointmentId: match.id });
+      return { appointment: match };
+    }
+
+    return {};
+  } catch (e) {
+    logStep("Existence check threw — inconclusive", { error: String(e) });
+    return { inconclusive: true };
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -101,10 +165,51 @@ serve(async (req) => {
     if (!acuityResponse.ok) {
       const errorText = await acuityResponse.text();
       logStep("Acuity booking failed", { status: acuityResponse.status, error: errorText });
-      
-      // If Acuity booking fails, we should refund the payment
-      logStep("Initiating refund due to booking failure");
-      
+
+      // RECOVERY BEFORE REFUND. The appointment may already exist (a racing
+      // call, the webhook/confirm path, or a booking on another surface that
+      // shares this Acuity). Acuity rejects the duplicate as "not available /
+      // already booked", which must NOT trigger a refund — that gives the
+      // customer a paid session for free. Verify against Acuity first.
+      const existing = await findExistingAcuityAppointment(
+        acuityAuthHeader, email, datetime, appointmentTypeID,
+      );
+
+      if (existing.appointment) {
+        logStep("Recovery: appointment already exists — keeping payment, NOT refunding", {
+          appointmentId: existing.appointment.id,
+        });
+        // Stamp the session so repeat calls short-circuit at the idempotency guard.
+        try {
+          await stripe.checkout.sessions.update(sessionId, {
+            metadata: { ...session.metadata, acuity_appointment_id: String(existing.appointment.id) },
+          });
+        } catch (e) {
+          logStep("WARNING: failed to stamp session metadata", { error: String(e) });
+        }
+        return new Response(JSON.stringify({
+          success: true,
+          alreadyBooked: true,
+          appointment: existing.appointment,
+          appointmentId: existing.appointment.id,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      if (existing.inconclusive) {
+        // Couldn't confirm with Acuity — refunding now risks clawing back a real
+        // booking, so we DON'T. Return a soft pending state instead of refunding.
+        logStep("Recovery: existence check inconclusive — NOT refunding", { sessionId });
+        return new Response(JSON.stringify({
+          success: false,
+          pending: true,
+          error: "We're finalizing your booking. If you don't receive a confirmation email shortly, please contact hello@fettle.ie for support.",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+
+      // Confirmed there is genuinely no appointment for this customer + slot →
+      // the payment has nothing to pay for, so refund it.
+      logStep("Initiating refund due to booking failure (no existing appointment found)");
+
       if (session.payment_intent) {
         await stripe.refunds.create({
           payment_intent: session.payment_intent as string,
@@ -112,7 +217,7 @@ serve(async (req) => {
         });
         logStep("Refund initiated");
       }
-      
+
       throw new Error(`Failed to book appointment in Acuity: ${errorText}. Payment has been refunded.`);
     }
 

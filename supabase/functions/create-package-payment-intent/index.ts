@@ -98,6 +98,9 @@ serve(async (req) => {
 
     // Store package details in metadata
     const packageMetadata = {
+      // Origin marker — see create-payment-intent. Marks this charge as created
+      // by MyFettleHub (Stripe account is shared with the separate [Website] app).
+      source: "myfettlehub",
       userId,
       packageId: packageId.toString(),
       packageName: packageInfo.name,
