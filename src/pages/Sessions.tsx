@@ -365,9 +365,9 @@ export default function Sessions() {
   };
 
   const now = new Date();
-  const upcomingSessions = appointments.filter(apt => 
-    !apt.canceled && !isPast(parseISO(apt.datetime))
-  );
+  const upcomingSessions = appointments
+    .filter(apt => !apt.canceled && !isPast(parseISO(apt.datetime)))
+    .sort((a, b) => parseISO(a.datetime).getTime() - parseISO(b.datetime).getTime());
   const pastSessions = appointments.filter(apt => 
     apt.canceled || isPast(parseISO(apt.datetime))
   );

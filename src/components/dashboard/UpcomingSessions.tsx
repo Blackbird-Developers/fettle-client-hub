@@ -99,6 +99,7 @@ export function UpcomingSessions() {
   
   const upcomingSessions = appointments
     .filter(apt => !apt.canceled && !isPast(parseISO(apt.datetime)))
+    .sort((a, b) => parseISO(a.datetime).getTime() - parseISO(b.datetime).getTime())
     .slice(0, 2);
 
   return (
