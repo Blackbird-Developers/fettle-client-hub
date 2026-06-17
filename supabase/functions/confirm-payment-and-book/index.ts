@@ -173,6 +173,29 @@ serve(async (req) => {
       });
     }
 
+    // GUARD: this function books a single session from the PI metadata
+    // (appointmentTypeID, datetime, …). Package purchases carry packageId and NO
+    // appointmentTypeID. If a package PI is misrouted here — e.g. the redirect
+    // fallback in usePaymentRedirectReturn tries confirm-payment-and-book first —
+    // parseInt(undefined) → NaN, Acuity rejects, and because package PIs are
+    // auto-captured we would then REFUND a valid package purchase. Refuse up front,
+    // WITHOUT touching the money, so the package flow can still complete it. This
+    // mirrors the guard the stripe-webhook backstop already applies.
+    if (!paymentIntent.metadata?.appointmentTypeID) {
+      logStep("Not a session-booking PI (no appointmentTypeID) — refusing without touching payment", {
+        paymentIntentId,
+        hasPackageId: !!paymentIntent.metadata?.packageId,
+      });
+      return new Response(JSON.stringify({
+        success: false,
+        wrongType: true,
+        error: "This payment is not a session booking.",
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400,
+      });
+    }
+
     // For manual capture, status should be "requires_capture" after card authorization
     // For Google Pay / Apple Pay, it might be "processing" briefly
     // "succeeded" means payment was already captured (auto-capture or already processed)
@@ -483,28 +506,39 @@ serve(async (req) => {
     if (!appointment) {
       // Confirmed there is genuinely no appointment for this customer + slot
       // (e.g. the slot was really taken by someone else) → return the money.
+      // CRITICAL: only mark the PI as terminally settled if the money was ACTUALLY
+      // returned. If the refund/cancel call fails (transient error, rate limit,
+      // missing refund scope), leaving the PI UNMARKED lets the stripe-webhook
+      // backstop keep retrying — instead of stamping "failed_refunded" and having
+      // every retry path treat it as done while the customer is still charged.
+      let moneyReturned = false;
       if (needsCapture) {
         logStep("Canceling payment authorization due to booking failure");
         try {
           await stripe.paymentIntents.cancel(paymentIntentId, { cancellation_reason: "abandoned" });
+          moneyReturned = true;
           logStep("Payment authorization canceled due to booking failure");
         } catch (cancelError) {
-          logStep("Failed to cancel payment authorization", { error: cancelError });
+          logStep("CRITICAL: booking failed AND authorization cancel failed — leaving UNSETTLED for webhook retry", { error: String(cancelError) });
         }
       } else {
         // Payment was auto-captured (Revolut, PayPal, etc.) — issue a full refund.
         logStep("Payment already captured — issuing automatic refund due to booking failure");
         try {
           await stripe.refunds.create({ payment_intent: paymentIntentId });
+          moneyReturned = true;
           logStep("Refund issued successfully");
         } catch (refundError) {
-          logStep("CRITICAL: Booking failed AND refund failed — manual refund needed", { error: refundError });
+          logStep("CRITICAL: booking failed AND refund failed — leaving UNSETTLED for webhook retry", { error: String(refundError) });
         }
       }
 
-      // Mark the PI as terminally settled so the webhook backstop and any client
-      // retry stop re-attempting this booking (and re-attempting the refund).
-      await markSettledFailed(needsCapture ? "failed_canceled" : "failed_refunded");
+      // Mark the PI as terminally settled ONLY when the money was returned, so the
+      // webhook backstop and any client retry stop re-attempting. If the money was
+      // not returned, leave it unmarked so the backstop retries the refund.
+      if (moneyReturned) {
+        await markSettledFailed(needsCapture ? "failed_canceled" : "failed_refunded");
+      }
 
       let userMessage = "We couldn't complete your booking at this time.";
       if (lastErrorText.includes("not available")) {
