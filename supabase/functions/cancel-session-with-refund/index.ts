@@ -74,58 +74,48 @@ serve(async (req) => {
       });
     }
 
-    // Find the Stripe customer and their payments
-    let refundProcessed = false;
-    let refundAmount = 0;
+    // Locate the Stripe payment for this appointment. LOOKUP ONLY — no money is
+    // moved until the Acuity cancellation has succeeded (see STEP 1 below). This
+    // ordering guarantees the customer is never left both refunded AND still
+    // holding the appointment slot.
+    let matchingPayment: Stripe.PaymentIntent | null = null;
+    let alreadyRefundedAmount: number | null = null;
 
     const customers = await stripe.customers.list({ email: clientEmail, limit: 1 });
-    
+
     if (customers.data.length > 0) {
       const customerId = customers.data[0].id;
       logStep("Found Stripe customer", { customerId });
 
-      // Search for payment with matching appointment datetime in metadata
       const paymentIntents = await stripe.paymentIntents.list({
         customer: customerId,
-        limit: 50,
+        limit: 100,
       });
 
-      // Find the payment for this specific appointment
-      const matchingPayment = paymentIntents.data.find((pi: Stripe.PaymentIntent) => {
-        if (pi.status !== 'succeeded') return false;
-        
-        // Check metadata for matching datetime
-        if (pi.metadata?.datetime === appointment.datetime) return true;
-        
-        // Also check if appointment ID matches if stored
-        if (pi.metadata?.appointmentId === appointmentId.toString()) return true;
-        
-        return false;
-      });
+      // Match on the durable acuity_appointment_id that confirm-payment-and-book
+      // stamps onto the PI metadata. Fall back to the legacy datetime compare only
+      // for older bookings made before that id was stamped. (The previous code
+      // checked pi.metadata.appointmentId — a key NO function ever writes — so the
+      // brittle datetime equality was effectively the only matcher.)
+      const apptIdStr = String(appointmentId);
+      matchingPayment =
+        paymentIntents.data.find((pi) =>
+          pi.status === 'succeeded' && pi.metadata?.acuity_appointment_id === apptIdStr
+        ) ||
+        paymentIntents.data.find((pi) =>
+          pi.status === 'succeeded' && pi.metadata?.datetime === appointment.datetime
+        ) ||
+        null;
 
       if (matchingPayment) {
         logStep("Found matching payment", { paymentId: matchingPayment.id, amount: matchingPayment.amount });
-
-        // Check if already refunded
         const existingRefunds = await stripe.refunds.list({
           payment_intent: matchingPayment.id,
           limit: 1,
         });
-
-        if (existingRefunds.data.length === 0) {
-          // Process refund
-          const refund = await stripe.refunds.create({
-            payment_intent: matchingPayment.id,
-            reason: "requested_by_customer",
-          });
-          
-          logStep("Refund processed", { refundId: refund.id, amount: refund.amount });
-          refundProcessed = true;
-          refundAmount = refund.amount;
-        } else {
-          logStep("Payment already refunded");
-          refundProcessed = true;
-          refundAmount = existingRefunds.data[0].amount;
+        if (existingRefunds.data.length > 0) {
+          alreadyRefundedAmount = existingRefunds.data[0].amount;
+          logStep("Payment already refunded", { amount: alreadyRefundedAmount });
         }
       } else {
         logStep("No matching payment found for this appointment");
@@ -134,7 +124,8 @@ serve(async (req) => {
       logStep("No Stripe customer found for this email");
     }
 
-    // Cancel the appointment in Acuity
+    // STEP 1: Cancel in Acuity FIRST. If this fails we have not refunded anything,
+    // so we never end up in the "refunded but still booked" state.
     const cancelResponse = await fetch(`${ACUITY_API_BASE}/appointments/${appointmentId}/cancel`, {
       method: 'PUT',
       headers: {
@@ -145,19 +136,55 @@ serve(async (req) => {
 
     if (!cancelResponse.ok) {
       const errorText = await cancelResponse.text();
-      logStep("Acuity cancellation failed", { status: cancelResponse.status, error: errorText });
+      logStep("Acuity cancellation failed — NO refund issued", { status: cancelResponse.status, error: errorText });
       throw new Error(`Failed to cancel appointment: ${errorText}`);
     }
 
     const cancelledAppointment = await cancelResponse.json();
     logStep("Appointment cancelled successfully", { appointmentId: cancelledAppointment.id });
 
-    return new Response(JSON.stringify({ 
+    // STEP 2: Slot is released — now issue the refund. Idempotent (skips if one
+    // already exists). A refund failure here is recoverable on a later retry (the
+    // existing-refund guard prevents a double refund) and never re-books the slot.
+    let refundProcessed = false;
+    let refundAmount = 0;
+    let refundPending = false;
+    if (matchingPayment) {
+      if (alreadyRefundedAmount !== null) {
+        refundProcessed = true;
+        refundAmount = alreadyRefundedAmount;
+      } else {
+        try {
+          const refund = await stripe.refunds.create({
+            payment_intent: matchingPayment.id,
+            reason: "requested_by_customer",
+          });
+          logStep("Refund processed", { refundId: refund.id, amount: refund.amount });
+          refundProcessed = true;
+          refundAmount = refund.amount;
+        } catch (refundError) {
+          // Cancellation already succeeded; report a clear "refund pending" state
+          // instead of throwing (which would wrongly imply the cancel didn't happen).
+          refundPending = true;
+          logStep("CRITICAL: appointment cancelled but refund failed — manual refund needed", {
+            paymentId: matchingPayment.id,
+            error: String(refundError),
+          });
+        }
+      }
+    }
+
+    const message = refundProcessed
+      ? `Session cancelled and €${(refundAmount / 100).toFixed(2)} refunded`
+      : refundPending
+        ? "Session cancelled. Your refund is being processed — please contact hello@fettle.ie if it doesn't appear shortly."
+        : "Session cancelled (no payment found to refund)";
+
+    return new Response(JSON.stringify({
       success: true,
-      message: refundProcessed 
-        ? `Session cancelled and €${(refundAmount / 100).toFixed(2)} refunded` 
-        : "Session cancelled (no payment found to refund)",
+      message,
       refunded: refundProcessed,
+      refundPending,
       refundAmount: refundAmount / 100,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
