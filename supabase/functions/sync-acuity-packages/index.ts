@@ -547,8 +547,21 @@ serve(async (req) => {
             });
 
           if (insertError) {
-            logStep("Error inserting package", { error: insertError, certId: cert.id });
-            errors.push(`Failed to insert cert ${cert.id}: ${insertError.message}`);
+            // 23505 = unique_violation on (user_id, stripe_session_id). This is
+            // the guard against the duplicate-row bug: a concurrent/repeated sync
+            // tried to insert a cert this user already has. Not an error — the
+            // cert is already synced, so skip it rather than creating a duplicate.
+            if (insertError.code === "23505") {
+              logStep("Duplicate insert blocked by unique constraint — cert already synced", {
+                certId: cert.id,
+                acuityCertId,
+                userId: certUserId,
+              });
+              skippedCount++;
+            } else {
+              logStep("Error inserting package", { error: insertError, certId: cert.id });
+              errors.push(`Failed to insert cert ${cert.id}: ${insertError.message}`);
+            }
           } else {
             logStep("Created new package from Acuity certificate", {
               certId: cert.id,
