@@ -584,6 +584,8 @@ export function BookingModal({
                 intakeFormFields: JSON.stringify(intakeFormFields),
                 // User's timezone for email formatting
                 timezone: profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+                // Optional loyalty coupon (validated + applied server-side)
+                couponCode: couponCode.trim() || undefined,
             };
 
             console.log(
@@ -604,6 +606,33 @@ export function BookingModal({
 
             if (error) throw error;
             if (data.error) throw new Error(data.error);
+
+            // Surface the loyalty-coupon outcome before charging.
+            if (couponCode.trim()) {
+                if (data.discountApplied) {
+                    toast({
+                        title: `Coupon applied — ${data.discountPercent}% off`,
+                        description: `You're paying €${((data.amount || 0) / 100).toFixed(2)} instead of €${((data.originalAmount || 0) / 100).toFixed(2)}.`,
+                    });
+                } else if (data.couponRejected) {
+                    const reasons: Record<string, string> = {
+                        unknown_code: "That coupon code isn't recognised.",
+                        not_signed_in: "We couldn't verify your account to apply this coupon.",
+                        server_unavailable: "We couldn't verify your coupon right now — please try again.",
+                        validation_error: "We couldn't verify your coupon right now — please try again.",
+                        not_earned: "This reward hasn't been unlocked on your account yet.",
+                        coupon_invalid: "This coupon is no longer valid.",
+                        coupon_not_found: "This coupon is no longer valid.",
+                        coupon_no_discount: "This coupon is no longer valid.",
+                        below_minimum: "This coupon can't be applied to this session.",
+                    };
+                    toast({
+                        title: 'Coupon not applied',
+                        description: `${reasons[data.couponRejected] || 'This coupon could not be applied.'} Proceeding at full price.`,
+                        variant: 'destructive',
+                    });
+                }
+            }
 
             // Save clientSecret and other data (same as filter.html)
             if (data.clientSecret && data.paymentIntentId) {
