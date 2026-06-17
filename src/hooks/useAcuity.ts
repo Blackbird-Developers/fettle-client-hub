@@ -60,16 +60,25 @@ export function useAcuityAppointments(clientEmail?: string, autoRefreshMs: numbe
     setError(null);
     
     try {
-      const params = new URLSearchParams({ action: 'get-appointments' });
-      if (clientEmail) {
-        params.append('email', clientEmail);
+      // Appointments are PHI: the acuity function now requires the signed-in
+      // user's JWT and scopes results to that user server-side. We send the
+      // user's access token (not the public anon key) so the request is
+      // authorized; the email is derived from the token on the server, so we no
+      // longer pass it as a query param.
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        // Not signed in — nothing to fetch (appointments are per-user).
+        setAppointments([]);
+        return;
       }
 
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/acuity?${params.toString()}`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/acuity?action=get-appointments`,
         {
           headers: {
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            'Authorization': `Bearer ${accessToken}`,
+            'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
             'Content-Type': 'application/json',
           },
         }

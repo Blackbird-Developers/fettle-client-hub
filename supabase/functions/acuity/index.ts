@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -6,6 +7,26 @@ const corsHeaders = {
 };
 
 const ACUITY_API_BASE = 'https://acuityscheduling.com/api/v1';
+
+// Resolve the authenticated user's email from the request's Supabase JWT.
+// Returns null if the caller is not a real signed-in user (e.g. only the
+// public anon key was presented). Appointment data is PHI, so the
+// get-appointments action uses this to scope results to the caller's own
+// email and rejects anonymous callers.
+async function getAuthenticatedEmail(req: Request): Promise<string | null> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+  const bearer = req.headers.get('Authorization')?.replace('Bearer ', '').trim();
+  if (!supabaseUrl || !supabaseAnonKey || !bearer) return null;
+  try {
+    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
+    const { data, error } = await supabaseAuth.auth.getUser(bearer);
+    if (error || !data.user) return null;
+    return data.user.email ?? null;
+  } catch (_e) {
+    return null;
+  }
+}
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -35,17 +56,29 @@ serve(async (req) => {
 
     switch (action) {
       case 'get-appointments': {
-        // Fetch appointments for a specific client
+        // SECURITY: appointments are PHI. Require a real authenticated user and
+        // ALWAYS scope the query to that user's own email. The client-supplied
+        // `email` param is IGNORED — previously any holder of the public anon key
+        // could pass an arbitrary email to read another client's appointments, or
+        // omit it entirely to dump the whole clinic's schedule.
+        const authedEmail = await getAuthenticatedEmail(req);
+        if (!authedEmail) {
+          console.warn('get-appointments rejected: no authenticated user');
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Fetch appointments for the authenticated client
         // Include minDate to get future appointments (Acuity defaults to past only)
         const today = new Date();
         const minDate = new Date(today.getFullYear(), today.getMonth() - 3, 1).toISOString().split('T')[0]; // 3 months ago
         const maxDate = new Date(today.getFullYear(), today.getMonth() + 6, 0).toISOString().split('T')[0]; // 6 months ahead
-        
-        // Build base URL - fetch both active and cancelled appointments
-        let baseParams = `minDate=${minDate}&maxDate=${maxDate}&max=100`;
-        if (clientEmail) {
-          baseParams += `&email=${encodeURIComponent(clientEmail)}`;
-        }
+
+        // Build base URL - fetch both active and cancelled appointments.
+        // email is the authenticated user's, not the client-supplied param.
+        const baseParams = `minDate=${minDate}&maxDate=${maxDate}&max=100&email=${encodeURIComponent(authedEmail)}`;
         
         // Fetch active appointments
         const activeUrl = `${ACUITY_API_BASE}/appointments?${baseParams}`;
@@ -127,9 +160,9 @@ serve(async (req) => {
           );
         }
 
-        let availabilityUrl = `${ACUITY_API_BASE}/availability/dates?appointmentTypeID=${appointmentTypeId}&month=${month}`;
+        let availabilityUrl = `${ACUITY_API_BASE}/availability/dates?appointmentTypeID=${encodeURIComponent(appointmentTypeId)}&month=${encodeURIComponent(month)}`;
         if (calendarId) {
-          availabilityUrl += `&calendarID=${calendarId}`;
+          availabilityUrl += `&calendarID=${encodeURIComponent(calendarId)}`;
         }
 
         const response = await fetch(availabilityUrl, {
@@ -161,9 +194,9 @@ serve(async (req) => {
           );
         }
 
-        let timesUrl = `${ACUITY_API_BASE}/availability/times?appointmentTypeID=${appointmentTypeId}&date=${date}`;
+        let timesUrl = `${ACUITY_API_BASE}/availability/times?appointmentTypeID=${encodeURIComponent(appointmentTypeId)}&date=${encodeURIComponent(date)}`;
         if (calendarId) {
-          timesUrl += `&calendarID=${calendarId}`;
+          timesUrl += `&calendarID=${encodeURIComponent(calendarId)}`;
         }
 
         const response = await fetch(timesUrl, {
