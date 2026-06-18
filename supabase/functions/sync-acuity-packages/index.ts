@@ -125,7 +125,9 @@ interface AcuityCertificate {
 }
 
 interface Profile {
-  id: string;
+  // user_id is the auth uid — the value every other table/RLS check keys on.
+  // (profiles.id is a separate random PK and must NOT be used as user_packages.user_id.)
+  user_id: string;
   email: string;
 }
 
@@ -339,7 +341,7 @@ serve(async (req) => {
       if (emailsToMatch.length > 0) {
         const { data: profiles, error: profilesError } = await supabaseAdmin
           .from("profiles")
-          .select("id, email")
+          .select("user_id, email")
           .in("email", emailsToMatch);
 
         if (profilesError) {
@@ -348,8 +350,12 @@ serve(async (req) => {
         }
 
         (profiles as Profile[] || []).forEach((profile) => {
-          if (profile.email) {
-            emailToUserId.set(profile.email.toLowerCase(), profile.id);
+          // Map to the AUTH uid (profiles.user_id), not the profiles PK. Using
+          // the PK here was the C1 bug: it inserted user_packages rows whose
+          // user_id matched nothing, so RLS hid them and redemption/lookup
+          // missed them — packages paid for but invisible and unredeemable.
+          if (profile.email && profile.user_id) {
+            emailToUserId.set(profile.email.toLowerCase(), profile.user_id);
           }
         });
       }
