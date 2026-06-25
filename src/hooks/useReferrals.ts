@@ -16,10 +16,12 @@ export interface ReferralFriend {
 export interface ReferralOverview {
   code: string;
   reward_cents: number;
+  validity_days: number;
   balance_cents: number;
   friends_joined: number;
   pending: number;
   total_earned_cents: number;
+  next_expiry: string | null;
   friends: ReferralFriend[];
 }
 

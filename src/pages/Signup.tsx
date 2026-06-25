@@ -322,10 +322,10 @@ export default function Signup() {
                   />
                 </div>
                 {referralCode && (
-                  <p className="text-xs text-success flex items-center gap-1">
-                    <Gift className="h-3 w-3" />
-                    You've been referred! €20 credit will be added once you
-                    verify your email.
+                  <p className="text-xs text-success flex items-center gap-1.5">
+                    <Gift className="h-3 w-3 shrink-0" />
+                    You've been referred! You'll get €20 credit after you pay for
+                    your first session.
                   </p>
                 )}
               </div>

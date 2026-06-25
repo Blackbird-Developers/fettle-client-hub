@@ -1,15 +1,16 @@
 -- ============================================================================
 -- Refer & Earn  —  "Give €20, Get €20" referral system
 -- ============================================================================
--- Rules (per product decisions):
---   * Referee earns €20 credit when they sign up via a code / link / email.
---   * Referrer earns €20 credit, unlocked when their friend signs up.
---   * Credits are SPEND-ONLY (sessions & packages) — never paid out as cash.
---   * Anti-abuse: rewards are granted only once the referee's email is
---     CONFIRMED (the real "signed up" moment); self-referral is blocked; a
---     given new account can be referred at most once; auth enforces unique
---     emails so each reward needs a unique, verifiable inbox.
--- All amounts are stored in cents. €20 = 2000.
+-- Rules (finalised):
+--   * Both €20 credits unlock when the REFEREE makes their first REAL-MONEY
+--     payment for a session OR package (becoming a paying client).
+--   * Anti-abuse: the qualifying payment must be real money — a booking fully
+--     covered by referral credit never triggers rewards. Self-referral blocked;
+--     one referral per new account; auth enforces unique emails.
+--   * Credits EXPIRE 45 days after they are granted.
+--   * Credits are spend-only (sessions & packages), can cover a booking in full
+--     (€0 charge), and are never paid out as cash.
+-- All amounts are in cents. €20 = 2000.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -25,70 +26,82 @@ CREATE TABLE IF NOT EXISTS public.referral_codes (
 
 -- One row per referred person (the referee).
 CREATE TABLE IF NOT EXISTS public.referrals (
-  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  referrer_user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  -- A given new account can only ever be referred once (anti-farm).
-  referee_user_id     UUID NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
-  code_used           TEXT NOT NULL,
-  status              TEXT NOT NULL DEFAULT 'pending'
-                        CHECK (status IN ('pending', 'rewarded')),
-  -- Denormalised snapshot so the referrer can see who they referred without
-  -- gaining RLS access to another user's profile row.
-  referee_first_name  TEXT,
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  referrer_user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  referee_user_id      UUID NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+  code_used            TEXT NOT NULL,
+  -- pending  = signed up, not yet a paying client
+  -- rewarded = referee made first paid payment → both credits granted
+  status               TEXT NOT NULL DEFAULT 'pending'
+                         CHECK (status IN ('pending', 'rewarded')),
+  referee_first_name   TEXT,
   referee_masked_email TEXT,
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-  rewarded_at         TIMESTAMPTZ,
-  -- Self-referral is impossible.
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  rewarded_at          TIMESTAMPTZ,
   CONSTRAINT referrals_no_self_referral CHECK (referrer_user_id <> referee_user_id)
 );
-
 CREATE INDEX IF NOT EXISTS referrals_referrer_idx ON public.referrals (referrer_user_id);
 
--- Append-only credit ledger. Balance = SUM(amount_cents).
+-- Credit "lots". Each granted credit is a lot with its own expiry and a
+-- remaining balance that gets consumed (FIFO by soonest expiry) on redemption.
 CREATE TABLE IF NOT EXISTS public.referral_credits (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id            UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  amount_cents       INTEGER NOT NULL,           -- +earned, -redeemed
-  type               TEXT NOT NULL
-                       CHECK (type IN ('referee_signup', 'referrer_reward', 'redeemed', 'adjustment')),
+  amount_cents       INTEGER NOT NULL CHECK (amount_cents > 0),   -- original grant
+  remaining_cents    INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  type               TEXT NOT NULL CHECK (type IN ('referee_reward', 'referrer_reward')),
   source_referral_id UUID REFERENCES public.referrals(id) ON DELETE SET NULL,
   description        TEXT,
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+  granted_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at         TIMESTAMPTZ NOT NULL
 );
-
 CREATE INDEX IF NOT EXISTS referral_credits_user_idx ON public.referral_credits (user_id);
 
+-- Each spend of credit against a booking (one row per lot consumed).
+CREATE TABLE IF NOT EXISTS public.referral_redemptions (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  credit_id    UUID NOT NULL REFERENCES public.referral_credits(id) ON DELETE CASCADE,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  booking_type TEXT,                 -- 'session' | 'package'
+  booking_ref  TEXT,                 -- stripe id / acuity id / etc.
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS referral_redemptions_user_idx ON public.referral_redemptions (user_id);
+
 -- ----------------------------------------------------------------------------
--- RLS — users read only their own rows; all writes happen via SECURITY DEFINER
--- functions below (which bypass RLS), so no INSERT/UPDATE policies are granted.
+-- RLS — users read only their own rows; all writes go through the
+-- SECURITY DEFINER functions below (they bypass RLS).
 -- ----------------------------------------------------------------------------
-ALTER TABLE public.referral_codes   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.referrals        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.referral_credits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.referral_codes       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.referrals            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.referral_credits     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.referral_redemptions ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "own referral code" ON public.referral_codes
   FOR SELECT USING (auth.uid() = user_id);
-
 CREATE POLICY "own referrals" ON public.referrals
   FOR SELECT USING (auth.uid() IN (referrer_user_id, referee_user_id));
-
 CREATE POLICY "own referral credits" ON public.referral_credits
   FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "own referral redemptions" ON public.referral_redemptions
+  FOR SELECT USING (auth.uid() = user_id);
 
--- ----------------------------------------------------------------------------
--- Helpers
--- ----------------------------------------------------------------------------
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 
--- Reward amount in cents (single source of truth).
+-- ----------------------------------------------------------------------------
+-- Constants & helpers
+-- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.referral_reward_cents()
 RETURNS INTEGER LANGUAGE sql IMMUTABLE AS $$ SELECT 2000 $$;
+
+CREATE OR REPLACE FUNCTION public.referral_validity_days()
+RETURNS INTEGER LANGUAGE sql IMMUTABLE AS $$ SELECT 45 $$;
 
 -- Mask an email: "sarah@gmail.com" -> "s•••@gmail.com".
 CREATE OR REPLACE FUNCTION public.mask_email(addr TEXT)
 RETURNS TEXT LANGUAGE plpgsql IMMUTABLE AS $$
-DECLARE
-  at_pos INT;
+DECLARE at_pos INT;
 BEGIN
   IF addr IS NULL OR length(addr) = 0 THEN RETURN NULL; END IF;
   at_pos := position('@' IN addr);
@@ -102,8 +115,7 @@ CREATE OR REPLACE FUNCTION public.generate_referral_code()
 RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
   alphabet TEXT := 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  candidate TEXT;
-  i INT;
+  candidate TEXT; i INT;
 BEGIN
   LOOP
     candidate := 'FET-';
@@ -116,91 +128,118 @@ BEGIN
 END;
 $$;
 
--- Ensure a user has a referral code; return it (lazy backfill for existing users).
 CREATE OR REPLACE FUNCTION public.ensure_referral_code(uid UUID)
 RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  existing TEXT;
+DECLARE existing TEXT;
 BEGIN
   SELECT code INTO existing FROM public.referral_codes WHERE user_id = uid;
   IF existing IS NOT NULL THEN RETURN existing; END IF;
-
   existing := public.generate_referral_code();
-  INSERT INTO public.referral_codes (user_id, code)
-  VALUES (uid, existing)
-  ON CONFLICT (user_id) DO NOTHING;
-
-  -- Re-read in case of a concurrent insert.
+  INSERT INTO public.referral_codes (user_id, code) VALUES (uid, existing)
+    ON CONFLICT (user_id) DO NOTHING;
   SELECT code INTO existing FROM public.referral_codes WHERE user_id = uid;
   RETURN existing;
 END;
 $$;
 
--- Record attribution at signup (no credit granted yet — that waits for email
--- confirmation). Safe to call with a bad/empty code (it just no-ops).
+-- Record attribution at signup (no credit yet). Safe with bad/empty code.
 CREATE OR REPLACE FUNCTION public.link_referral(
   referee_id UUID, referee_email TEXT, referee_name TEXT, raw_code TEXT
 )
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  norm_code TEXT;
-  ref_user  UUID;
+DECLARE norm_code TEXT; ref_user UUID;
 BEGIN
   IF raw_code IS NULL OR length(trim(raw_code)) = 0 THEN RETURN; END IF;
   norm_code := upper(trim(raw_code));
-
   SELECT user_id INTO ref_user FROM public.referral_codes WHERE code = norm_code;
-  IF ref_user IS NULL THEN RETURN; END IF;          -- invalid code
-  IF ref_user = referee_id THEN RETURN; END IF;     -- self-referral blocked
+  IF ref_user IS NULL THEN RETURN; END IF;            -- invalid code
+  IF ref_user = referee_id THEN RETURN; END IF;       -- self-referral blocked
   IF EXISTS (SELECT 1 FROM public.referrals WHERE referee_user_id = referee_id) THEN
-    RETURN;                                          -- already referred once
+    RETURN;                                            -- already referred once
   END IF;
-
   INSERT INTO public.referrals (
     referrer_user_id, referee_user_id, code_used, status,
     referee_first_name, referee_masked_email
   ) VALUES (
     ref_user, referee_id, norm_code, 'pending',
     referee_name, public.mask_email(referee_email)
-  )
-  ON CONFLICT (referee_user_id) DO NOTHING;
+  ) ON CONFLICT (referee_user_id) DO NOTHING;
 END;
 $$;
 
--- Grant both rewards once the referee is confirmed. Idempotent: only acts on a
--- 'pending' referral and flips it to 'rewarded'.
-CREATE OR REPLACE FUNCTION public.grant_referral_rewards(referee_id UUID)
-RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+-- Called from the payment edge functions when the REFEREE completes their first
+-- REAL-MONEY payment. Grants both €20 credits (45-day expiry) and marks the
+-- referral rewarded. Idempotent: only acts on a 'pending' referral.
+CREATE OR REPLACE FUNCTION public.qualify_referral(referee_id UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   r      public.referrals%ROWTYPE;
   reward INTEGER := public.referral_reward_cents();
+  exp    TIMESTAMPTZ := now() + make_interval(days => public.referral_validity_days());
 BEGIN
   SELECT * INTO r FROM public.referrals
    WHERE referee_user_id = referee_id AND status = 'pending'
    FOR UPDATE;
-  IF NOT FOUND THEN RETURN; END IF;
+  IF NOT FOUND THEN RETURN FALSE; END IF;
 
-  -- Referee's €20
-  INSERT INTO public.referral_credits (user_id, amount_cents, type, source_referral_id, description)
-  VALUES (r.referee_user_id, reward, 'referee_signup', r.id, 'Welcome credit for joining via referral');
+  INSERT INTO public.referral_credits
+    (user_id, amount_cents, remaining_cents, type, source_referral_id, description, expires_at)
+  VALUES
+    (r.referee_user_id, reward, reward, 'referee_reward', r.id,
+     'Welcome credit — completed your first paid session', exp),
+    (r.referrer_user_id, reward, reward, 'referrer_reward', r.id,
+     'Reward — your referral became a paying client', exp);
 
-  -- Referrer's €20
-  INSERT INTO public.referral_credits (user_id, amount_cents, type, source_referral_id, description)
-  VALUES (r.referrer_user_id, reward, 'referrer_reward', r.id, 'Reward for referring a friend');
+  UPDATE public.referrals SET status = 'rewarded', rewarded_at = now() WHERE id = r.id;
+  RETURN TRUE;
+END;
+$$;
 
-  UPDATE public.referrals
-     SET status = 'rewarded', rewarded_at = now()
-   WHERE id = r.id;
+-- Spendable balance = remaining on lots that are not used up and not expired.
+CREATE OR REPLACE FUNCTION public.referral_available_balance(uid UUID)
+RETURNS INTEGER LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT COALESCE(SUM(remaining_cents), 0)::int
+  FROM public.referral_credits
+  WHERE user_id = uid AND remaining_cents > 0 AND expires_at > now();
+$$;
+
+-- Consume up to want_cents from the user's credit (FIFO by soonest expiry).
+-- Returns the amount actually redeemed (≤ want_cents, ≤ available balance).
+CREATE OR REPLACE FUNCTION public.redeem_referral_credit(
+  uid UUID, want_cents INTEGER, p_booking_type TEXT, p_booking_ref TEXT
+)
+RETURNS INTEGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  remaining INTEGER := want_cents;
+  take      INTEGER;
+  lot       RECORD;
+BEGIN
+  IF want_cents IS NULL OR want_cents <= 0 THEN RETURN 0; END IF;
+
+  FOR lot IN
+    SELECT id, remaining_cents FROM public.referral_credits
+     WHERE user_id = uid AND remaining_cents > 0 AND expires_at > now()
+     ORDER BY expires_at ASC, granted_at ASC
+     FOR UPDATE
+  LOOP
+    EXIT WHEN remaining <= 0;
+    take := least(lot.remaining_cents, remaining);
+    UPDATE public.referral_credits SET remaining_cents = remaining_cents - take WHERE id = lot.id;
+    INSERT INTO public.referral_redemptions (user_id, credit_id, amount_cents, booking_type, booking_ref)
+    VALUES (uid, lot.id, take, p_booking_type, p_booking_ref);
+    remaining := remaining - take;
+  END LOOP;
+
+  RETURN want_cents - remaining;
 END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- Triggers — extend new-user handling + reward on email confirmation
+-- New-user handling: create code + record attribution. NO reward at signup.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  names RECORD;
+DECLARE names RECORD;
 BEGIN
   SELECT * INTO names FROM public.extract_user_names(NEW.raw_user_meta_data);
 
@@ -208,66 +247,39 @@ BEGIN
   VALUES (NEW.id, NEW.email, names.first_name, names.last_name)
   ON CONFLICT (user_id) DO NOTHING;
 
-  -- Every new user gets their own referral code.
   PERFORM public.ensure_referral_code(NEW.id);
-
-  -- If they arrived via a referral code, record attribution.
   PERFORM public.link_referral(
-    NEW.id, NEW.email, names.first_name,
-    NEW.raw_user_meta_data ->> 'referral_code'
+    NEW.id, NEW.email, names.first_name, NEW.raw_user_meta_data ->> 'referral_code'
   );
 
-  -- OAuth signups (e.g. Google) are created already-confirmed, so reward now.
-  IF NEW.email_confirmed_at IS NOT NULL THEN
-    PERFORM public.grant_referral_rewards(NEW.id);
-  END IF;
-
   RETURN NEW;
 END;
 $$;
 
--- Email/password signups confirm later; reward at that moment.
-CREATE OR REPLACE FUNCTION public.handle_user_email_confirmed()
-RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-BEGIN
-  IF OLD.email_confirmed_at IS NULL AND NEW.email_confirmed_at IS NOT NULL THEN
-    PERFORM public.grant_referral_rewards(NEW.id);
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
+-- Remove the old email-confirmation reward trigger from earlier drafts (rewards
+-- now fire on first paid session, via qualify_referral from edge functions).
 DROP TRIGGER IF EXISTS on_auth_user_email_confirmed ON auth.users;
-CREATE TRIGGER on_auth_user_email_confirmed
-  AFTER UPDATE OF email_confirmed_at ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_user_email_confirmed();
+DROP FUNCTION IF EXISTS public.handle_user_email_confirmed();
+DROP FUNCTION IF EXISTS public.grant_referral_rewards(UUID);
 
 -- ----------------------------------------------------------------------------
--- Read API — single RPC the frontend calls for the whole Refer & Earn page.
--- Lazily ensures the caller has a code (covers users created before this feature).
+-- Read API for the Refer & Earn page.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.get_referral_overview()
 RETURNS JSON LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
-  uid        UUID := auth.uid();
-  my_code    TEXT;
-  reward     INTEGER := public.referral_reward_cents();
-  balance    INTEGER;
-  friends    JSON;
+  uid     UUID := auth.uid();
+  my_code TEXT;
+  reward  INTEGER := public.referral_reward_cents();
+  friends JSON;
 BEGIN
-  IF uid IS NULL THEN
-    RAISE EXCEPTION 'Not authenticated';
-  END IF;
-
+  IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
   my_code := public.ensure_referral_code(uid);
-
-  SELECT COALESCE(SUM(amount_cents), 0) INTO balance
-    FROM public.referral_credits WHERE user_id = uid;
 
   SELECT COALESCE(json_agg(f ORDER BY f.created_at DESC), '[]'::json) INTO friends
   FROM (
     SELECT id,
-           referee_first_name AS name,
+           referee_first_name   AS name,
            referee_masked_email AS masked_email,
            status,
            created_at,
@@ -279,13 +291,16 @@ BEGIN
   RETURN json_build_object(
     'code', my_code,
     'reward_cents', reward,
-    'balance_cents', balance,
+    'validity_days', public.referral_validity_days(),
+    'balance_cents', public.referral_available_balance(uid),
     'friends_joined', (SELECT count(*) FROM public.referrals
                         WHERE referrer_user_id = uid AND status = 'rewarded'),
     'pending', (SELECT count(*) FROM public.referrals
                  WHERE referrer_user_id = uid AND status = 'pending'),
     'total_earned_cents', COALESCE((SELECT SUM(amount_cents) FROM public.referral_credits
                                      WHERE user_id = uid AND type = 'referrer_reward'), 0),
+    'next_expiry', (SELECT min(expires_at) FROM public.referral_credits
+                     WHERE user_id = uid AND remaining_cents > 0 AND expires_at > now()),
     'friends', friends
   );
 END;
@@ -293,19 +308,15 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.get_referral_overview() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ensure_referral_code(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.referral_available_balance(UUID) TO authenticated;
 
 -- ----------------------------------------------------------------------------
--- Backfill: give every existing user a referral code now (one at a time so the
--- uniqueness check inside ensure_referral_code sees prior inserts).
+-- Backfill: give every existing user a referral code now.
 -- ----------------------------------------------------------------------------
 DO $$
-DECLARE
-  u RECORD;
+DECLARE u RECORD;
 BEGIN
-  FOR u IN
-    SELECT id FROM auth.users
-    WHERE id NOT IN (SELECT user_id FROM public.referral_codes)
-  LOOP
+  FOR u IN SELECT id FROM auth.users WHERE id NOT IN (SELECT user_id FROM public.referral_codes) LOOP
     PERFORM public.ensure_referral_code(u.id);
   END LOOP;
 END $$;

@@ -127,9 +127,11 @@ export default function Referrals() {
 
   const steps = [
     { icon: Share2, title: "Share your link", desc: "Send your unique code or link to friends and family." },
-    { icon: UserPlus, title: "They join & verify", desc: `Your friend gets €${REFERRAL_REWARD} off after verifying their email.` },
-    { icon: CalendarCheck, title: "You both win", desc: `You earn €${REFERRAL_REWARD} credit the moment they join. No limit on referrals.` },
+    { icon: UserPlus, title: "They book & pay", desc: "Your friend signs up and pays for their first session." },
+    { icon: CalendarCheck, title: "You both earn €" + REFERRAL_REWARD, desc: `Once they pay, you each get €${REFERRAL_REWARD} credit for any session or package. No limit.` },
   ];
+
+  const validityDays = data?.validity_days ?? 45;
 
   return (
     <DashboardLayout>
@@ -352,8 +354,8 @@ export default function Referrals() {
                     <span className="font-semibold text-foreground">
                       {formatEuros(balance)} credit
                     </span>{" "}
-                    ready to use. It applies automatically at checkout for
-                    sessions and packages.
+                    ready to use at checkout for sessions and packages. Credits
+                    expire {validityDays} days after you earn them.
                   </p>
                 </div>
               </CardContent>
