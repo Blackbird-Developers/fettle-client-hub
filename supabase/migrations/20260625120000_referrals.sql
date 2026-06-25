@@ -78,12 +78,19 @@ ALTER TABLE public.referrals            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.referral_credits     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.referral_redemptions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "own referral code" ON public.referral_codes;
 CREATE POLICY "own referral code" ON public.referral_codes
   FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "own referrals" ON public.referrals;
 CREATE POLICY "own referrals" ON public.referrals
   FOR SELECT USING (auth.uid() IN (referrer_user_id, referee_user_id));
+
+DROP POLICY IF EXISTS "own referral credits" ON public.referral_credits;
 CREATE POLICY "own referral credits" ON public.referral_credits
   FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "own referral redemptions" ON public.referral_redemptions;
 CREATE POLICY "own referral redemptions" ON public.referral_redemptions
   FOR SELECT USING (auth.uid() = user_id);
 
