@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Mail, Lock, User, ArrowRight, CheckCircle, Loader2 } from "lucide-react";
+import { Mail, Lock, User, ArrowRight, CheckCircle, Loader2, Gift } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -20,9 +20,19 @@ export default function Signup() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
+  const [referralCode, setReferralCode] = useState("");
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const { signUp, signInWithGoogle, user } = useAuth();
+
+  // Capture ?ref=CODE from the referral link / email.
+  const refFromUrl = searchParams.get("ref");
+  useEffect(() => {
+    if (refFromUrl) {
+      setReferralCode(refFromUrl.trim().toUpperCase());
+    }
+  }, [refFromUrl]);
 
   useEffect(() => {
     if (user) {
@@ -88,7 +98,7 @@ export default function Signup() {
     
     setIsLoading(true);
     
-    const { error } = await signUp(email, password, firstName, lastName);
+    const { error } = await signUp(email, password, firstName, lastName, referralCode);
     
     if (error) {
       setIsLoading(false);
@@ -289,6 +299,35 @@ export default function Signup() {
                 <p className="text-xs text-muted-foreground">
                   Must be at least 8 characters
                 </p>
+              </div>
+
+              {/* Referral code (optional, prefilled from a referral link) */}
+              <div className="space-y-2">
+                <Label htmlFor="referralCode">
+                  Referral code{" "}
+                  <span className="text-muted-foreground font-normal">
+                    (optional)
+                  </span>
+                </Label>
+                <div className="relative">
+                  <Gift className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="referralCode"
+                    placeholder="FET-XXXXXX"
+                    value={referralCode}
+                    onChange={(e) =>
+                      setReferralCode(e.target.value.toUpperCase())
+                    }
+                    className="pl-10 uppercase tracking-wider"
+                  />
+                </div>
+                {referralCode && (
+                  <p className="text-xs text-success flex items-center gap-1">
+                    <Gift className="h-3 w-3" />
+                    You've been referred! €20 credit will be added once you
+                    verify your email.
+                  </p>
+                )}
               </div>
 
               {/* Consent Checkboxes */}
