@@ -75,9 +75,57 @@ serve(async (req) => {
       throw new Error("Invalid package ID");
     }
 
-    const amountInCents = packageInfo.price * 100;
+    let amountInCents = Math.round(packageInfo.price * 100);
+    const originalAmount = amountInCents;
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
+
+    // ── Referral credit (optional, opt-in via useReferralCredit) ──────────────
+    // Same semantics as create-payment-intent: applied here, redeemed in
+    // confirm-package-payment after the purchase succeeds. Dormant unless opted in.
+    let referralCreditApplied = 0;
+    let referralFullyCovered = false;
+    if (body.useReferralCredit === true) {
+      try {
+        const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+        if (serviceKey) {
+          const admin = createClient(supabaseUrl, serviceKey);
+          const { data: bal } = await admin.rpc("referral_available_balance", { uid: userId });
+          const balance = Number(bal || 0);
+          if (balance > 0) {
+            let apply = Math.min(balance, amountInCents);
+            const remainder = amountInCents - apply;
+            if (remainder === 0) referralFullyCovered = true;
+            else if (remainder < 50) apply = amountInCents - 50;
+            referralCreditApplied = apply;
+            if (!referralFullyCovered) amountInCents = amountInCents - apply;
+            logStep("Referral credit applied", { balance, referralCreditApplied, referralFullyCovered, newAmount: amountInCents });
+          }
+        }
+      } catch (e) {
+        logStep("Referral credit skipped (non-fatal)", { error: String(e) });
+        referralCreditApplied = 0;
+        referralFullyCovered = false;
+      }
+    }
+
+    // Fully covered by credit → no Stripe charge; client purchases via the
+    // dedicated no-charge path (book-with-credit / package mode).
+    if (referralFullyCovered) {
+      logStep("Package fully covered by referral credit — skipping Stripe", { referralCreditApplied, originalAmount });
+      return new Response(JSON.stringify({
+        fullyCovered: true,
+        referralCreditApplied,
+        originalAmount,
+        amount: 0,
+        packageName: packageInfo.name,
+        sessions: packageInfo.sessions,
+        packageId: packageId.toString(),
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
 
     // Check if customer exists
     const customers = await stripe.customers.list({ email, limit: 1 });
@@ -109,6 +157,7 @@ serve(async (req) => {
       lastName,
       email,
       phone: phone || "",
+      referralCreditApplied: referralCreditApplied ? String(referralCreditApplied) : "",
     };
 
     // Create payment intent
@@ -136,6 +185,8 @@ serve(async (req) => {
       livemode: paymentIntent.livemode,
       packageName: packageInfo.name,
       sessions: packageInfo.sessions,
+      referralCreditApplied,
+      originalAmount,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,

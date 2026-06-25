@@ -199,6 +199,72 @@ serve(async (req) => {
       couponRejected = "below_minimum";
     }
 
+    // ── Referral credit (optional, opt-in via useReferralCredit) ──────────────
+    // Applied AFTER any loyalty discount. NEVER blocks a booking — any problem
+    // just means full price. The credit is only RESERVED here (stamped in
+    // metadata); it is actually consumed in confirm-payment-and-book after the
+    // booking succeeds. Dormant unless the caller explicitly opts in, so this
+    // cannot affect normal bookings.
+    let referralCreditApplied = 0;
+    let referralFullyCovered = false;
+    if (body.useReferralCredit === true) {
+      try {
+        const supabaseUrl = Deno.env.get("SUPABASE_URL");
+        const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+        const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+        const token = req.headers.get("Authorization")?.replace("Bearer ", "").trim();
+
+        let uid: string | null = null;
+        if (supabaseUrl && anonKey && token) {
+          const authClient = createClient(supabaseUrl, anonKey);
+          const { data: u } = await authClient.auth.getUser(token);
+          uid = u.user?.id ?? null;
+        }
+
+        if (uid && supabaseUrl && serviceKey) {
+          const admin = createClient(supabaseUrl, serviceKey);
+          const { data: bal } = await admin.rpc("referral_available_balance", { uid });
+          const balance = Number(bal || 0);
+          if (balance > 0) {
+            let apply = Math.min(balance, amountInCents);
+            const remainder = amountInCents - apply;
+            if (remainder === 0) {
+              referralFullyCovered = true;
+            } else if (remainder < 50) {
+              // Stripe rejects charges under €0.50 — leave exactly that to charge.
+              apply = amountInCents - 50;
+            }
+            referralCreditApplied = apply;
+            if (!referralFullyCovered) amountInCents = amountInCents - apply;
+            logStep("Referral credit applied", { balance, referralCreditApplied, referralFullyCovered, newAmount: amountInCents });
+          }
+        }
+      } catch (e) {
+        logStep("Referral credit skipped (non-fatal)", { error: String(e) });
+        referralCreditApplied = 0;
+        referralFullyCovered = false;
+      }
+    }
+
+    // Fully covered by credit → no Stripe charge. The client books via the
+    // dedicated no-charge path (book-with-credit) instead of confirming a PI.
+    if (referralFullyCovered) {
+      logStep("Booking fully covered by referral credit — skipping Stripe", { referralCreditApplied, originalAmount });
+      return new Response(JSON.stringify({
+        fullyCovered: true,
+        referralCreditApplied,
+        originalAmount,
+        amount: 0,
+        currency: "eur",
+        discountApplied,
+        discountPercent: appliedDiscountPercent,
+        couponRejected,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
     // Check if customer exists
     const customers = await stripe.customers.list({ email, limit: 1 });
     let customerId: string;
@@ -238,6 +304,8 @@ serve(async (req) => {
       couponCode: discountApplied ? normalizedCoupon : "",
       discountPercent: discountApplied ? String(appliedDiscountPercent) : "",
       originalAmount: discountApplied ? String(originalAmount) : "",
+      // Referral credit reserved for this booking; redeemed on confirm.
+      referralCreditApplied: referralCreditApplied ? String(referralCreditApplied) : "",
     };
 
     // Create PaymentIntent with auto-capture to support all payment methods
@@ -272,6 +340,7 @@ serve(async (req) => {
       discountPercent: appliedDiscountPercent,
       originalAmount,
       couponRejected,
+      referralCreditApplied,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
