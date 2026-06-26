@@ -467,6 +467,32 @@ serve(async (req) => {
       }
     }
 
+    // ── Referral credits (best-effort; never blocks the purchase) ────────────
+    // The customer just paid REAL money for a package, so (1) consume any
+    // referral credit applied to this payment, and (2) unlock the "first paid"
+    // referral rewards for them and their referrer.
+    try {
+      const applied = parseInt(metadata.referralCreditApplied || "0", 10);
+      if (applied > 0) {
+        const { data: existing } = await supabaseAdmin
+          .from("referral_redemptions").select("id")
+          .eq("booking_ref", paymentIntentId).limit(1);
+        if (!existing || existing.length === 0) {
+          await supabaseAdmin.rpc("redeem_referral_credit", {
+            uid: userId, want_cents: applied,
+            p_booking_type: "package", p_booking_ref: paymentIntentId,
+          });
+          logStep("Referral credit redeemed", { userId, applied });
+        }
+      }
+      if (paymentIntent.amount > 0) {
+        const { data: qualified } = await supabaseAdmin.rpc("qualify_referral", { referee_id: userId });
+        if (qualified) logStep("Referral rewards unlocked (first paid purchase)", { userId });
+      }
+    } catch (e) {
+      logStep("Referral credit handling failed (non-fatal)", { error: String(e) });
+    }
+
     return new Response(JSON.stringify({
       success: true,
       package: {

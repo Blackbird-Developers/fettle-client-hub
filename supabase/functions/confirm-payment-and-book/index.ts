@@ -681,6 +681,44 @@ serve(async (req) => {
       }
     }
 
+    // ── Referral credits (best-effort; must NEVER block/break the booking) ───
+    // The booking already succeeded above. Here we (1) consume any referral
+    // credit that was applied to this payment, and (2) — because the customer
+    // just paid REAL money for a session — unlock the "first paid session"
+    // referral rewards for them and whoever referred them.
+    try {
+      if (supabaseUrl && supabaseServiceKey) {
+        const refAdmin = createClient(supabaseUrl, supabaseServiceKey);
+        const { data: prof } = await refAdmin
+          .from("profiles").select("user_id").eq("email", email).maybeSingle();
+        const payingUserId = prof?.user_id ?? null;
+
+        if (payingUserId) {
+          // (1) Redeem applied credit — idempotent on this paymentIntentId.
+          const applied = parseInt(metadata.referralCreditApplied || "0", 10);
+          if (applied > 0) {
+            const { data: existing } = await refAdmin
+              .from("referral_redemptions").select("id")
+              .eq("booking_ref", paymentIntentId).limit(1);
+            if (!existing || existing.length === 0) {
+              await refAdmin.rpc("redeem_referral_credit", {
+                uid: payingUserId, want_cents: applied,
+                p_booking_type: "session", p_booking_ref: paymentIntentId,
+              });
+              logStep("Referral credit redeemed", { payingUserId, applied });
+            }
+          }
+          // (2) Real money paid → qualify the referral (idempotent server-side).
+          if (paymentIntent.amount > 0) {
+            const { data: qualified } = await refAdmin.rpc("qualify_referral", { referee_id: payingUserId });
+            if (qualified) logStep("Referral rewards unlocked (first paid session)", { payingUserId });
+          }
+        }
+      }
+    } catch (e) {
+      logStep("Referral credit handling failed (non-fatal)", { error: String(e) });
+    }
+
     return new Response(JSON.stringify({
       success: true,
       appointment: {

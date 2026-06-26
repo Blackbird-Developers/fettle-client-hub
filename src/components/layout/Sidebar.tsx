@@ -10,6 +10,7 @@ import {
   Menu,
   Shield,
   HelpCircle,
+  Gift,
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -23,6 +24,7 @@ const authenticatedNavigation = [
   { name: "My Sessions", href: "/sessions", icon: Calendar },
   { name: "Invoices", href: "/invoices", icon: FileText },
   { name: "Profile", href: "/profile", icon: User },
+  { name: "Refer & Earn", href: "/referrals", icon: Gift },
   { name: "Help Center", href: "/help", icon: HelpCircle },
 ];
 
