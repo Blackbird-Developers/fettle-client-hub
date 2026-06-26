@@ -25,6 +25,7 @@ import {
     AcuityCalendar,
 } from '@/hooks/useAcuity';
 import { useActivePackages } from '@/hooks/useUserPackages';
+import { useReferrals } from '@/hooks/useReferrals';
 import { useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -135,6 +136,7 @@ export function BookingModal({
     } | null>(null);
     const [couponCode, setCouponCode] = useState('');
     const [usePackageCredits, setUsePackageCredits] = useState(false);
+    const [applyReferralCredit, setApplyReferralCredit] = useState(false);
     const [selectedPackageId, setSelectedPackageId] = useState<string | null>(
         null
     );
@@ -142,6 +144,8 @@ export function BookingModal({
 
     const { toast } = useToast();
     const { profile, user } = useAuth();
+    const { data: referralData } = useReferrals();
+    const referralBalanceCents = referralData?.balance_cents ?? 0;
     const queryClient = useQueryClient();
 
     // Fetch user's active packages
@@ -586,6 +590,8 @@ export function BookingModal({
                 timezone: profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
                 // Optional loyalty coupon (validated + applied server-side)
                 couponCode: couponCode.trim() || undefined,
+                // Apply referral credit (server reduces the charge / may fully cover)
+                useReferralCredit: applyReferralCredit,
             };
 
             console.log(
@@ -606,6 +612,42 @@ export function BookingModal({
 
             if (error) throw error;
             if (data.error) throw new Error(data.error);
+
+            // Referral credit covers the whole price → no Stripe. Book via the
+            // dedicated no-charge path and jump straight to success.
+            if (data.fullyCovered) {
+                const { data: bookData, error: bookError } = await supabase.functions.invoke(
+                    'book-with-credit',
+                    {
+                        body: {
+                            appointmentTypeID: selectedType,
+                            appointmentTypeName: selectedTypeData.name,
+                            appointmentTypePrice: selectedTypeData.price,
+                            datetime: selectedTime,
+                            calendarID: selectedCalendar,
+                            calendarName: selectedCalendarData?.name?.trim(),
+                            firstName: formData.firstName,
+                            lastName: formData.lastName,
+                            email: formData.email,
+                            phone: formData.phone || undefined,
+                            notes: formData.notes || undefined,
+                            intakeFormFields: JSON.stringify(intakeFormFields),
+                            timezone: profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+                        },
+                    }
+                );
+                if (bookError) throw bookError;
+                if (bookData.error) throw new Error(bookData.error);
+
+                queryClient.invalidateQueries({ queryKey: ['referral-overview'] });
+                setBookingResult({ appointment: bookData.appointment });
+                setStep('success');
+                toast({
+                    title: 'Session Booked!',
+                    description: `Fully covered by your €${(referralBalanceCents / 100).toFixed(0)} referral credit — €0 to pay.`,
+                });
+                return;
+            }
 
             // Surface the loyalty-coupon outcome before charging.
             if (couponCode.trim()) {
@@ -682,6 +724,8 @@ export function BookingModal({
         appointment: any;
         receiptUrl?: string;
     }) => {
+        // Referral credit may have been redeemed during this payment — refresh it.
+        queryClient.invalidateQueries({ queryKey: ['referral-overview'] });
         setBookingResult(result);
         setStep('success');
     };
@@ -713,6 +757,7 @@ export function BookingModal({
         setBookingResult(null);
         setCouponCode('');
         setUsePackageCredits(false);
+        setApplyReferralCredit(false);
         setSelectedPackageId(null);
         setHasUserMadePaymentChoice(false);
         setIgnorePreselectedTherapist(false);
@@ -1587,6 +1632,48 @@ export function BookingModal({
                                     />
                                 </div>
                             )}
+
+                        {/* Referral credit - only when paying by card and you have credit */}
+                        {!usePackageCredits &&
+                            selectedTypeData?.price &&
+                            parseFloat(selectedTypeData.price) > 0 &&
+                            referralBalanceCents > 0 && (() => {
+                                const priceCents = Math.round(parseFloat(selectedTypeData.price) * 100);
+                                const newTotal = Math.max(priceCents - referralBalanceCents, 0);
+                                return (
+                                    <button
+                                        type="button"
+                                        onClick={() => setApplyReferralCredit((v) => !v)}
+                                        className={cn(
+                                            'w-full p-4 rounded-xl border-2 text-left transition-all',
+                                            applyReferralCredit
+                                                ? 'border-success bg-success/5 ring-2 ring-success/20'
+                                                : 'border-border hover:border-success/50 hover:bg-success/5'
+                                        )}>
+                                        <div className="flex items-center gap-3">
+                                            <Checkbox
+                                                checked={applyReferralCredit}
+                                                className="pointer-events-none"
+                                            />
+                                            <div className="p-2 rounded-lg bg-success/10">
+                                                <Gift className="h-5 w-5 text-success" />
+                                            </div>
+                                            <div className="flex-1">
+                                                <p className="font-semibold text-foreground">
+                                                    Apply €{(referralBalanceCents / 100).toFixed(0)} referral credit
+                                                </p>
+                                                <p className="text-sm text-muted-foreground">
+                                                    {applyReferralCredit
+                                                        ? newTotal === 0
+                                                            ? 'Covers the full price — €0 to pay'
+                                                            : `You'll pay €${(newTotal / 100).toFixed(2)} instead of €${selectedTypeData.price}`
+                                                        : 'Use your credit to reduce the price'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </button>
+                                );
+                            })()}
 
                         <div className="flex gap-3">
                             <Button
