@@ -31,7 +31,7 @@ const STEPS: TourStep[] = [
     title: "One-tap sharing",
     description:
       "Hit WhatsApp to send a pre-written message, or Email to drop it into your inbox. The Share button works for anything else.",
-    placement: "top",
+    placement: "bottom",
   },
   {
     target: '[data-tour="stats"]',
