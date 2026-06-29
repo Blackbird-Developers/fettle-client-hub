@@ -30,6 +30,7 @@ import {
   type ReferralFriendStatus,
 } from "@/hooks/useReferrals";
 import { ReferralTutorial } from "@/components/referrals/ReferralTutorial";
+import { ReferralTour } from "@/components/referrals/ReferralTour";
 
 const STATUS_BADGE: Record<
   ReferralFriendStatus,
@@ -54,6 +55,7 @@ export default function Referrals() {
   const { toast } = useToast();
   const { data, isLoading, isError, refetch } = useReferrals();
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
+  const [tourActive, setTourActive] = useState(false);
 
   const code = data?.code ?? "";
   const link = useMemo(
@@ -136,7 +138,8 @@ export default function Referrals() {
 
   return (
     <DashboardLayout>
-      <ReferralTutorial />
+      <ReferralTutorial onStartTour={() => setTourActive(true)} />
+      {tourActive && <ReferralTour onClose={() => setTourActive(false)} />}
       {/* Header */}
       <div className="mb-6 animate-fade-in">
         <div className="flex items-center gap-3 mb-2">
@@ -199,7 +202,7 @@ export default function Referrals() {
 
             <CardContent className="space-y-4 relative">
               {/* Code */}
-              <div className="space-y-1.5">
+              <div className="space-y-1.5" data-tour="referral-code">
                 <label className="text-xs font-medium text-muted-foreground">
                   Your referral code
                 </label>
@@ -230,7 +233,7 @@ export default function Referrals() {
               </div>
 
               {/* Link */}
-              <div className="space-y-1.5">
+              <div className="space-y-1.5" data-tour="referral-link">
                 <label className="text-xs font-medium text-muted-foreground">
                   Your referral link
                 </label>
@@ -260,7 +263,7 @@ export default function Referrals() {
               </div>
 
               {/* Share buttons */}
-              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+              <div className="flex flex-col sm:flex-row gap-2 pt-1" data-tour="share-buttons">
                 <Button
                   onClick={shareWhatsApp}
                   disabled={isLoading || !link}
@@ -292,7 +295,7 @@ export default function Referrals() {
           </Card>
 
           {/* Stats */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6" data-tour="stats">
             {stats.map((stat, i) => (
               <Card
                 key={stat.label}

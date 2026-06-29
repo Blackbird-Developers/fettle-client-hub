@@ -11,6 +11,7 @@ import {
   UserPlus,
   Coins,
   ArrowRight,
+  MapPin,
   X,
 } from "lucide-react";
 import { REFERRAL_REWARD } from "@/data/referrals";
@@ -64,7 +65,11 @@ const STEPS = [
   },
 ];
 
-export function ReferralTutorial() {
+interface ReferralTutorialProps {
+  onStartTour?: () => void;
+}
+
+export function ReferralTutorial({ onStartTour }: ReferralTutorialProps) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
 
@@ -77,6 +82,12 @@ export function ReferralTutorial() {
   const dismiss = () => {
     localStorage.setItem(STORAGE_KEY, "true");
     setOpen(false);
+  };
+
+  const handleShowAround = () => {
+    dismiss();
+    // slight delay so the modal finishes closing before tour starts
+    setTimeout(() => onStartTour?.(), 300);
   };
 
   const next = () => {
@@ -158,26 +169,29 @@ export function ReferralTutorial() {
           </div>
 
           {/* Actions */}
-          <div className="flex gap-2">
-            <Button
-              variant="ghost"
-              className="flex-1 text-muted-foreground"
-              onClick={dismiss}
-            >
-              Skip
-            </Button>
-            <Button
-              className="flex-1 gap-1.5 shadow-sm"
-              onClick={next}
-            >
-              {isLast ? "Got it!" : (
-                <>
-                  Next
-                  <ArrowRight className="h-4 w-4" />
-                </>
+          {isLast ? (
+            <div className="flex flex-col gap-2">
+              {onStartTour && (
+                <Button className="w-full gap-2 shadow-sm" onClick={handleShowAround}>
+                  <MapPin className="h-4 w-4" />
+                  Show me around
+                </Button>
               )}
-            </Button>
-          </div>
+              <Button variant="ghost" className="w-full text-muted-foreground" onClick={dismiss}>
+                Got it, I'm all set
+              </Button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Button variant="ghost" className="flex-1 text-muted-foreground" onClick={dismiss}>
+                Skip
+              </Button>
+              <Button className="flex-1 gap-1.5 shadow-sm" onClick={next}>
+                Next
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
