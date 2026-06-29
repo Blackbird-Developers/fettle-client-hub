@@ -175,25 +175,25 @@ export default function Referrals() {
             className="border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-background animate-fade-in overflow-hidden relative mb-6"
             style={{ animationDelay: "0.05s" }}
           >
-            <div className="absolute top-0 right-0 w-40 h-40 bg-primary/10 rounded-full -translate-y-1/2 translate-x-1/2" />
-            <div className="absolute bottom-0 left-0 w-24 h-24 bg-success/10 rounded-full translate-y-1/2 -translate-x-1/2" />
+            <div className="absolute top-0 right-0 w-24 h-24 sm:w-40 sm:h-40 bg-primary/10 rounded-full -translate-y-1/2 translate-x-1/2" />
+            <div className="absolute bottom-0 left-0 w-16 h-16 sm:w-24 sm:h-24 bg-success/10 rounded-full translate-y-1/2 -translate-x-1/2" />
 
             <CardHeader className="pb-2 relative">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <div className="p-2.5 rounded-xl bg-gradient-to-br from-primary to-primary/80 shadow-lg shrink-0">
                     <Gift className="h-5 w-5 text-primary-foreground" />
                   </div>
                   <div className="min-w-0">
-                    <CardTitle className="font-heading text-lg break-words">
+                    <CardTitle className="font-heading text-base sm:text-lg leading-tight">
                       Give €{REFERRAL_REWARD}, get €{REFERRAL_REWARD}
                     </CardTitle>
-                    <p className="text-xs text-muted-foreground break-words">
+                    <p className="text-xs text-muted-foreground">
                       Spend your credit on any session or package
                     </p>
                   </div>
                 </div>
-                <Badge className="bg-success text-success-foreground border-0 shadow-sm shrink-0 self-start sm:self-auto">
+                <Badge className="bg-success text-success-foreground border-0 shadow-sm shrink-0">
                   <Sparkles className="h-3 w-3 mr-1" />
                   No limit
                 </Badge>
@@ -263,33 +263,35 @@ export default function Referrals() {
               </div>
 
               {/* Share buttons */}
-              <div className="flex flex-col sm:flex-row gap-2 pt-1" data-tour="share-buttons">
+              <div className="space-y-2 pt-1" data-tour="share-buttons">
                 <Button
                   onClick={shareWhatsApp}
                   disabled={isLoading || !link}
-                  className="flex-1 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-lg"
+                  className="w-full gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-lg"
                 >
                   <MessageCircle className="h-4 w-4" />
                   Share on WhatsApp
                 </Button>
-                <Button
-                  variant="outline"
-                  onClick={shareEmail}
-                  disabled={isLoading || !link}
-                  className="flex-1 gap-2 bg-background/80"
-                >
-                  <Mail className="h-4 w-4" />
-                  Email
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={nativeShare}
-                  disabled={isLoading || !link}
-                  className="gap-2 bg-background/80 sm:w-auto"
-                >
-                  <Share2 className="h-4 w-4" />
-                  <span className="sm:hidden">More ways to share</span>
-                </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={shareEmail}
+                    disabled={isLoading || !link}
+                    className="gap-2 bg-background/80"
+                  >
+                    <Mail className="h-4 w-4" />
+                    Email
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={nativeShare}
+                    disabled={isLoading || !link}
+                    className="gap-2 bg-background/80"
+                  >
+                    <Share2 className="h-4 w-4" />
+                    More options
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
