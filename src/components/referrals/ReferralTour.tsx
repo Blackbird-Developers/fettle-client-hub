@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -53,7 +53,7 @@ interface Rect {
   bottom: number;
 }
 
-function getElementRect(selector: string): Rect | null {
+function measureRect(selector: string): Rect | null {
   const el = document.querySelector(selector);
   if (!el) return null;
   const r = el.getBoundingClientRect();
@@ -63,12 +63,10 @@ function getElementRect(selector: string): Rect | null {
 function tooltipStyle(rect: Rect, placement: "top" | "bottom"): React.CSSProperties {
   const centreX = rect.left + rect.width / 2;
   const left = Math.max(12, Math.min(centreX - TOOLTIP_W / 2, window.innerWidth - TOOLTIP_W - 12));
-
   if (placement === "bottom") {
     return { top: rect.bottom + PADDING + 8, left };
   }
-  // top — we don't know exact height; ~160px is a good estimate
-  return { top: rect.top - PADDING - 8 - 168, left };
+  return { top: rect.top - PADDING - 8 - 172, left };
 }
 
 interface ReferralTourProps {
@@ -78,35 +76,41 @@ interface ReferralTourProps {
 export function ReferralTour({ onClose }: ReferralTourProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [rect, setRect] = useState<Rect | null>(null);
-  const scrolling = useRef(false);
 
   const current = STEPS[stepIndex];
   const isLast = stepIndex === STEPS.length - 1;
 
-  const measureAndShow = useCallback((index: number) => {
-    const step = STEPS[index];
-    const el = document.querySelector(step.target);
+  useEffect(() => {
+    const el = document.querySelector(current.target);
     if (!el) return;
 
-    scrolling.current = true;
+    // 1. Measure immediately — spotlight appears with zero delay
+    setRect(measureRect(current.target));
+
+    // 2. Scroll the element into view
     el.scrollIntoView({ behavior: "smooth", block: "center" });
 
-    // wait for scroll to settle, then measure
-    setTimeout(() => {
-      scrolling.current = false;
-      setRect(getElementRect(step.target));
-    }, 450);
-  }, []);
-
-  useEffect(() => {
-    measureAndShow(stepIndex);
-  }, [stepIndex, measureAndShow]);
-
-  // re-measure on window resize
-  useEffect(() => {
-    const onResize = () => {
-      if (!scrolling.current) setRect(getElementRect(current.target));
+    // 3. Track in real-time via RAF while the page is scrolling so the
+    //    spotlight follows the element instead of jumping at the end
+    let rafId: number;
+    const track = () => {
+      setRect(measureRect(current.target));
+      rafId = requestAnimationFrame(track);
     };
+    rafId = requestAnimationFrame(track);
+
+    // Stop after 700 ms — scroll animation should be fully settled by then
+    const stop = setTimeout(() => cancelAnimationFrame(rafId), 700);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(stop);
+    };
+  }, [stepIndex, current.target]);
+
+  // Re-measure on window resize
+  useEffect(() => {
+    const onResize = () => setRect(measureRect(current.target));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [current.target]);
@@ -119,17 +123,17 @@ export function ReferralTour({ onClose }: ReferralTourProps) {
 
   if (!rect) return null;
 
-  const spotlight = {
-    position: "fixed" as const,
+  const spotlightStyle: React.CSSProperties = {
+    position: "fixed",
     top: rect.top - PADDING,
     left: rect.left - PADDING,
     width: rect.width + PADDING * 2,
     height: rect.height + PADDING * 2,
     borderRadius: 14,
+    // The large box-shadow darkens everything outside this element
     boxShadow: "0 0 0 9999px rgba(0,0,0,0.58)",
-    pointerEvents: "none" as const,
+    pointerEvents: "none",
     zIndex: 49,
-    transition: "top 0.35s ease, left 0.35s ease, width 0.35s ease, height 0.35s ease",
   };
 
   const ttStyle: React.CSSProperties = {
@@ -141,13 +145,13 @@ export function ReferralTour({ onClose }: ReferralTourProps) {
 
   return createPortal(
     <>
-      {/* Dark overlay — fills everything, spotlight punches through via box-shadow */}
-      <div style={spotlight} />
+      {/* Spotlight */}
+      <div style={spotlightStyle} />
 
       {/* Tooltip card */}
       <div
         style={ttStyle}
-        className="rounded-2xl border border-border/60 bg-background shadow-elevated p-4 animate-in fade-in zoom-in-95 duration-200"
+        className="rounded-2xl border border-border/60 bg-background shadow-elevated p-4 animate-in fade-in zoom-in-95 duration-150"
       >
         {/* Step counter + close */}
         <div className="flex items-center justify-between mb-2">
@@ -186,7 +190,7 @@ export function ReferralTour({ onClose }: ReferralTourProps) {
             <div
               key={i}
               className={cn(
-                "rounded-full transition-all duration-300",
+                "rounded-full transition-all duration-200",
                 i === stepIndex ? "w-4 h-1.5 bg-primary" : "w-1.5 h-1.5 bg-muted-foreground/30"
               )}
             />
