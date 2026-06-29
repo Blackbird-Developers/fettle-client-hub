@@ -29,6 +29,7 @@ import {
   formatEuros,
   type ReferralFriendStatus,
 } from "@/hooks/useReferrals";
+import { ReferralTutorial } from "@/components/referrals/ReferralTutorial";
 
 const STATUS_BADGE: Record<
   ReferralFriendStatus,
@@ -135,6 +136,7 @@ export default function Referrals() {
 
   return (
     <DashboardLayout>
+      <ReferralTutorial />
       {/* Header */}
       <div className="mb-6 animate-fade-in">
         <div className="flex items-center gap-3 mb-2">
