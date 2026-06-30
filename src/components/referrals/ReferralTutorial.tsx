@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -70,14 +70,10 @@ interface ReferralTutorialProps {
 }
 
 export function ReferralTutorial({ onStartTour }: ReferralTutorialProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(
+    () => localStorage.getItem(STORAGE_KEY) !== "true"
+  );
   const [step, setStep] = useState(0);
-
-  useEffect(() => {
-    if (localStorage.getItem(STORAGE_KEY) !== "true") {
-      setOpen(true);
-    }
-  }, []);
 
   const dismiss = () => {
     localStorage.setItem(STORAGE_KEY, "true");

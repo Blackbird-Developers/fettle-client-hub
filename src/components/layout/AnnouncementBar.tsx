@@ -1,15 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import { Gift, Sparkles, X } from "lucide-react";
 
 const STORAGE_KEY = "fettle:announcement:refer-and-earn-live";
 
 export function AnnouncementBar() {
-  const [dismissed, setDismissed] = useState(true);
-
-  useEffect(() => {
-    setDismissed(localStorage.getItem(STORAGE_KEY) === "true");
-  }, []);
+  // Lazy initializer reads localStorage synchronously on the very first render
+  // so the bar is either shown or hidden immediately — no layout shift on navigation
+  const [dismissed, setDismissed] = useState(
+    () => localStorage.getItem(STORAGE_KEY) === "true"
+  );
 
   const handleDismiss = () => {
     localStorage.setItem(STORAGE_KEY, "true");
