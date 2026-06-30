@@ -172,7 +172,7 @@ export default function Referrals() {
         <>
           {/* Hero / share card */}
           <Card
-            className="border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-background animate-fade-in overflow-hidden relative mb-6"
+            className="border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-background animate-fade-in [overflow:clip] relative mb-6"
             style={{ animationDelay: "0.05s" }}
           >
             <div className="absolute top-0 right-0 w-24 h-24 sm:w-40 sm:h-40 bg-primary/10 rounded-full -translate-y-1/2 translate-x-1/2" />
