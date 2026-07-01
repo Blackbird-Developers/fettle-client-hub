@@ -24,7 +24,7 @@ const authenticatedNavigation = [
   { name: "My Sessions", href: "/sessions", icon: Calendar },
   { name: "Invoices", href: "/invoices", icon: FileText },
   { name: "Profile", href: "/profile", icon: User },
-  { name: "Refer & Earn", href: "/referrals", icon: Gift },
+  { name: "Refer & Earn", href: "/referrals", icon: Gift, badge: "New" },
   { name: "Help Center", href: "/help", icon: HelpCircle },
 ];
 
@@ -89,7 +89,19 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               )}
             >
               <item.icon className="h-4 w-4 2xl:h-5 2xl:w-5" />
-              {item.name}
+              <span className="flex-1">{item.name}</span>
+              {"badge" in item && item.badge ? (
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide leading-none",
+                    isActive
+                      ? "bg-primary-foreground/20 text-primary-foreground"
+                      : "bg-accent text-accent-foreground"
+                  )}
+                >
+                  {item.badge}
+                </span>
+              ) : null}
             </NavLink>
           );
         })}
