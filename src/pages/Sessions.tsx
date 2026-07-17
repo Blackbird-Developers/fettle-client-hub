@@ -23,32 +23,42 @@ import { useAcuityAppointments, AcuityAppointment } from "@/hooks/useAcuity";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Calendar, Clock, Video, MapPin, X, Loader2, AlertTriangle, RefreshCw, ExternalLink } from "lucide-react";
+import { Plus, Calendar, Clock, Video, MapPin, X, Loader2, AlertTriangle, RefreshCw, ExternalLink, Star, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toSlug, TherapistAvatar } from "@/components/dashboard/MyTherapist";
 import { useTherapistImages } from "@/hooks/useTherapistImages";
+import { ReviewTherapistDialog } from "@/components/sessions/ReviewTherapistDialog";
+import { useTherapistReviews, TherapistReview } from "@/hooks/useTherapistReviews";
 
-function AcuitySessionCard({ 
-  appointment, 
+function AcuitySessionCard({
+  appointment,
   onCancel,
   onRebook,
   clientEmail,
   therapistImageUrl,
-}: { 
-  appointment: AcuityAppointment; 
+  review,
+  onReviewSubmitted,
+}: {
+  appointment: AcuityAppointment;
   onCancel?: () => void;
   onRebook?: (calendarId: number, calendarName: string) => void;
   clientEmail?: string;
   therapistImageUrl?: string;
+  review?: TherapistReview;
+  onReviewSubmitted?: () => void;
 }) {
   const [isCancelling, setIsCancelling] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showReviewDialog, setShowReviewDialog] = useState(false);
   const { toast } = useToast();
-  
+
   const dateTime = parseISO(appointment.datetime);
   const isUpcoming = !isPast(dateTime) && !appointment.canceled;
+  // A session is reviewable only once it has actually taken place and was not
+  // cancelled. Cancelled or future appointments never show the review CTA.
+  const isCompleted = isPast(dateTime) && !appointment.canceled;
   const isVideo = appointment.location?.toLowerCase().includes('video') || 
                   appointment.location?.toLowerCase().includes('online') ||
                   appointment.location?.toLowerCase().includes('zoom');
@@ -236,35 +246,80 @@ function AcuitySessionCard({
                 </div>
               )}
 
-              {/* Rebook & View Profile buttons for past sessions (completed or cancelled) */}
+              {/* Rebook, review & View Profile for past sessions (completed or cancelled) */}
               {!isUpcoming && (
-                <div className="flex flex-wrap gap-2 sm:gap-3 mt-4">
-                  {onRebook && (
-                    <Button 
-                      size="sm" 
+                <div className="mt-4 space-y-3">
+                  <div className="flex flex-wrap gap-2 sm:gap-3">
+                    {onRebook && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 text-xs sm:text-sm"
+                        onClick={() => onRebook(appointment.calendarID, appointment.calendar)}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        Rebook with {appointment.calendar.split(' ')[0]}
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
                       variant="outline"
                       className="gap-1.5 text-xs sm:text-sm"
-                      onClick={() => onRebook(appointment.calendarID, appointment.calendar)}
+                      asChild
                     >
-                      <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      Rebook with {appointment.calendar.split(' ')[0]}
+                      <a
+                        href={`https://fettle.ie/our-therapists/${toSlug(appointment.calendar)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        View Profile
+                      </a>
                     </Button>
+                    {/* Review CTA — only for completed sessions not yet reviewed */}
+                    {isCompleted && !review && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 text-xs sm:text-sm border-warning/40 text-warning hover:bg-warning/10 hover:text-warning"
+                        onClick={() => setShowReviewDialog(true)}
+                      >
+                        <Star className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        Review therapist
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Reviewed state — shows the client's rating with an edit option */}
+                  {isCompleted && review && (
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
+                      <div className="flex items-center gap-0.5" aria-label={`You rated ${review.rating} out of 5`}>
+                        {[1, 2, 3, 4, 5].map((value) => (
+                          <Star
+                            key={value}
+                            className={cn(
+                              "h-3.5 w-3.5 sm:h-4 sm:w-4",
+                              value <= review.rating
+                                ? "fill-warning text-warning"
+                                : "text-muted-foreground/40",
+                            )}
+                          />
+                        ))}
+                      </div>
+                      <span className="text-xs sm:text-sm text-muted-foreground">
+                        Your review
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-auto py-1 px-2 gap-1 text-xs text-muted-foreground hover:text-foreground ml-auto"
+                        onClick={() => setShowReviewDialog(true)}
+                      >
+                        <Pencil className="h-3 w-3" />
+                        Edit
+                      </Button>
+                    </div>
                   )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1.5 text-xs sm:text-sm"
-                    asChild
-                  >
-                    <a
-                      href={`https://fettle.ie/our-therapists/${toSlug(appointment.calendar)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      View Profile
-                    </a>
-                  </Button>
                 </div>
               )}
             </div>
@@ -310,6 +365,18 @@ function AcuitySessionCard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {isCompleted && (
+        <ReviewTherapistDialog
+          open={showReviewDialog}
+          onOpenChange={setShowReviewDialog}
+          appointmentId={appointment.id}
+          therapistName={appointment.calendar}
+          sessionLabel={format(dateTime, 'MMMM d, yyyy')}
+          existingReview={review}
+          onSubmitted={onReviewSubmitted}
+        />
+      )}
     </>
   );
 }
@@ -344,6 +411,7 @@ export default function Sessions() {
   const { user } = useAuth();
   const { appointments, loading, error, refetch } = useAcuityAppointments(user?.email);
   const { images: therapistImages } = useTherapistImages();
+  const { reviewsByAppointment, refetch: refetchReviews } = useTherapistReviews();
 
   // State for rebook modal
   const [rebookOpen, setRebookOpen] = useState(false);
@@ -445,12 +513,14 @@ export default function Sessions() {
             </>
           ) : pastSessions.length > 0 ? (
             pastSessions.map((appointment) => (
-              <AcuitySessionCard 
-                key={appointment.id} 
-                appointment={appointment} 
+              <AcuitySessionCard
+                key={appointment.id}
+                appointment={appointment}
                 clientEmail={user?.email}
                 onRebook={handleRebook}
                 therapistImageUrl={therapistImages.get(appointment.calendarID)}
+                review={reviewsByAppointment.get(String(appointment.id))}
+                onReviewSubmitted={refetchReviews}
               />
             ))
           ) : (

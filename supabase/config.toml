@@ -35,6 +35,11 @@ verify_jwt = false
 [functions.sync-acuity-appointments]
 verify_jwt = false
 
+# The function reads the caller's JWT itself (to bind the review to the real
+# user) and verifies appointment ownership against Acuity before writing.
+[functions.submit-therapist-review]
+verify_jwt = false
+
 [functions.export-user-data]
 verify_jwt = false
 
