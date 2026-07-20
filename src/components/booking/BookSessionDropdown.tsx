@@ -9,8 +9,35 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { BookingModal, SessionCategory } from '@/components/booking/BookingModal';
 import { PackageBookingModal } from '@/components/booking/PackageBookingModal';
-import { CalendarPlus, Plus, ChevronDown, User, Gift, Users, Heart } from 'lucide-react';
+import { CalendarPlus, Plus, ChevronDown, User, Gift, Users, Heart, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useNextAvailable, formatNextAvailableShort } from '@/hooks/useNextAvailable';
+
+/** Compact "Next available: ..." line shown under a session category item. */
+function NextAvailableHint({
+    category,
+    enabled,
+}: {
+    category: SessionCategory;
+    enabled: boolean;
+}) {
+    const { slot, loading, noAvailability } = useNextAvailable(category, { enabled });
+
+    if (!enabled) return null;
+
+    let text: string;
+    if (loading) text = 'Checking availability…';
+    else if (slot) text = `Next available: ${formatNextAvailableShort(slot.time)}`;
+    else if (noAvailability) text = 'No immediate availability';
+    else return null; // error — stay quiet rather than show a broken hint
+
+    return (
+        <span className="mt-1 flex items-start gap-1 text-[11px] leading-snug text-primary/80">
+            <Zap className="h-3 w-3 shrink-0 mt-0.5" />
+            <span>{text}</span>
+        </span>
+    );
+}
 
 interface BookSessionDropdownProps {
   variant?: 'default' | 'compact';
@@ -25,6 +52,7 @@ export function BookSessionDropdown({
 }: BookSessionDropdownProps) {
   const [bookingOpen, setBookingOpen] = useState(false);
   const [packageOpen, setPackageOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [sessionCategory, setSessionCategory] = useState<SessionCategory>('individual');
 
   const handleBookingComplete = () => {
@@ -38,7 +66,7 @@ export function BookSessionDropdown({
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           {variant === 'compact' ? (
             <Button size="sm" className={cn("w-full gap-2", className)}>
@@ -56,7 +84,7 @@ export function BookSessionDropdown({
         </DropdownMenuTrigger>
         <DropdownMenuContent 
           align="end" 
-          className="w-64 max-w-[calc(100vw-1rem)] bg-popover border border-border shadow-lg z-50"
+          className="w-72 max-w-[calc(100vw-1rem)] bg-popover border border-border shadow-lg z-50"
         >
           <DropdownMenuItem 
             onClick={() => openBookingModal('individual')}
@@ -66,6 +94,7 @@ export function BookSessionDropdown({
             <div className="flex flex-col">
               <span className="font-medium">Individual Session</span>
               <span className="text-xs text-muted-foreground">One-on-one therapy</span>
+              <NextAvailableHint category="individual" enabled={menuOpen} />
             </div>
           </DropdownMenuItem>
           <DropdownMenuItem 
@@ -76,6 +105,7 @@ export function BookSessionDropdown({
             <div className="flex flex-col">
               <span className="font-medium">Couple's Therapy</span>
               <span className="text-xs text-muted-foreground">Sessions for partners</span>
+              <NextAvailableHint category="couples" enabled={menuOpen} />
             </div>
           </DropdownMenuItem>
           <DropdownMenuItem 
@@ -86,6 +116,7 @@ export function BookSessionDropdown({
             <div className="flex flex-col">
               <span className="font-medium">Youth Therapy</span>
               <span className="text-xs text-muted-foreground">For young people</span>
+              <NextAvailableHint category="youth" enabled={menuOpen} />
             </div>
           </DropdownMenuItem>
           <DropdownMenuSeparator />

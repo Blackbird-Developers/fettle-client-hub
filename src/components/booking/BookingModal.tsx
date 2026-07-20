@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import { format, addMonths } from 'date-fns';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements } from '@stripe/react-stripe-js';
@@ -24,6 +24,7 @@ import {
     useAcuityAppointments,
     AcuityCalendar,
 } from '@/hooks/useAcuity';
+import { useNextAvailable, formatNextAvailable } from '@/hooks/useNextAvailable';
 import { useActivePackages } from '@/hooks/useUserPackages';
 import { useReferrals } from '@/hooks/useReferrals';
 import { useQueryClient } from '@tanstack/react-query';
@@ -44,6 +45,7 @@ import {
     Star,
     ExternalLink,
     ArrowRight,
+    Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getPackageCategory } from '@/lib/packageCategory';
@@ -73,6 +75,14 @@ interface BookingModalProps {
     preselectedCalendarId?: number;
     preselectedCalendarName?: string;
     sessionCategory?: SessionCategory;
+    /** Preselect an appointment type and skip the type-selection step. */
+    preselectedType?: number;
+    /**
+     * Preselect a specific slot (ISO datetime). When provided together with
+     * preselectedType (and ideally preselectedCalendarId), the modal jumps
+     * straight to the details/checkout step with everything preselected.
+     */
+    preselectedTimeISO?: string;
 }
 
 type Step =
@@ -92,6 +102,8 @@ export function BookingModal({
     preselectedCalendarId,
     preselectedCalendarName,
     sessionCategory = 'individual',
+    preselectedType,
+    preselectedTimeISO,
 }: BookingModalProps) {
     const [step, setStep] = useState<Step>(
         preselectedCalendarId ? 'type' : 'type'
@@ -730,7 +742,10 @@ export function BookingModal({
         setStep('success');
     };
 
-    const handleClose = () => {
+    // Reset all wizard state back to a clean first-step session. Kept separate
+    // from handleClose so we can also run it when the modal is (re)opened,
+    // ensuring a fresh start even if a previous session was abandoned mid-flow.
+    const resetWizardState = () => {
         setStep('type');
         setSelectedType(null);
         setSelectedCalendar(preselectedCalendarId || null);
@@ -743,6 +758,7 @@ export function BookingModal({
             email: '',
             phone: '',
             notes: '',
+            partnerName: '',
         });
         setIntakeForm({
             over18: false,
@@ -761,6 +777,10 @@ export function BookingModal({
         setSelectedPackageId(null);
         setHasUserMadePaymentChoice(false);
         setIgnorePreselectedTherapist(false);
+    };
+
+    const handleClose = () => {
+        resetWizardState();
         onOpenChange(false);
 
         if (bookingResult) {
@@ -800,6 +820,67 @@ export function BookingModal({
     const handleSelectTherapist = (calendarId: number) => {
         setSelectedCalendar(calendarId);
         setStep('date');
+    };
+
+    // Initialise the wizard once per open. This guarantees a clean start every
+    // time the modal is opened (fixing stale state when a previous session was
+    // abandoned mid-flow) and applies any preselection from the "next
+    // available" entry points.
+    const initedForOpenRef = useRef(false);
+    useLayoutEffect(() => {
+        if (!open) {
+            initedForOpenRef.current = false;
+            return;
+        }
+        if (initedForOpenRef.current) return;
+
+        // Preselection needs appointment-type/calendar data loaded; wait for it
+        // (this effect re-runs when typesLoading flips).
+        if (preselectedType && typesLoading) return;
+
+        // Full slot preselected (type + exact time, ideally + calendar): jump
+        // straight to the details/checkout step with everything filled in.
+        if (preselectedType && preselectedTimeISO) {
+            const d = new Date(preselectedTimeISO);
+            setSelectedType(preselectedType);
+            if (preselectedCalendarId) setSelectedCalendar(preselectedCalendarId);
+            setSelectedDate(d);
+            setViewingMonth(d);
+            setSelectedTime(preselectedTimeISO);
+            setStep('details');
+        } else if (preselectedType) {
+            // Type-only preselection: skip just the type-selection step.
+            handleTypeSelection(preselectedType);
+        } else {
+            // No preselection: ensure a clean wizard for this fresh session.
+            resetWizardState();
+        }
+
+        initedForOpenRef.current = true;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+        open,
+        preselectedType,
+        preselectedTimeISO,
+        preselectedCalendarId,
+        typesLoading,
+    ]);
+
+    // Earliest bookable slot for the currently selected type/therapist, shown as
+    // a one-tap shortcut above the calendar on the date step.
+    const { slot: earliestSlot } = useNextAvailable(sessionCategory, {
+        enabled: open && (step === 'date' || step === 'time') && selectedType !== null,
+        calendarId: selectedCalendar,
+        typeFilter: (t) => t.id === selectedType,
+    });
+
+    const handlePickEarliestSlot = () => {
+        if (!earliestSlot) return;
+        const d = new Date(earliestSlot.time);
+        setSelectedDate(d);
+        setViewingMonth(d);
+        setSelectedTime(earliestSlot.time);
+        setStep('details');
     };
 
     /** Format a tag string for display: "cbt" → "CBT", "anxiety" → "Anxiety" */
@@ -1120,6 +1201,23 @@ export function BookingModal({
                             Choose a date
                             {therapistName ? ` with ${therapistName}` : ''}
                         </p>
+                        {earliestSlot && !datesLoading && (
+                            <button
+                                type="button"
+                                onClick={handlePickEarliestSlot}
+                                className="w-full flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-left transition-colors hover:bg-primary/10">
+                                <Zap className="h-4 w-4 text-primary shrink-0" />
+                                <span className="flex-1 min-w-0">
+                                    <span className="block text-xs font-medium uppercase tracking-wide text-primary">
+                                        Earliest available
+                                    </span>
+                                    <span className="block text-sm font-medium text-card-foreground truncate">
+                                        {formatNextAvailable(earliestSlot.time)}
+                                    </span>
+                                </span>
+                                <ArrowRight className="h-4 w-4 text-primary shrink-0" />
+                            </button>
+                        )}
                         <div className="flex justify-center">
                             {datesLoading ? (
                                 <div className="flex flex-col items-center justify-center py-12 gap-3">
