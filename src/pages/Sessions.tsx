@@ -280,8 +280,7 @@ function AcuitySessionCard({
                     {isCompleted && !review && (
                       <Button
                         size="sm"
-                        variant="outline"
-                        className="gap-1.5 text-xs sm:text-sm border-warning/40 text-warning hover:bg-warning/10 hover:text-warning"
+                        className="gap-1.5 text-xs sm:text-sm bg-primary text-white hover:bg-primary/90"
                         onClick={() => setShowReviewDialog(true)}
                       >
                         <Star className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
