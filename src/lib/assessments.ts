@@ -1,24 +1,22 @@
 // Curated list of the assessments offered in the hub, in display order.
+// Stage structure, pricing and wording mirror the fettle.ie assessment pages
+// (ocd/anxiety/depression/addiction pages + the ADHD Now and AutismCare
+// partner pages).
 //
-// Only the initial consultation (Acuity "screening" type) can be booked
-// directly — the full assessment and follow-up stages are arranged by the
-// clinical team after the consultation, so they are shown locked with an
-// explanatory note rather than being bookable.
+// Only the stage-1 consultation (Acuity "screening" type) can be booked
+// directly — its live price/duration come from Acuity, which is what the
+// client is actually charged. Later stages are display-only: they are
+// arranged by the clinical team after the consultation, so they are shown
+// locked with the website's pricing and conditional notes.
 //
 // ADHD and Autism assessments run on partner booking systems (ADHD Now /
-// AutismCare), not Acuity, so they link out to the fettle.ie pages instead.
-//
-// Acuity appointment type IDs are verified against the live account and match
-// the booking links on the fettle.ie assessment pages.
+// AutismCare), not Acuity, so their cards are informational and link out to
+// the fettle.ie pages.
 
-const FULL_ASSESSMENT_NOTE =
-    'Booked only after your initial consultation, if recommended by the clinical team.';
-const FOLLOW_UP_NOTE = 'Available once your full assessment is complete.';
-
-export interface AssessmentTier {
+export interface AssessmentStage {
     label: string;
-    /** Acuity appointment type for this stage (used to show live pricing). */
-    typeId: number;
+    /** Display price, e.g. "€650" or "From €80/session" (not charged in-hub). */
+    price: string;
     note: string;
 }
 
@@ -26,19 +24,64 @@ export interface Assessment {
     name: string;
     /** Partner-run assessment — links out instead of booking through Acuity. */
     external?: { partner: string; url: string };
-    /** Acuity type for the bookable initial consultation. */
+    /** Acuity type for the bookable stage-1 consultation. */
     screeningTypeId?: number;
-    /** Later stages shown for context but not directly bookable. */
-    lockedTiers?: AssessmentTier[];
+    /** Label for the bookable stage, matching the website's pricing table. */
+    screeningLabel?: string;
+    /** Later stages shown for context but not bookable in the hub. */
+    lockedStages?: AssessmentStage[];
+    /** Stages shown on partner cards (all booked via the partner). */
+    partnerStages?: AssessmentStage[];
 }
 
+const CLINICAL_STAGES: AssessmentStage[] = [
+    {
+        label: 'Full clinical assessment',
+        price: '€650',
+        note: 'Booked only after your initial consultation, if recommended by your psychologist.',
+    },
+    {
+        label: 'Aftercare therapy',
+        price: 'From €80/session',
+        note: 'Available once your clinical assessment is complete.',
+    },
+];
+
 export const ASSESSMENTS: Assessment[] = [
+    {
+        name: 'OCD Assessment',
+        screeningTypeId: 92852936,
+        screeningLabel: 'Consultation + screening',
+        lockedStages: CLINICAL_STAGES,
+    },
+    {
+        name: 'Anxiety Assessment',
+        screeningTypeId: 92853020,
+        screeningLabel: 'Consultation + screening',
+        lockedStages: CLINICAL_STAGES,
+    },
+    {
+        name: 'Depression Assessment',
+        screeningTypeId: 92853161,
+        screeningLabel: 'Consultation + screening',
+        lockedStages: CLINICAL_STAGES,
+    },
+    {
+        name: 'Addiction Assessment',
+        screeningTypeId: 94856237,
+        screeningLabel: 'Addiction assessment',
+    },
     {
         name: 'ADHD Assessment',
         external: {
             partner: 'ADHD Now',
             url: 'https://fettle.ie/adhd-assessment/',
         },
+        partnerStages: [
+            { label: 'Initial Consultation', price: '€89', note: '' },
+            { label: 'Full Assessment', price: '€695', note: 'If recommended' },
+            { label: 'Diagnosis & Report', price: '€495', note: 'After assessment' },
+        ],
     },
     {
         name: 'Autism Assessment',
@@ -46,34 +89,11 @@ export const ASSESSMENTS: Assessment[] = [
             partner: 'AutismCare',
             url: 'https://fettle.ie/autism-assesments/',
         },
-    },
-    {
-        name: 'OCD Assessment',
-        screeningTypeId: 92852936,
-        lockedTiers: [
-            { label: 'Full Assessment', typeId: 93759134, note: FULL_ASSESSMENT_NOTE },
-            { label: 'Follow-Up Session', typeId: 94365786, note: FOLLOW_UP_NOTE },
+        partnerStages: [
+            { label: 'Pre-Assessment', price: '€89', note: '' },
+            { label: 'Assessment & Diagnosis', price: '€1,199', note: 'If suitable' },
+            { label: 'Report & Support Plan', price: '€599', note: 'After assessment' },
         ],
-    },
-    {
-        name: 'Anxiety Assessment',
-        screeningTypeId: 92853020,
-        lockedTiers: [
-            { label: 'Full Assessment', typeId: 94070389, note: FULL_ASSESSMENT_NOTE },
-            { label: 'Follow-Up Session', typeId: 94365810, note: FOLLOW_UP_NOTE },
-        ],
-    },
-    {
-        name: 'Depression Assessment',
-        screeningTypeId: 92853161,
-        lockedTiers: [
-            { label: 'Full Assessment', typeId: 94070403, note: FULL_ASSESSMENT_NOTE },
-            { label: 'Follow-Up Session', typeId: 94365860, note: FOLLOW_UP_NOTE },
-        ],
-    },
-    {
-        name: 'Addiction Assessment',
-        screeningTypeId: 94856237,
     },
 ];
 

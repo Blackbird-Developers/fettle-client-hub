@@ -1064,11 +1064,18 @@ export function BookingModal({
                     );
                 }
 
-                // Assessments render from the curated ASSESSMENTS config: only
-                // the initial consultation is bookable; later stages are shown
-                // locked with an explanatory note, and partner-run assessments
-                // (ADHD/Autism) link out to fettle.ie.
+                // Assessments render from the curated ASSESSMENTS config.
+                // Only the stage-1 consultation is bookable; later stages show
+                // the website's pricing locked with its conditional notes.
+                // Partner-run assessments (ADHD/Autism) list last and link out
+                // to fettle.ie.
                 if (sessionCategory === 'assessment') {
+                    const nativeAssessments = ASSESSMENTS.filter(
+                        (a) => !a.external
+                    );
+                    const partnerAssessments = ASSESSMENTS.filter(
+                        (a) => a.external
+                    );
                     return (
                         <div className="space-y-4">
                             <p className="text-muted-foreground">
@@ -1087,36 +1094,7 @@ export function BookingModal({
                             ) : (
                                 <ScrollArea className="h-[340px] pr-4">
                                     <div className="space-y-3">
-                                        {ASSESSMENTS.map((assessment) => {
-                                            if (assessment.external) {
-                                                return (
-                                                    <a
-                                                        key={assessment.name}
-                                                        href={assessment.external.url}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="block w-full p-4 rounded-xl border-2 border-border text-left transition-all hover:border-primary/50 hover:bg-accent/50">
-                                                        <div className="flex justify-between items-start">
-                                                            <div>
-                                                                <h4 className="font-semibold text-foreground">
-                                                                    {assessment.name}
-                                                                </h4>
-                                                                <p className="text-sm text-muted-foreground mt-1">
-                                                                    Booked via our
-                                                                    partner{' '}
-                                                                    {
-                                                                        assessment
-                                                                            .external
-                                                                            .partner
-                                                                    }
-                                                                </p>
-                                                            </div>
-                                                            <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0 ml-4 mt-1" />
-                                                        </div>
-                                                    </a>
-                                                );
-                                            }
-
+                                        {nativeAssessments.map((assessment) => {
                                             const screeningType = types.find(
                                                 (t) =>
                                                     t.id ===
@@ -1141,8 +1119,8 @@ export function BookingModal({
                                                         <div className="flex justify-between items-center">
                                                             <div>
                                                                 <p className="font-medium text-foreground">
-                                                                    Initial
-                                                                    Consultation
+                                                                    {assessment.screeningLabel ??
+                                                                        'Initial Consultation'}
                                                                 </p>
                                                                 <div className="flex items-center gap-1 text-sm text-muted-foreground mt-0.5">
                                                                     <Clock className="h-3.5 w-3.5" />
@@ -1164,50 +1142,115 @@ export function BookingModal({
                                                         </div>
                                                     </button>
                                                     {(
-                                                        assessment.lockedTiers ??
+                                                        assessment.lockedStages ??
                                                         []
-                                                    ).map((tier) => {
-                                                        const tierType =
-                                                            types.find(
-                                                                (t) =>
-                                                                    t.id ===
-                                                                    tier.typeId
-                                                            );
-                                                        if (!tierType)
-                                                            return null;
-                                                        return (
-                                                            <div
-                                                                key={tier.typeId}
-                                                                className="w-full p-3 rounded-lg border border-border bg-muted/40">
-                                                                <div className="flex justify-between items-start">
-                                                                    <div className="flex items-start gap-2">
-                                                                        <Lock className="h-3.5 w-3.5 mt-1 text-muted-foreground shrink-0" />
-                                                                        <div>
-                                                                            <p className="font-medium text-muted-foreground">
-                                                                                {
-                                                                                    tier.label
-                                                                                }
-                                                                            </p>
-                                                                            <p className="text-xs text-muted-foreground mt-0.5">
-                                                                                {
-                                                                                    tier.note
-                                                                                }
-                                                                            </p>
-                                                                        </div>
+                                                    ).map((stage) => (
+                                                        <div
+                                                            key={stage.label}
+                                                            className="w-full p-3 rounded-lg border border-border bg-muted/40">
+                                                            <div className="flex justify-between items-start">
+                                                                <div className="flex items-start gap-2">
+                                                                    <Lock className="h-3.5 w-3.5 mt-1 text-muted-foreground shrink-0" />
+                                                                    <div>
+                                                                        <p className="font-medium text-muted-foreground">
+                                                                            {
+                                                                                stage.label
+                                                                            }
+                                                                        </p>
+                                                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                                                            {
+                                                                                stage.note
+                                                                            }
+                                                                        </p>
                                                                     </div>
-                                                                    <p className="text-sm font-medium text-muted-foreground shrink-0 ml-4">
-                                                                        €
-                                                                        {
-                                                                            tierType.price
-                                                                        }
-                                                                    </p>
                                                                 </div>
+                                                                <p className="text-sm font-medium text-muted-foreground shrink-0 ml-4">
+                                                                    {
+                                                                        stage.price
+                                                                    }
+                                                                </p>
                                                             </div>
-                                                        );
-                                                    })}
+                                                        </div>
+                                                    ))}
                                                 </div>
                                             );
                                         })}
+
+                                        {partnerAssessments.length > 0 && (
+                                            <div className="relative py-2">
+                                                <div className="absolute inset-0 flex items-center">
+                                                    <span className="w-full border-t" />
+                                                </div>
+                                                <div className="relative flex justify-center text-xs uppercase">
+                                                    <span className="bg-background px-2 text-muted-foreground">
+                                                        With our partners
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {partnerAssessments.map((assessment) => (
+                                            <a
+                                                key={assessment.name}
+                                                href={assessment.external!.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="block w-full p-4 rounded-xl border-2 border-border text-left transition-all hover:border-primary/50 hover:bg-accent/50">
+                                                <div className="flex justify-between items-start">
+                                                    <div>
+                                                        <h4 className="font-semibold text-foreground">
+                                                            {assessment.name}
+                                                        </h4>
+                                                        <p className="text-sm text-muted-foreground mt-0.5">
+                                                            Booked via our
+                                                            partner{' '}
+                                                            {
+                                                                assessment
+                                                                    .external!
+                                                                    .partner
+                                                            }
+                                                        </p>
+                                                    </div>
+                                                    <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0 ml-4 mt-1" />
+                                                </div>
+                                                {(
+                                                    assessment.partnerStages ??
+                                                    []
+                                                ).length > 0 && (
+                                                    <div className="mt-2 space-y-1">
+                                                        {assessment.partnerStages!.map(
+                                                            (stage) => (
+                                                                <div
+                                                                    key={
+                                                                        stage.label
+                                                                    }
+                                                                    className="flex justify-between items-baseline text-sm">
+                                                                    <span className="text-muted-foreground">
+                                                                        {
+                                                                            stage.label
+                                                                        }
+                                                                        {stage.note && (
+                                                                            <span className="text-xs">
+                                                                                {' '}
+                                                                                ·{' '}
+                                                                                {
+                                                                                    stage.note
+                                                                                }
+                                                                            </span>
+                                                                        )}
+                                                                    </span>
+                                                                    <span className="font-medium text-muted-foreground shrink-0 ml-3">
+                                                                        {
+                                                                            stage.price
+                                                                        }
+                                                                    </span>
+                                                                </div>
+                                                            )
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </a>
+                                        ))}
                                     </div>
                                 </ScrollArea>
                             )}

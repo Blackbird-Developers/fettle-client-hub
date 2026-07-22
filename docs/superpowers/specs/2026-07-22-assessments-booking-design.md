@@ -60,14 +60,22 @@ Youth Therapy and Session Bundles, with the same `NextAvailableHint`
   order: ADHD, Autism, OCD, Anxiety, Depression, Addiction — driven by the
   `ASSESSMENTS` config in `src/lib/assessments.ts` (Acuity screening type IDs
   verified live; they match the fettle.ie page links).
-- **Only the initial consultation (screening) is bookable.** The later stages
-  are displayed locked with live Acuity pricing and conditional notes,
-  mirroring the ADHD page's presentation: Full Assessment — “Booked only after
-  your initial consultation, if recommended by the clinical team.”; Follow-Up
-  Session — “Available once your full assessment is complete.” (Addiction has
-  a screening only.)
-- ADHD and Autism render as **external partner cards** (ADHD Now / AutismCare)
-  opening the fettle.ie pages in a new tab.
+- **Only the stage-1 consultation is bookable** (live Acuity price/duration —
+  that is what the client is charged). Later stages are display-only and
+  mirror the fettle.ie pricing tables (client request, 2026-07-22): OCD /
+  Anxiety / Depression show “Consultation + screening €89” → locked “Full
+  clinical assessment €650 — Booked only after your initial consultation, if
+  recommended by your psychologist.” → locked “Aftercare therapy From
+  €80/session — Available once your clinical assessment is complete.”
+  Addiction is a single bookable stage (site sells it at €140/1hr — see
+  pricing-mismatch note below).
+- ADHD and Autism render **last**, under a “With our partners” divider, as
+  external cards (ADHD Now / AutismCare) with their website stage pricing
+  (€89 / €695 / €495 and €89 / €1,199 / €599) linking to fettle.ie.
+- **Known data mismatches for Fettle to reconcile in Acuity:** the Acuity
+  Addiction Assessment Screening is €89/30min but the website sells €140/1hr
+  (the hub charges the Acuity price); Acuity “Full … Assessment” types are
+  €750 vs €650 on the website (display-only in the hub).
 - `matchesCategory('assessment')` in `useNextAvailable` matches only the
   curated screening IDs so the “next available” hint reflects what is actually
   bookable. Bipolar/Mental-Health screenings and the Psychiatry Appointment in
