@@ -24,7 +24,12 @@ import {
     useAcuityAppointments,
     AcuityCalendar,
 } from '@/hooks/useAcuity';
-import { useNextAvailable, formatNextAvailable } from '@/hooks/useNextAvailable';
+import {
+    useNextAvailable,
+    formatNextAvailable,
+    resolveSlotCalendar,
+    type NextAvailableSlot,
+} from '@/hooks/useNextAvailable';
 import { useActivePackages } from '@/hooks/useUserPackages';
 import { useReferrals } from '@/hooks/useReferrals';
 import { useQueryClient } from '@tanstack/react-query';
@@ -54,7 +59,9 @@ import {
     ASSESSMENTS,
     getAssessmentPriceOverride,
     getAssessmentDurationOverride,
+    type Assessment,
 } from '@/lib/assessments';
+import { NextAvailableTypeHint } from './NextAvailableTypeHint';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TherapistAvatar, toSlug } from '@/components/dashboard/MyTherapist';
 import { useTherapistImages, type TherapistProfile } from '@/hooks/useTherapistImages';
@@ -93,6 +100,7 @@ interface BookingModalProps {
 
 type Step =
     | 'type'
+    | 'pricing' // assessment-only: staged pricing for the chosen assessment
     | 'therapist'
     | 'date'
     | 'time'
@@ -115,6 +123,10 @@ export function BookingModal({
         preselectedCalendarId ? 'type' : 'type'
     );
     const [selectedType, setSelectedType] = useState<number | null>(null);
+    // Assessment chosen on the first step of the assessment flow; its pricing
+    // options render on the 'pricing' step.
+    const [selectedAssessment, setSelectedAssessment] =
+        useState<Assessment | null>(null);
     const [selectedCalendar, setSelectedCalendar] = useState<number | null>(
         preselectedCalendarId || null
     );
@@ -783,6 +795,7 @@ export function BookingModal({
     const resetWizardState = () => {
         setStep('type');
         setSelectedType(null);
+        setSelectedAssessment(null);
         setSelectedCalendar(preselectedCalendarId || null);
         setSelectedDate(undefined);
         setViewingMonth(new Date()); // Reset calendar view to current month
@@ -924,6 +937,44 @@ export function BookingModal({
         setSelectedDate(d);
         setViewingMonth(d);
         setSelectedTime(earliestSlot.time);
+        setStep('details');
+    };
+
+    // Jump straight to a slot picked from an option card's "next available"
+    // hint: select the type, resolve the owning therapist when needed (pooled
+    // availability doesn't say which calendar a slot belongs to), and land on
+    // the details step with date and time filled in.
+    const handlePickTypeSlot = async (
+        typeId: number,
+        slot: NextAvailableSlot
+    ) => {
+        setSelectedType(typeId);
+
+        let calendarId: number | null = slot.calendarId ?? null;
+        let time = slot.time;
+        if (sessionCategory === 'assessment') {
+            // Pooled booking — Acuity assigns the clinician.
+            calendarId = null;
+        } else if (
+            !selectedCalendar &&
+            (slot.candidateCalendarIds?.length ?? 0) > 1
+        ) {
+            const resolved = await resolveSlotCalendar(
+                typeId,
+                slot.candidateCalendarIds!,
+                slot.isoDate
+            );
+            if (resolved) {
+                calendarId = resolved.calendarId;
+                time = resolved.time;
+            }
+        }
+        setSelectedCalendar(calendarId);
+
+        const d = new Date(time);
+        setSelectedDate(d);
+        setViewingMonth(d);
+        setSelectedTime(time);
         setStep('details');
     };
 
@@ -1080,11 +1131,9 @@ export function BookingModal({
                     );
                 }
 
-                // Assessments render from the curated ASSESSMENTS config.
-                // Only the stage-1 consultation is bookable; later stages show
-                // the website's pricing locked with its conditional notes.
-                // Partner-run assessments (ADHD/Autism) list last and link out
-                // to fettle.ie.
+                // Assessment flow step 1: choose the assessment. The chosen
+                // assessment's staged pricing renders on the 'pricing' step.
+                // Partner-run assessments (ADHD/Autism) list last.
                 if (sessionCategory === 'assessment') {
                     const nativeAssessments = ASSESSMENTS.filter(
                         (a) => !a.external
@@ -1092,18 +1141,21 @@ export function BookingModal({
                     const partnerAssessments = ASSESSMENTS.filter(
                         (a) => a.external
                     );
+                    const openPricing = (assessment: Assessment) => {
+                        setSelectedAssessment(assessment);
+                        setStep('pricing');
+                    };
                     return (
                         <div className="space-y-4">
                             <p className="text-muted-foreground">
-                                Select the assessment you'd like to book — you
-                                start with an initial consultation.
+                                Select the assessment you'd like to book
                             </p>
                             {typesLoading ? (
                                 <div className="space-y-3">
                                     {[1, 2, 3].map((i) => (
                                         <Skeleton
                                             key={i}
-                                            className="h-28 w-full rounded-xl"
+                                            className="h-20 w-full rounded-xl"
                                         />
                                     ))}
                                 </div>
@@ -1119,74 +1171,40 @@ export function BookingModal({
                                             if (!screeningType) return null;
 
                                             return (
-                                                <div
+                                                <button
                                                     key={assessment.name}
-                                                    className="w-full p-4 rounded-xl border-2 border-border space-y-2">
-                                                    <h4 className="font-semibold text-foreground">
-                                                        {assessment.name}
-                                                    </h4>
-                                                    <button
-                                                        onClick={() =>
-                                                            handleTypeSelection(
-                                                                screeningType.id
-                                                            )
-                                                        }
-                                                        className="w-full p-3 rounded-lg border-2 border-primary/30 bg-primary/5 text-left transition-all hover:border-primary hover:bg-primary/10">
-                                                        <div className="flex justify-between items-center">
-                                                            <div>
-                                                                <p className="font-medium text-foreground">
-                                                                    {assessment.screeningLabel ??
-                                                                        'Initial Consultation'}
-                                                                </p>
-                                                                <div className="flex items-center gap-1 text-sm text-muted-foreground mt-0.5">
-                                                                    <Clock className="h-3.5 w-3.5" />
-                                                                    {assessment.durationOverride ??
-                                                                        screeningType.duration}{' '}
-                                                                    min
-                                                                </div>
-                                                            </div>
-                                                            <div className="flex items-center gap-2 shrink-0 ml-4">
-                                                                <p className="text-sm font-medium text-primary">
-                                                                    €
-                                                                    {assessment.priceOverride ??
-                                                                        screeningType.price}
-                                                                </p>
-                                                                <ArrowRight className="h-4 w-4 text-primary" />
-                                                            </div>
+                                                    onClick={() =>
+                                                        openPricing(assessment)
+                                                    }
+                                                    className="w-full p-4 rounded-xl border-2 border-border text-left transition-all hover:border-primary/50 hover:bg-accent/50">
+                                                    <div className="flex justify-between items-start">
+                                                        <div>
+                                                            <h4 className="font-semibold text-foreground">
+                                                                {assessment.name}
+                                                            </h4>
+                                                            <NextAvailableTypeHint
+                                                                category="assessment"
+                                                                typeId={
+                                                                    screeningType.id
+                                                                }
+                                                                onPick={(slot) =>
+                                                                    handlePickTypeSlot(
+                                                                        screeningType.id,
+                                                                        slot
+                                                                    )
+                                                                }
+                                                            />
                                                         </div>
-                                                    </button>
-                                                    {(
-                                                        assessment.lockedStages ??
-                                                        []
-                                                    ).map((stage) => (
-                                                        <div
-                                                            key={stage.label}
-                                                            className="w-full p-3 rounded-lg border border-border bg-muted/40">
-                                                            <div className="flex justify-between items-start">
-                                                                <div className="flex items-start gap-2">
-                                                                    <Lock className="h-3.5 w-3.5 mt-1 text-muted-foreground shrink-0" />
-                                                                    <div>
-                                                                        <p className="font-medium text-muted-foreground">
-                                                                            {
-                                                                                stage.label
-                                                                            }
-                                                                        </p>
-                                                                        <p className="text-xs text-muted-foreground mt-0.5">
-                                                                            {
-                                                                                stage.note
-                                                                            }
-                                                                        </p>
-                                                                    </div>
-                                                                </div>
-                                                                <p className="text-sm font-medium text-muted-foreground shrink-0 ml-4">
-                                                                    {
-                                                                        stage.price
-                                                                    }
-                                                                </p>
-                                                            </div>
+                                                        <div className="flex items-center gap-2 shrink-0 ml-4">
+                                                            <p className="text-sm font-medium text-primary">
+                                                                From €
+                                                                {assessment.priceOverride ??
+                                                                    screeningType.price}
+                                                            </p>
+                                                            <ArrowRight className="h-4 w-4 text-primary" />
                                                         </div>
-                                                    ))}
-                                                </div>
+                                                    </div>
+                                                </button>
                                             );
                                         })}
 
@@ -1204,20 +1222,19 @@ export function BookingModal({
                                         )}
 
                                         {partnerAssessments.map((assessment) => (
-                                            <a
+                                            <button
                                                 key={assessment.name}
-                                                href={assessment.external!.url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="block w-full p-4 rounded-xl border-2 border-border text-left transition-all hover:border-primary/50 hover:bg-accent/50">
+                                                onClick={() =>
+                                                    openPricing(assessment)
+                                                }
+                                                className="w-full p-4 rounded-xl border-2 border-border text-left transition-all hover:border-primary/50 hover:bg-accent/50">
                                                 <div className="flex justify-between items-start">
                                                     <div>
                                                         <h4 className="font-semibold text-foreground">
                                                             {assessment.name}
                                                         </h4>
                                                         <p className="text-sm text-muted-foreground mt-0.5">
-                                                            Booked via our
-                                                            partner{' '}
+                                                            With our partner{' '}
                                                             {
                                                                 assessment
                                                                     .external!
@@ -1225,45 +1242,23 @@ export function BookingModal({
                                                             }
                                                         </p>
                                                     </div>
-                                                    <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0 ml-4 mt-1" />
-                                                </div>
-                                                {(
-                                                    assessment.partnerStages ??
-                                                    []
-                                                ).length > 0 && (
-                                                    <div className="mt-2 space-y-1">
-                                                        {assessment.partnerStages!.map(
-                                                            (stage) => (
-                                                                <div
-                                                                    key={
-                                                                        stage.label
-                                                                    }
-                                                                    className="flex justify-between items-baseline text-sm">
-                                                                    <span className="text-muted-foreground">
-                                                                        {
-                                                                            stage.label
-                                                                        }
-                                                                        {stage.note && (
-                                                                            <span className="text-xs">
-                                                                                {' '}
-                                                                                ·{' '}
-                                                                                {
-                                                                                    stage.note
-                                                                                }
-                                                                            </span>
-                                                                        )}
-                                                                    </span>
-                                                                    <span className="font-medium text-muted-foreground shrink-0 ml-3">
-                                                                        {
-                                                                            stage.price
-                                                                        }
-                                                                    </span>
-                                                                </div>
-                                                            )
+                                                    <div className="flex items-center gap-2 shrink-0 ml-4">
+                                                        {assessment
+                                                            .partnerStages?.[0]
+                                                            ?.price && (
+                                                            <p className="text-sm font-medium text-primary">
+                                                                From{' '}
+                                                                {
+                                                                    assessment
+                                                                        .partnerStages[0]
+                                                                        .price
+                                                                }
+                                                            </p>
                                                         )}
+                                                        <ArrowRight className="h-4 w-4 text-primary" />
                                                     </div>
-                                                )}
-                                            </a>
+                                                </div>
+                                            </button>
                                         ))}
                                     </div>
                                 </ScrollArea>
@@ -1339,6 +1334,21 @@ export function BookingModal({
                                                             !!preselectedCalendarName
                                                         )}
                                                     </h4>
+                                                    <NextAvailableTypeHint
+                                                        category={
+                                                            sessionCategory
+                                                        }
+                                                        typeId={type.id}
+                                                        calendarId={
+                                                            selectedCalendar
+                                                        }
+                                                        onPick={(slot) =>
+                                                            handlePickTypeSlot(
+                                                                type.id,
+                                                                slot
+                                                            )
+                                                        }
+                                                    />
                                                 </div>
                                                 <div className="text-right shrink-0 ml-4">
                                                     <div className="flex items-center gap-1 text-sm text-muted-foreground">
@@ -1360,6 +1370,137 @@ export function BookingModal({
                         )}
                     </div>
                 );
+
+            case 'pricing': {
+                // Assessment flow step 2: staged pricing for the chosen
+                // assessment. Only the stage-1 consultation is bookable in the
+                // hub; later stages show the website's pricing with its
+                // conditional notes. Partner assessments show their stages and
+                // continue on the partner's site.
+                if (!selectedAssessment) return null;
+                const pricingScreeningType = selectedAssessment.screeningTypeId
+                    ? types.find(
+                          (t) => t.id === selectedAssessment.screeningTypeId
+                      )
+                    : undefined;
+                return (
+                    <div className="space-y-4">
+                        <p className="text-muted-foreground">
+                            {selectedAssessment.external
+                                ? `Staged pricing with our partner ${selectedAssessment.external.partner} — you only pay for a stage when the clinical team confirms it's appropriate.`
+                                : 'You start with an initial consultation — later stages are arranged with the clinical team if recommended.'}
+                        </p>
+                        <div className="space-y-3">
+                            {pricingScreeningType && (
+                                <button
+                                    onClick={() =>
+                                        handleTypeSelection(
+                                            pricingScreeningType.id
+                                        )
+                                    }
+                                    className="w-full p-4 rounded-xl border-2 border-primary/30 bg-primary/5 text-left transition-all hover:border-primary hover:bg-primary/10">
+                                    <div className="flex justify-between items-center">
+                                        <div>
+                                            <p className="font-medium text-foreground">
+                                                {selectedAssessment.screeningLabel ??
+                                                    'Initial Consultation'}
+                                            </p>
+                                            <div className="flex items-center gap-1 text-sm text-muted-foreground mt-0.5">
+                                                <Clock className="h-3.5 w-3.5" />
+                                                {selectedAssessment.durationOverride ??
+                                                    pricingScreeningType.duration}{' '}
+                                                min
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0 ml-4">
+                                            <p className="text-sm font-medium text-primary">
+                                                €
+                                                {selectedAssessment.priceOverride ??
+                                                    pricingScreeningType.price}
+                                            </p>
+                                            <ArrowRight className="h-4 w-4 text-primary" />
+                                        </div>
+                                    </div>
+                                </button>
+                            )}
+
+                            {(selectedAssessment.lockedStages ?? []).map(
+                                (stage) => (
+                                    <div
+                                        key={stage.label}
+                                        className="w-full p-4 rounded-xl border border-border bg-muted/40">
+                                        <div className="flex justify-between items-start">
+                                            <div className="flex items-start gap-2">
+                                                <Lock className="h-3.5 w-3.5 mt-1 text-muted-foreground shrink-0" />
+                                                <div>
+                                                    <p className="font-medium text-muted-foreground">
+                                                        {stage.label}
+                                                    </p>
+                                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                                        {stage.note}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <p className="text-sm font-medium text-muted-foreground shrink-0 ml-4">
+                                                {stage.price}
+                                            </p>
+                                        </div>
+                                    </div>
+                                )
+                            )}
+
+                            {selectedAssessment.external && (
+                                <>
+                                    {(
+                                        selectedAssessment.partnerStages ?? []
+                                    ).map((stage) => (
+                                        <div
+                                            key={stage.label}
+                                            className="w-full p-4 rounded-xl border border-border bg-muted/40">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <p className="font-medium text-foreground">
+                                                        {stage.label}
+                                                    </p>
+                                                    {stage.note && (
+                                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                                            {stage.note}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                <p className="text-sm font-medium text-muted-foreground shrink-0 ml-4">
+                                                    {stage.price}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <Button asChild className="w-full gap-2">
+                                        <a
+                                            href={
+                                                selectedAssessment.external.url
+                                            }
+                                            target="_blank"
+                                            rel="noopener noreferrer">
+                                            Continue with{' '}
+                                            {
+                                                selectedAssessment.external
+                                                    .partner
+                                            }
+                                            <ExternalLink className="h-4 w-4" />
+                                        </a>
+                                    </Button>
+                                </>
+                            )}
+                        </div>
+                        <Button
+                            variant="ghost"
+                            onClick={() => setStep('type')}
+                            className="w-full">
+                            Back to assessments
+                        </Button>
+                    </div>
+                );
+            }
 
             case 'therapist':
                 return (
@@ -1490,16 +1631,17 @@ export function BookingModal({
                             variant="ghost"
                             onClick={() =>
                                 setStep(
-                                    sessionCategory === 'couples' ||
-                                        sessionCategory === 'youth' ||
-                                        sessionCategory === 'assessment'
+                                    sessionCategory === 'assessment'
+                                        ? 'pricing'
+                                        : sessionCategory === 'couples' ||
+                                          sessionCategory === 'youth'
                                         ? 'type'
                                         : 'therapist'
                                 )
                             }
                             className="w-full">
                             {sessionCategory === 'assessment'
-                                ? 'Back to assessments'
+                                ? 'Back to pricing options'
                                 : sessionCategory === 'couples' ||
                                   sessionCategory === 'youth'
                                 ? 'Back to session types'
@@ -2248,6 +2390,8 @@ export function BookingModal({
                       sessionCategory === 'youth'
                     ? `${categoryLabel} - Choose Therapist`
                     : `${categoryLabel} - Choose Session`;
+            case 'pricing':
+                return selectedAssessment?.name ?? 'Pricing Options';
             case 'therapist':
                 return 'Choose Your Therapist';
             case 'date':
@@ -2266,19 +2410,28 @@ export function BookingModal({
     };
 
     // Progress indicator steps (excluding success which is the final state).
-    // Assessments never visit the therapist step (pooled availability), so it
-    // is dropped from their indicator.
-    const progressSteps = [
-        { key: 'type', label: 'Type' },
-        { key: 'therapist', label: 'Therapist' },
-        { key: 'date', label: 'Date' },
-        { key: 'time', label: 'Time' },
-        { key: 'details', label: 'Details' },
-        { key: 'confirm', label: 'Confirm' },
-        { key: 'payment', label: 'Payment' },
-    ].filter(
-        (s) => !(sessionCategory === 'assessment' && s.key === 'therapist')
-    );
+    // Assessments visit a pricing step instead of the therapist step (their
+    // availability is pooled).
+    const progressSteps =
+        sessionCategory === 'assessment'
+            ? [
+                  { key: 'type', label: 'Assessment' },
+                  { key: 'pricing', label: 'Pricing' },
+                  { key: 'date', label: 'Date' },
+                  { key: 'time', label: 'Time' },
+                  { key: 'details', label: 'Details' },
+                  { key: 'confirm', label: 'Confirm' },
+                  { key: 'payment', label: 'Payment' },
+              ]
+            : [
+                  { key: 'type', label: 'Type' },
+                  { key: 'therapist', label: 'Therapist' },
+                  { key: 'date', label: 'Date' },
+                  { key: 'time', label: 'Time' },
+                  { key: 'details', label: 'Details' },
+                  { key: 'confirm', label: 'Confirm' },
+                  { key: 'payment', label: 'Payment' },
+              ];
 
     const currentStepIndex = progressSteps.findIndex((s) => s.key === step);
     const isSuccessStep = step === 'success';
