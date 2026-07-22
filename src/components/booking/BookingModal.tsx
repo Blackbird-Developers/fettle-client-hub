@@ -46,9 +46,11 @@ import {
     ExternalLink,
     ArrowRight,
     Zap,
+    Lock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getPackageCategory } from '@/lib/packageCategory';
+import { ASSESSMENTS } from '@/lib/assessments';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TherapistAvatar, toSlug } from '@/components/dashboard/MyTherapist';
 import { useTherapistImages, type TherapistProfile } from '@/hooks/useTherapistImages';
@@ -67,21 +69,6 @@ const stripePromise = stripePublishableKey
     : null;
 console.log('[Stripe Debug] stripePromise created:', !!stripePromise);
 export type SessionCategory = 'individual' | 'couples' | 'youth' | 'assessment';
-
-// Assessments booked through fettle.ie partners rather than Acuity. Shown as
-// link-out cards at the end of the assessment type list (no native booking).
-const PARTNER_ASSESSMENTS = [
-    {
-        name: 'ADHD Assessment',
-        partner: 'ADHD Now',
-        url: 'https://fettle.ie/adhd-assessment/',
-    },
-    {
-        name: 'Autism Assessment',
-        partner: 'AutismCare',
-        url: 'https://fettle.ie/autism-assesments/',
-    },
-] as const;
 
 interface BookingModalProps {
     open: boolean;
@@ -232,27 +219,10 @@ export function BookingModal({
         selectedCalendar
     );
 
-    // Filter appointment types based on session category and whether we're rebooking
+    // Filter appointment types based on session category and whether we're
+    // rebooking. Assessments don't use this list — the 'type' step renders the
+    // curated ASSESSMENTS config instead.
     const filteredAppointmentTypes = useMemo(() => {
-        // Assessments are identified by Acuity's own category — a stable,
-        // explicit grouping — rather than by name matching. Screenings (€89)
-        // sort ahead of full assessments and follow-ups via price, so the
-        // natural entry point is listed first.
-        if (sessionCategory === 'assessment') {
-            return types
-                .filter(
-                    (type) =>
-                        type.category === 'Assessments' &&
-                        type.active !== false &&
-                        type.private !== true
-                )
-                .sort(
-                    (a, b) =>
-                        parseFloat(a.price || '0') - parseFloat(b.price || '0') ||
-                        a.name.localeCompare(b.name)
-                );
-        }
-
         if (preselectedCalendarName && !ignorePreselectedTherapist) {
             // When rebooking, show only session types for the specific therapist
             // Trim the name as some calendars (like Ken Gallagher) have trailing spaces from Acuity API
@@ -1094,14 +1064,163 @@ export function BookingModal({
                     );
                 }
 
+                // Assessments render from the curated ASSESSMENTS config: only
+                // the initial consultation is bookable; later stages are shown
+                // locked with an explanatory note, and partner-run assessments
+                // (ADHD/Autism) link out to fettle.ie.
+                if (sessionCategory === 'assessment') {
+                    return (
+                        <div className="space-y-4">
+                            <p className="text-muted-foreground">
+                                Select the assessment you'd like to book — you
+                                start with an initial consultation.
+                            </p>
+                            {typesLoading ? (
+                                <div className="space-y-3">
+                                    {[1, 2, 3].map((i) => (
+                                        <Skeleton
+                                            key={i}
+                                            className="h-28 w-full rounded-xl"
+                                        />
+                                    ))}
+                                </div>
+                            ) : (
+                                <ScrollArea className="h-[340px] pr-4">
+                                    <div className="space-y-3">
+                                        {ASSESSMENTS.map((assessment) => {
+                                            if (assessment.external) {
+                                                return (
+                                                    <a
+                                                        key={assessment.name}
+                                                        href={assessment.external.url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="block w-full p-4 rounded-xl border-2 border-border text-left transition-all hover:border-primary/50 hover:bg-accent/50">
+                                                        <div className="flex justify-between items-start">
+                                                            <div>
+                                                                <h4 className="font-semibold text-foreground">
+                                                                    {assessment.name}
+                                                                </h4>
+                                                                <p className="text-sm text-muted-foreground mt-1">
+                                                                    Booked via our
+                                                                    partner{' '}
+                                                                    {
+                                                                        assessment
+                                                                            .external
+                                                                            .partner
+                                                                    }
+                                                                </p>
+                                                            </div>
+                                                            <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0 ml-4 mt-1" />
+                                                        </div>
+                                                    </a>
+                                                );
+                                            }
+
+                                            const screeningType = types.find(
+                                                (t) =>
+                                                    t.id ===
+                                                    assessment.screeningTypeId
+                                            );
+                                            if (!screeningType) return null;
+
+                                            return (
+                                                <div
+                                                    key={assessment.name}
+                                                    className="w-full p-4 rounded-xl border-2 border-border space-y-2">
+                                                    <h4 className="font-semibold text-foreground">
+                                                        {assessment.name}
+                                                    </h4>
+                                                    <button
+                                                        onClick={() =>
+                                                            handleTypeSelection(
+                                                                screeningType.id
+                                                            )
+                                                        }
+                                                        className="w-full p-3 rounded-lg border-2 border-primary/30 bg-primary/5 text-left transition-all hover:border-primary hover:bg-primary/10">
+                                                        <div className="flex justify-between items-center">
+                                                            <div>
+                                                                <p className="font-medium text-foreground">
+                                                                    Initial
+                                                                    Consultation
+                                                                </p>
+                                                                <div className="flex items-center gap-1 text-sm text-muted-foreground mt-0.5">
+                                                                    <Clock className="h-3.5 w-3.5" />
+                                                                    {
+                                                                        screeningType.duration
+                                                                    }{' '}
+                                                                    min
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 shrink-0 ml-4">
+                                                                <p className="text-sm font-medium text-primary">
+                                                                    €
+                                                                    {
+                                                                        screeningType.price
+                                                                    }
+                                                                </p>
+                                                                <ArrowRight className="h-4 w-4 text-primary" />
+                                                            </div>
+                                                        </div>
+                                                    </button>
+                                                    {(
+                                                        assessment.lockedTiers ??
+                                                        []
+                                                    ).map((tier) => {
+                                                        const tierType =
+                                                            types.find(
+                                                                (t) =>
+                                                                    t.id ===
+                                                                    tier.typeId
+                                                            );
+                                                        if (!tierType)
+                                                            return null;
+                                                        return (
+                                                            <div
+                                                                key={tier.typeId}
+                                                                className="w-full p-3 rounded-lg border border-border bg-muted/40">
+                                                                <div className="flex justify-between items-start">
+                                                                    <div className="flex items-start gap-2">
+                                                                        <Lock className="h-3.5 w-3.5 mt-1 text-muted-foreground shrink-0" />
+                                                                        <div>
+                                                                            <p className="font-medium text-muted-foreground">
+                                                                                {
+                                                                                    tier.label
+                                                                                }
+                                                                            </p>
+                                                                            <p className="text-xs text-muted-foreground mt-0.5">
+                                                                                {
+                                                                                    tier.note
+                                                                                }
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <p className="text-sm font-medium text-muted-foreground shrink-0 ml-4">
+                                                                        €
+                                                                        {
+                                                                            tierType.price
+                                                                        }
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </ScrollArea>
+                            )}
+                        </div>
+                    );
+                }
+
                 return (
                     <div className="space-y-4">
                         <p className="text-muted-foreground">
                             {preselectedCalendarName &&
                             !ignorePreselectedTherapist
                                 ? `Select a session type to book with ${preselectedCalendarName}`
-                                : sessionCategory === 'assessment'
-                                ? "Select the assessment you'd like to book"
                                 : sessionCategory === 'couples' ||
                                   sessionCategory === 'youth'
                                 ? 'Select your therapist'
@@ -1179,45 +1298,6 @@ export function BookingModal({
                                             </div>
                                         </button>
                                     ))}
-
-                                    {/* ADHD & Autism assessments run on partner
-                                        booking systems (not Acuity), so they
-                                        link out to fettle.ie instead. */}
-                                    {sessionCategory === 'assessment' && (
-                                        <>
-                                            <div className="relative py-2">
-                                                <div className="absolute inset-0 flex items-center">
-                                                    <span className="w-full border-t" />
-                                                </div>
-                                                <div className="relative flex justify-center text-xs uppercase">
-                                                    <span className="bg-background px-2 text-muted-foreground">
-                                                        With our partners
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            {PARTNER_ASSESSMENTS.map((partner) => (
-                                                <a
-                                                    key={partner.name}
-                                                    href={partner.url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="block w-full p-4 rounded-xl border-2 border-border text-left transition-all hover:border-primary/50 hover:bg-accent/50">
-                                                    <div className="flex justify-between items-start">
-                                                        <div>
-                                                            <h4 className="font-semibold text-foreground">
-                                                                {partner.name}
-                                                            </h4>
-                                                            <p className="text-sm text-muted-foreground mt-1">
-                                                                Booked via our partner{' '}
-                                                                {partner.partner}
-                                                            </p>
-                                                        </div>
-                                                        <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0 ml-4 mt-1" />
-                                                    </div>
-                                                </a>
-                                            ))}
-                                        </>
-                                    )}
                                 </div>
                             </ScrollArea>
                         )}

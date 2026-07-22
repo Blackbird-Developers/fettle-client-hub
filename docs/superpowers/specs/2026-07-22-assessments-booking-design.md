@@ -54,17 +54,24 @@ links out to the public pages for these two instead of integrating foreign APIs:
 Youth Therapy and Session Bundles, with the same `NextAvailableHint`
 (`category="assessment"` — `useNextAvailable` already supports this category).
 
-### Type filtering
+### Type selection (curated, tiered)
 - `SessionCategory` becomes `'individual' | 'couples' | 'youth' | 'assessment'`.
-- For `assessment`, `filteredAppointmentTypes` selects Acuity types with
-  `category === 'Assessments'`, `active`, and not `private` (the
-  `AcuityAppointmentType` interface gains `active`/`private`), sorted screenings
-  first (by price ascending, then name).
-- `matchesCategory('assessment')` in `useNextAvailable` is tightened from the
-  defensive name match (`name includes 'assessment'`, which would wrongly match
-  psychiatry/wellbeing types) to `category === 'Assessments'`.
-- The assessment type list appends two **external partner cards** for ADHD
-  (ADHD Now) and Autism (AutismCare) that open the fettle.ie pages in a new tab.
+- The picker shows exactly six assessments (client decision, 2026-07-22), in
+  order: ADHD, Autism, OCD, Anxiety, Depression, Addiction — driven by the
+  `ASSESSMENTS` config in `src/lib/assessments.ts` (Acuity screening type IDs
+  verified live; they match the fettle.ie page links).
+- **Only the initial consultation (screening) is bookable.** The later stages
+  are displayed locked with live Acuity pricing and conditional notes,
+  mirroring the ADHD page's presentation: Full Assessment — “Booked only after
+  your initial consultation, if recommended by the clinical team.”; Follow-Up
+  Session — “Available once your full assessment is complete.” (Addiction has
+  a screening only.)
+- ADHD and Autism render as **external partner cards** (ADHD Now / AutismCare)
+  opening the fettle.ie pages in a new tab.
+- `matchesCategory('assessment')` in `useNextAvailable` matches only the
+  curated screening IDs so the “next available” hint reflects what is actually
+  bookable. Bipolar/Mental-Health screenings and the Psychiatry Appointment in
+  Acuity's Assessments category are intentionally excluded.
 
 ### Step flow
 `type → date → time → details → confirm → payment → success` — the therapist
