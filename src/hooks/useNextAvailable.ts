@@ -6,6 +6,7 @@ import {
     type AcuityAppointmentType,
     type AcuityAvailableTime,
 } from '@/hooks/useAcuity';
+import { ASSESSMENT_SCREENING_TYPE_IDS } from '@/lib/assessments';
 
 /**
  * Booking categories the hub can surface "next available" for. This is a
@@ -73,10 +74,10 @@ export function matchesCategory(
         case 'youth':
             return name.startsWith('Youth Therapy - Individual Session');
         case 'assessment':
-            // Assessment types come from a sibling task; match defensively by
-            // name until a firmer convention exists. Callers can override via
-            // the `typeFilter` option below.
-            return name.toLowerCase().includes('assessment');
+            // Only the initial consultations from the curated assessment list
+            // are bookable in the hub (full assessments and follow-ups are
+            // arranged by the clinical team), so the hint only looks at those.
+            return ASSESSMENT_SCREENING_TYPE_IDS.includes(type.id);
         default: // individual
             return name.startsWith('Individual Therapy Session');
     }

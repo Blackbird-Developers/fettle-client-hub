@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { BookingModal, SessionCategory } from '@/components/booking/BookingModal';
 import { PackageBookingModal } from '@/components/booking/PackageBookingModal';
-import { CalendarPlus, Plus, ChevronDown, User, Gift, Users, Heart, Zap } from 'lucide-react';
+import { CalendarPlus, Plus, ChevronDown, User, Gift, Users, Heart, Zap, ClipboardCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNextAvailable, formatNextAvailableShort } from '@/hooks/useNextAvailable';
 
@@ -108,7 +108,7 @@ export function BookSessionDropdown({
               <NextAvailableHint category="couples" enabled={menuOpen} />
             </div>
           </DropdownMenuItem>
-          <DropdownMenuItem 
+          <DropdownMenuItem
             onClick={() => openBookingModal('youth')}
             className="cursor-pointer py-3 px-4"
           >
@@ -117,6 +117,17 @@ export function BookSessionDropdown({
               <span className="font-medium">Youth Therapy</span>
               <span className="text-xs text-muted-foreground">For young people</span>
               <NextAvailableHint category="youth" enabled={menuOpen} />
+            </div>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => openBookingModal('assessment')}
+            className="cursor-pointer py-3 px-4"
+          >
+            <ClipboardCheck className="h-4 w-4 mr-3 text-teal-600" />
+            <div className="flex flex-col">
+              <span className="font-medium">Assessments</span>
+              <span className="text-xs text-muted-foreground">Screenings & clinical assessments</span>
+              <NextAvailableHint category="assessment" enabled={menuOpen} />
             </div>
           </DropdownMenuItem>
           <DropdownMenuSeparator />

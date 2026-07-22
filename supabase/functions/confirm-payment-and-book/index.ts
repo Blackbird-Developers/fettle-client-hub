@@ -558,6 +558,11 @@ serve(async (req) => {
 
     await markBooked(appointment.id);
 
+    // Pooled bookings (assessments) don't send a calendar — Acuity assigns a
+    // clinician itself, so fall back to the name on the booked appointment for
+    // the confirmation email and success payload.
+    const assignedCalendarName = calendarName || appointment.calendar || "";
+
     // STEP 2: Capture the payment ONLY AFTER successful Acuity booking (if not already captured)
     if (needsCapture) {
       logStep("Capturing payment after successful booking", { paymentIntentId });
@@ -632,12 +637,12 @@ serve(async (req) => {
             </div>
             <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 12px 12px;">
               <p style="font-size: 16px; margin-bottom: 20px;">Hi ${firstName},</p>
-              <p style="font-size: 16px; margin-bottom: 20px;">Your therapy session has been successfully booked and paid for.</p>
+              <p style="font-size: 16px; margin-bottom: 20px;">Your ${appointmentTypeName || 'therapy session'} has been successfully booked and paid for.</p>
 
               <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #667eea;">
                 <h3 style="margin: 0 0 15px 0; color: #667eea;">Session Details</h3>
                 <p style="margin: 5px 0;"><strong>Session:</strong> ${appointmentTypeName || 'Therapy Session'}</p>
-                <p style="margin: 5px 0;"><strong>Therapist:</strong> ${calendarName || 'Your therapist'}</p>
+                <p style="margin: 5px 0;"><strong>Therapist:</strong> ${assignedCalendarName || 'Your therapist'}</p>
                 <p style="margin: 5px 0;"><strong>Date:</strong> ${formattedDate}</p>
                 <p style="margin: 5px 0;"><strong>Time:</strong> ${formattedTime} ${timezoneAbbr}</p>
               </div>
@@ -725,7 +730,7 @@ serve(async (req) => {
         id: appointment.id,
         datetime: appointment.datetime,
         type: appointmentTypeName,
-        therapist: calendarName,
+        therapist: assignedCalendarName,
       },
       receiptUrl,
     }), {

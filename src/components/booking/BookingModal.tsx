@@ -46,9 +46,15 @@ import {
     ExternalLink,
     ArrowRight,
     Zap,
+    Lock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getPackageCategory } from '@/lib/packageCategory';
+import {
+    ASSESSMENTS,
+    getAssessmentPriceOverride,
+    getAssessmentDurationOverride,
+} from '@/lib/assessments';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TherapistAvatar, toSlug } from '@/components/dashboard/MyTherapist';
 import { useTherapistImages, type TherapistProfile } from '@/hooks/useTherapistImages';
@@ -66,7 +72,7 @@ const stripePromise = stripePublishableKey
     ? loadStripe(stripePublishableKey)
     : null;
 console.log('[Stripe Debug] stripePromise created:', !!stripePromise);
-export type SessionCategory = 'individual' | 'couples' | 'youth';
+export type SessionCategory = 'individual' | 'couples' | 'youth' | 'assessment';
 
 interface BookingModalProps {
     open: boolean;
@@ -217,7 +223,9 @@ export function BookingModal({
         selectedCalendar
     );
 
-    // Filter appointment types based on session category and whether we're rebooking
+    // Filter appointment types based on session category and whether we're
+    // rebooking. Assessments don't use this list — the 'type' step renders the
+    // curated ASSESSMENTS config instead.
     const filteredAppointmentTypes = useMemo(() => {
         if (preselectedCalendarName && !ignorePreselectedTherapist) {
             // When rebooking, show only session types for the specific therapist
@@ -291,6 +299,8 @@ export function BookingModal({
                 return "Couple's Therapy";
             case 'youth':
                 return 'Youth Therapy';
+            case 'assessment':
+                return 'Assessment';
             default:
                 return 'Individual Therapy';
         }
@@ -301,6 +311,13 @@ export function BookingModal({
         name: string,
         isTherapistSpecific: boolean = false
     ) => {
+        // Assessment type names are already client-facing (e.g. "OCD Assessment
+        // Screening") — show them verbatim, just trimmed (some have trailing
+        // spaces in Acuity).
+        if (sessionCategory === 'assessment') {
+            return name.trim();
+        }
+
         // For couples and youth sessions, show just the therapist name
         if (sessionCategory === 'couples' || sessionCategory === 'youth') {
             const therapistName = extractTherapistFromTypeName(name);
@@ -392,6 +409,18 @@ export function BookingModal({
     };
 
     const selectedTypeData = types.find((t) => t.id === selectedType);
+    // Price shown and charged for the selected type. Assessments may override
+    // the Acuity record's price to match what fettle.ie sells them for (e.g.
+    // the addiction assessment is €140 while its Acuity type lists €89).
+    const selectedTypePrice = selectedTypeData
+        ? getAssessmentPriceOverride(selectedTypeData.id) ??
+          selectedTypeData.price
+        : undefined;
+    // Displayed duration, likewise overridable to match the website's copy.
+    const selectedTypeDuration = selectedTypeData
+        ? getAssessmentDurationOverride(selectedTypeData.id) ??
+          selectedTypeData.duration
+        : undefined;
     const selectedCalendarData = calendars.find(
         (c) => c.id === selectedCalendar
     );
@@ -587,7 +616,7 @@ export function BookingModal({
             const requestBody = {
                 appointmentTypeID: selectedType,
                 appointmentTypeName: selectedTypeData.name,
-                appointmentTypePrice: selectedTypeData.price,
+                appointmentTypePrice: selectedTypePrice,
                 datetime: selectedTime,
                 calendarID: selectedCalendar,
                 calendarName: selectedCalendarData?.name?.trim(),
@@ -600,10 +629,16 @@ export function BookingModal({
                 intakeFormFields: JSON.stringify(intakeFormFields),
                 // User's timezone for email formatting
                 timezone: profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-                // Optional loyalty coupon (validated + applied server-side)
-                couponCode: couponCode.trim() || undefined,
+                // Optional loyalty coupon (validated + applied server-side).
+                // Coupons/referral credit are therapy rewards — never sent for
+                // assessments (the UI also hides both options there).
+                couponCode:
+                    sessionCategory === 'assessment'
+                        ? undefined
+                        : couponCode.trim() || undefined,
                 // Apply referral credit (server reduces the charge / may fully cover)
-                useReferralCredit: applyReferralCredit,
+                useReferralCredit:
+                    sessionCategory === 'assessment' ? false : applyReferralCredit,
             };
 
             console.log(
@@ -634,7 +669,7 @@ export function BookingModal({
                         body: {
                             appointmentTypeID: selectedType,
                             appointmentTypeName: selectedTypeData.name,
-                            appointmentTypePrice: selectedTypeData.price,
+                            appointmentTypePrice: selectedTypePrice,
                             datetime: selectedTime,
                             calendarID: selectedCalendar,
                             calendarName: selectedCalendarData?.name?.trim(),
@@ -694,7 +729,7 @@ export function BookingModal({
                 setPaymentIntentId(data.paymentIntentId);
                 setPaymentAmount(
                     data.amount ||
-                        Math.round(parseFloat(selectedTypeData.price) * 100)
+                        Math.round(parseFloat(selectedTypePrice || '0') * 100)
                 );
                 setPaymentLivemode(
                     data.livemode !== undefined ? data.livemode : null
@@ -797,6 +832,15 @@ export function BookingModal({
     // For couples/youth sessions, the therapist is embedded in the type name, so extract calendar and skip to date
     const handleTypeSelection = (typeId: number) => {
         setSelectedType(typeId);
+
+        // Assessments don't require choosing a clinician: availability is
+        // pooled across the assessment calendars and Acuity assigns one at
+        // booking time (calendarID stays unset).
+        if (sessionCategory === 'assessment') {
+            setSelectedCalendar(null);
+            setStep('date');
+            return;
+        }
 
         // For couples and youth sessions, therapist is part of the type name - extract calendar ID and skip to date
         if (sessionCategory === 'couples' || sessionCategory === 'youth') {
@@ -1036,6 +1080,198 @@ export function BookingModal({
                     );
                 }
 
+                // Assessments render from the curated ASSESSMENTS config.
+                // Only the stage-1 consultation is bookable; later stages show
+                // the website's pricing locked with its conditional notes.
+                // Partner-run assessments (ADHD/Autism) list last and link out
+                // to fettle.ie.
+                if (sessionCategory === 'assessment') {
+                    const nativeAssessments = ASSESSMENTS.filter(
+                        (a) => !a.external
+                    );
+                    const partnerAssessments = ASSESSMENTS.filter(
+                        (a) => a.external
+                    );
+                    return (
+                        <div className="space-y-4">
+                            <p className="text-muted-foreground">
+                                Select the assessment you'd like to book — you
+                                start with an initial consultation.
+                            </p>
+                            {typesLoading ? (
+                                <div className="space-y-3">
+                                    {[1, 2, 3].map((i) => (
+                                        <Skeleton
+                                            key={i}
+                                            className="h-28 w-full rounded-xl"
+                                        />
+                                    ))}
+                                </div>
+                            ) : (
+                                <ScrollArea className="h-[340px] pr-4">
+                                    <div className="space-y-3">
+                                        {nativeAssessments.map((assessment) => {
+                                            const screeningType = types.find(
+                                                (t) =>
+                                                    t.id ===
+                                                    assessment.screeningTypeId
+                                            );
+                                            if (!screeningType) return null;
+
+                                            return (
+                                                <div
+                                                    key={assessment.name}
+                                                    className="w-full p-4 rounded-xl border-2 border-border space-y-2">
+                                                    <h4 className="font-semibold text-foreground">
+                                                        {assessment.name}
+                                                    </h4>
+                                                    <button
+                                                        onClick={() =>
+                                                            handleTypeSelection(
+                                                                screeningType.id
+                                                            )
+                                                        }
+                                                        className="w-full p-3 rounded-lg border-2 border-primary/30 bg-primary/5 text-left transition-all hover:border-primary hover:bg-primary/10">
+                                                        <div className="flex justify-between items-center">
+                                                            <div>
+                                                                <p className="font-medium text-foreground">
+                                                                    {assessment.screeningLabel ??
+                                                                        'Initial Consultation'}
+                                                                </p>
+                                                                <div className="flex items-center gap-1 text-sm text-muted-foreground mt-0.5">
+                                                                    <Clock className="h-3.5 w-3.5" />
+                                                                    {assessment.durationOverride ??
+                                                                        screeningType.duration}{' '}
+                                                                    min
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 shrink-0 ml-4">
+                                                                <p className="text-sm font-medium text-primary">
+                                                                    €
+                                                                    {assessment.priceOverride ??
+                                                                        screeningType.price}
+                                                                </p>
+                                                                <ArrowRight className="h-4 w-4 text-primary" />
+                                                            </div>
+                                                        </div>
+                                                    </button>
+                                                    {(
+                                                        assessment.lockedStages ??
+                                                        []
+                                                    ).map((stage) => (
+                                                        <div
+                                                            key={stage.label}
+                                                            className="w-full p-3 rounded-lg border border-border bg-muted/40">
+                                                            <div className="flex justify-between items-start">
+                                                                <div className="flex items-start gap-2">
+                                                                    <Lock className="h-3.5 w-3.5 mt-1 text-muted-foreground shrink-0" />
+                                                                    <div>
+                                                                        <p className="font-medium text-muted-foreground">
+                                                                            {
+                                                                                stage.label
+                                                                            }
+                                                                        </p>
+                                                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                                                            {
+                                                                                stage.note
+                                                                            }
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                                <p className="text-sm font-medium text-muted-foreground shrink-0 ml-4">
+                                                                    {
+                                                                        stage.price
+                                                                    }
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            );
+                                        })}
+
+                                        {partnerAssessments.length > 0 && (
+                                            <div className="relative py-2">
+                                                <div className="absolute inset-0 flex items-center">
+                                                    <span className="w-full border-t" />
+                                                </div>
+                                                <div className="relative flex justify-center text-xs uppercase">
+                                                    <span className="bg-background px-2 text-muted-foreground">
+                                                        With our partners
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {partnerAssessments.map((assessment) => (
+                                            <a
+                                                key={assessment.name}
+                                                href={assessment.external!.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="block w-full p-4 rounded-xl border-2 border-border text-left transition-all hover:border-primary/50 hover:bg-accent/50">
+                                                <div className="flex justify-between items-start">
+                                                    <div>
+                                                        <h4 className="font-semibold text-foreground">
+                                                            {assessment.name}
+                                                        </h4>
+                                                        <p className="text-sm text-muted-foreground mt-0.5">
+                                                            Booked via our
+                                                            partner{' '}
+                                                            {
+                                                                assessment
+                                                                    .external!
+                                                                    .partner
+                                                            }
+                                                        </p>
+                                                    </div>
+                                                    <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0 ml-4 mt-1" />
+                                                </div>
+                                                {(
+                                                    assessment.partnerStages ??
+                                                    []
+                                                ).length > 0 && (
+                                                    <div className="mt-2 space-y-1">
+                                                        {assessment.partnerStages!.map(
+                                                            (stage) => (
+                                                                <div
+                                                                    key={
+                                                                        stage.label
+                                                                    }
+                                                                    className="flex justify-between items-baseline text-sm">
+                                                                    <span className="text-muted-foreground">
+                                                                        {
+                                                                            stage.label
+                                                                        }
+                                                                        {stage.note && (
+                                                                            <span className="text-xs">
+                                                                                {' '}
+                                                                                ·{' '}
+                                                                                {
+                                                                                    stage.note
+                                                                                }
+                                                                            </span>
+                                                                        )}
+                                                                    </span>
+                                                                    <span className="font-medium text-muted-foreground shrink-0 ml-3">
+                                                                        {
+                                                                            stage.price
+                                                                        }
+                                                                    </span>
+                                                                </div>
+                                                            )
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </a>
+                                        ))}
+                                    </div>
+                                </ScrollArea>
+                            )}
+                        </div>
+                    );
+                }
+
                 return (
                     <div className="space-y-4">
                         <p className="text-muted-foreground">
@@ -1255,14 +1491,17 @@ export function BookingModal({
                             onClick={() =>
                                 setStep(
                                     sessionCategory === 'couples' ||
-                                        sessionCategory === 'youth'
+                                        sessionCategory === 'youth' ||
+                                        sessionCategory === 'assessment'
                                         ? 'type'
                                         : 'therapist'
                                 )
                             }
                             className="w-full">
-                            {sessionCategory === 'couples' ||
-                            sessionCategory === 'youth'
+                            {sessionCategory === 'assessment'
+                                ? 'Back to assessments'
+                                : sessionCategory === 'couples' ||
+                                  sessionCategory === 'youth'
                                 ? 'Back to session types'
                                 : 'Back to therapist selection'}
                         </Button>
@@ -1418,7 +1657,11 @@ export function BookingModal({
                                         notes: e.target.value,
                                     }))
                                 }
-                                placeholder="Any information you'd like your therapist to know..."
+                                placeholder={
+                                    sessionCategory === 'assessment'
+                                        ? "Any information you'd like your clinician to know..."
+                                        : "Any information you'd like your therapist to know..."
+                                }
                                 rows={3}
                             />
                         </div>
@@ -1544,7 +1787,7 @@ export function BookingModal({
                                         {selectedTypeData?.name}
                                     </p>
                                     <p className="text-sm text-muted-foreground">
-                                        {selectedTypeData?.duration} minutes
+                                        {selectedTypeDuration} minutes
                                     </p>
                                 </div>
                             </div>
@@ -1553,10 +1796,14 @@ export function BookingModal({
                                 <div>
                                     <p className="font-medium">
                                         {getTherapistDisplayName() ||
-                                            'Your therapist'}
+                                            (sessionCategory === 'assessment'
+                                                ? 'Assessment clinician'
+                                                : 'Your therapist')}
                                     </p>
                                     <p className="text-sm text-muted-foreground">
-                                        Your therapist
+                                        {sessionCategory === 'assessment'
+                                            ? 'Assigned automatically'
+                                            : 'Your therapist'}
                                     </p>
                                 </div>
                             </div>
@@ -1676,7 +1923,7 @@ export function BookingModal({
                                         </div>
                                         <div className="flex-1">
                                             <p className="font-semibold text-foreground">
-                                                Pay €{selectedTypeData?.price}
+                                                Pay €{selectedTypePrice}
                                             </p>
                                             <p className="text-sm text-muted-foreground">
                                                 Pay for this individual session
@@ -1693,24 +1940,29 @@ export function BookingModal({
                         {/* Standard payment option when no packages (only show after packages have loaded) */}
                         {!packagesLoading &&
                             categoryRemainingSessions === 0 &&
-                            selectedTypeData?.price &&
-                            parseFloat(selectedTypeData.price) > 0 && (
+                            selectedTypePrice &&
+                            parseFloat(selectedTypePrice) > 0 && (
                                 <div className="space-y-3">
                                     <div className="bg-primary/5 rounded-lg p-3 border border-primary/20">
                                         <div className="flex justify-between items-center">
                                             <span className="text-sm text-muted-foreground">
-                                                Session fee
+                                                {sessionCategory === 'assessment'
+                                                    ? 'Assessment fee'
+                                                    : 'Session fee'}
                                             </span>
                                             <span className="text-lg font-bold text-primary">
-                                                €{selectedTypeData.price}
+                                                €{selectedTypePrice}
                                             </span>
                                         </div>
                                     </div>
                                 </div>
                             )}
 
-                        {/* Coupon code - only show when paying */}
+                        {/* Coupon code - only show when paying. Loyalty coupons
+                            and referral credits are therapy-session rewards, so
+                            neither is offered on assessment bookings. */}
                         {!usePackageCredits &&
+                            sessionCategory !== 'assessment' &&
                             selectedTypeData?.price &&
                             parseFloat(selectedTypeData.price) > 0 && (
                                 <div className="space-y-2">
@@ -1733,6 +1985,7 @@ export function BookingModal({
 
                         {/* Referral credit - only when paying by card and you have credit */}
                         {!usePackageCredits &&
+                            sessionCategory !== 'assessment' &&
                             selectedTypeData?.price &&
                             parseFloat(selectedTypeData.price) > 0 &&
                             referralBalanceCents > 0 && (() => {
@@ -1940,7 +2193,9 @@ export function BookingModal({
                                 Booking Confirmed!
                             </h3>
                             <p className="text-muted-foreground">
-                                Your session has been booked successfully.
+                                {sessionCategory === 'assessment'
+                                    ? 'Your assessment has been booked successfully.'
+                                    : 'Your session has been booked successfully.'}
                             </p>
                         </div>
 
@@ -1949,9 +2204,12 @@ export function BookingModal({
                                 <p className="font-medium">
                                     {bookingResult.appointment.type}
                                 </p>
-                                <p className="text-sm text-muted-foreground">
-                                    with {bookingResult.appointment.therapist}
-                                </p>
+                                {bookingResult.appointment.therapist && (
+                                    <p className="text-sm text-muted-foreground">
+                                        with{' '}
+                                        {bookingResult.appointment.therapist}
+                                    </p>
+                                )}
                                 <p className="text-sm text-muted-foreground">
                                     {new Date(
                                         bookingResult.appointment.datetime
@@ -1984,8 +2242,10 @@ export function BookingModal({
         const categoryLabel = getSessionCategoryLabel();
         switch (step) {
             case 'type':
-                return sessionCategory === 'couples' ||
-                    sessionCategory === 'youth'
+                return sessionCategory === 'assessment'
+                    ? 'Book an Assessment'
+                    : sessionCategory === 'couples' ||
+                      sessionCategory === 'youth'
                     ? `${categoryLabel} - Choose Therapist`
                     : `${categoryLabel} - Choose Session`;
             case 'therapist':
@@ -2005,7 +2265,9 @@ export function BookingModal({
         }
     };
 
-    // Progress indicator steps (excluding success which is the final state)
+    // Progress indicator steps (excluding success which is the final state).
+    // Assessments never visit the therapist step (pooled availability), so it
+    // is dropped from their indicator.
     const progressSteps = [
         { key: 'type', label: 'Type' },
         { key: 'therapist', label: 'Therapist' },
@@ -2014,7 +2276,9 @@ export function BookingModal({
         { key: 'details', label: 'Details' },
         { key: 'confirm', label: 'Confirm' },
         { key: 'payment', label: 'Payment' },
-    ] as const;
+    ].filter(
+        (s) => !(sessionCategory === 'assessment' && s.key === 'therapist')
+    );
 
     const currentStepIndex = progressSteps.findIndex((s) => s.key === step);
     const isSuccessStep = step === 'success';
