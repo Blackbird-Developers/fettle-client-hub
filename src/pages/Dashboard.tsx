@@ -1,7 +1,6 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { WelcomeHeader } from "@/components/dashboard/WelcomeHeader";
 import { QuickStats } from "@/components/dashboard/QuickStats";
-import { NextAvailableBanner } from "@/components/dashboard/NextAvailableBanner";
 import { UpcomingSessions } from "@/components/dashboard/UpcomingSessions";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
 import { PackagesPromo } from "@/components/dashboard/PackagesPromo";
@@ -14,9 +13,6 @@ export default function Dashboard() {
   return (
     <DashboardLayout>
       <WelcomeHeader />
-      <div className="mt-4 sm:mt-6">
-        <NextAvailableBanner />
-      </div>
       <div className="mt-4 sm:mt-6">
         <QuickStats />
       </div>
