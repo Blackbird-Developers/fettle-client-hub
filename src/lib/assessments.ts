@@ -35,6 +35,13 @@ export interface Assessment {
      * own Stripe flow, while the Acuity record still lists €89.
      */
     priceOverride?: string;
+    /**
+     * Duration (minutes) shown instead of the Acuity type's listed duration,
+     * matching the website's copy (the addiction page sells a 1-hour
+     * assessment while the Acuity record says 30 min). Display-only — Acuity
+     * still blocks its own listed duration in the clinician's calendar.
+     */
+    durationOverride?: number;
     /** Later stages shown for context but not bookable in the hub. */
     lockedStages?: AssessmentStage[];
     /** Stages shown on partner cards (all booked via the partner). */
@@ -78,6 +85,7 @@ export const ASSESSMENTS: Assessment[] = [
         screeningTypeId: 94856237,
         screeningLabel: 'Addiction assessment',
         priceOverride: '140.00',
+        durationOverride: 60,
     },
     {
         name: 'ADHD Assessment',
@@ -119,4 +127,15 @@ export function getAssessmentPriceOverride(
 ): string | undefined {
     return ASSESSMENTS.find((a) => a.screeningTypeId === appointmentTypeId)
         ?.priceOverride;
+}
+
+/**
+ * Display duration override for an Acuity appointment type (see
+ * durationOverride).
+ */
+export function getAssessmentDurationOverride(
+    appointmentTypeId: number
+): number | undefined {
+    return ASSESSMENTS.find((a) => a.screeningTypeId === appointmentTypeId)
+        ?.durationOverride;
 }

@@ -50,7 +50,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getPackageCategory } from '@/lib/packageCategory';
-import { ASSESSMENTS, getAssessmentPriceOverride } from '@/lib/assessments';
+import {
+    ASSESSMENTS,
+    getAssessmentPriceOverride,
+    getAssessmentDurationOverride,
+} from '@/lib/assessments';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TherapistAvatar, toSlug } from '@/components/dashboard/MyTherapist';
 import { useTherapistImages, type TherapistProfile } from '@/hooks/useTherapistImages';
@@ -411,6 +415,11 @@ export function BookingModal({
     const selectedTypePrice = selectedTypeData
         ? getAssessmentPriceOverride(selectedTypeData.id) ??
           selectedTypeData.price
+        : undefined;
+    // Displayed duration, likewise overridable to match the website's copy.
+    const selectedTypeDuration = selectedTypeData
+        ? getAssessmentDurationOverride(selectedTypeData.id) ??
+          selectedTypeData.duration
         : undefined;
     const selectedCalendarData = calendars.find(
         (c) => c.id === selectedCalendar
@@ -1131,9 +1140,8 @@ export function BookingModal({
                                                                 </p>
                                                                 <div className="flex items-center gap-1 text-sm text-muted-foreground mt-0.5">
                                                                     <Clock className="h-3.5 w-3.5" />
-                                                                    {
-                                                                        screeningType.duration
-                                                                    }{' '}
+                                                                    {assessment.durationOverride ??
+                                                                        screeningType.duration}{' '}
                                                                     min
                                                                 </div>
                                                             </div>
@@ -1779,7 +1787,7 @@ export function BookingModal({
                                         {selectedTypeData?.name}
                                     </p>
                                     <p className="text-sm text-muted-foreground">
-                                        {selectedTypeData?.duration} minutes
+                                        {selectedTypeDuration} minutes
                                     </p>
                                 </div>
                             </div>
