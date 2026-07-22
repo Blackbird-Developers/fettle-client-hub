@@ -50,7 +50,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getPackageCategory } from '@/lib/packageCategory';
-import { ASSESSMENTS } from '@/lib/assessments';
+import { ASSESSMENTS, getAssessmentPriceOverride } from '@/lib/assessments';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TherapistAvatar, toSlug } from '@/components/dashboard/MyTherapist';
 import { useTherapistImages, type TherapistProfile } from '@/hooks/useTherapistImages';
@@ -405,6 +405,13 @@ export function BookingModal({
     };
 
     const selectedTypeData = types.find((t) => t.id === selectedType);
+    // Price shown and charged for the selected type. Assessments may override
+    // the Acuity record's price to match what fettle.ie sells them for (e.g.
+    // the addiction assessment is €140 while its Acuity type lists €89).
+    const selectedTypePrice = selectedTypeData
+        ? getAssessmentPriceOverride(selectedTypeData.id) ??
+          selectedTypeData.price
+        : undefined;
     const selectedCalendarData = calendars.find(
         (c) => c.id === selectedCalendar
     );
@@ -600,7 +607,7 @@ export function BookingModal({
             const requestBody = {
                 appointmentTypeID: selectedType,
                 appointmentTypeName: selectedTypeData.name,
-                appointmentTypePrice: selectedTypeData.price,
+                appointmentTypePrice: selectedTypePrice,
                 datetime: selectedTime,
                 calendarID: selectedCalendar,
                 calendarName: selectedCalendarData?.name?.trim(),
@@ -653,7 +660,7 @@ export function BookingModal({
                         body: {
                             appointmentTypeID: selectedType,
                             appointmentTypeName: selectedTypeData.name,
-                            appointmentTypePrice: selectedTypeData.price,
+                            appointmentTypePrice: selectedTypePrice,
                             datetime: selectedTime,
                             calendarID: selectedCalendar,
                             calendarName: selectedCalendarData?.name?.trim(),
@@ -713,7 +720,7 @@ export function BookingModal({
                 setPaymentIntentId(data.paymentIntentId);
                 setPaymentAmount(
                     data.amount ||
-                        Math.round(parseFloat(selectedTypeData.price) * 100)
+                        Math.round(parseFloat(selectedTypePrice || '0') * 100)
                 );
                 setPaymentLivemode(
                     data.livemode !== undefined ? data.livemode : null
@@ -1133,9 +1140,8 @@ export function BookingModal({
                                                             <div className="flex items-center gap-2 shrink-0 ml-4">
                                                                 <p className="text-sm font-medium text-primary">
                                                                     €
-                                                                    {
-                                                                        screeningType.price
-                                                                    }
+                                                                    {assessment.priceOverride ??
+                                                                        screeningType.price}
                                                                 </p>
                                                                 <ArrowRight className="h-4 w-4 text-primary" />
                                                             </div>
@@ -1909,7 +1915,7 @@ export function BookingModal({
                                         </div>
                                         <div className="flex-1">
                                             <p className="font-semibold text-foreground">
-                                                Pay €{selectedTypeData?.price}
+                                                Pay €{selectedTypePrice}
                                             </p>
                                             <p className="text-sm text-muted-foreground">
                                                 Pay for this individual session
@@ -1926,8 +1932,8 @@ export function BookingModal({
                         {/* Standard payment option when no packages (only show after packages have loaded) */}
                         {!packagesLoading &&
                             categoryRemainingSessions === 0 &&
-                            selectedTypeData?.price &&
-                            parseFloat(selectedTypeData.price) > 0 && (
+                            selectedTypePrice &&
+                            parseFloat(selectedTypePrice) > 0 && (
                                 <div className="space-y-3">
                                     <div className="bg-primary/5 rounded-lg p-3 border border-primary/20">
                                         <div className="flex justify-between items-center">
@@ -1937,7 +1943,7 @@ export function BookingModal({
                                                     : 'Session fee'}
                                             </span>
                                             <span className="text-lg font-bold text-primary">
-                                                €{selectedTypeData.price}
+                                                €{selectedTypePrice}
                                             </span>
                                         </div>
                                     </div>

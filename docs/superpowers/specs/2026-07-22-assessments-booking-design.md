@@ -72,10 +72,16 @@ Youth Therapy and Session Bundles, with the same `NextAvailableHint`
 - ADHD and Autism render **last**, under a “With our partners” divider, as
   external cards (ADHD Now / AutismCare) with their website stage pricing
   (€89 / €695 / €495 and €89 / €1,199 / €599) linking to fettle.ie.
-- **Known data mismatches for Fettle to reconcile in Acuity:** the Acuity
-  Addiction Assessment Screening is €89/30min but the website sells €140/1hr
-  (the hub charges the Acuity price); Acuity “Full … Assessment” types are
-  €750 vs €650 on the website (display-only in the hub).
+- **Addiction price override (client decision, 2026-07-22):** the website
+  sells the addiction assessment at €140 while its Acuity type (94856237)
+  lists €89/30min — the same behaviour as the fettle.ie widget, which books
+  this Acuity type but charges €140 through its own Stripe flow. The hub now
+  does likewise via `priceOverride: '140.00'` in `src/lib/assessments.ts`
+  (shown in the picker, the fee box, and passed to `create-payment-intent`).
+  The Acuity record still says 30 min, so the hub displays a 30-minute
+  duration and Acuity blocks 30 minutes of calendar. Remaining Acuity-side
+  mismatch: “Full … Assessment” types are €750 vs €650 on the website
+  (display-only in the hub).
 - `matchesCategory('assessment')` in `useNextAvailable` matches only the
   curated screening IDs so the “next available” hint reflects what is actually
   bookable. Bipolar/Mental-Health screenings and the Psychiatry Appointment in

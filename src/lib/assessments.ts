@@ -28,6 +28,13 @@ export interface Assessment {
     screeningTypeId?: number;
     /** Label for the bookable stage, matching the website's pricing table. */
     screeningLabel?: string;
+    /**
+     * Price (EUR, e.g. "140.00") shown AND charged instead of the Acuity
+     * type's listed price. The fettle.ie booking widgets do the same: the
+     * addiction page books Acuity type 94856237 but charges €140 through its
+     * own Stripe flow, while the Acuity record still lists €89.
+     */
+    priceOverride?: string;
     /** Later stages shown for context but not bookable in the hub. */
     lockedStages?: AssessmentStage[];
     /** Stages shown on partner cards (all booked via the partner). */
@@ -70,6 +77,7 @@ export const ASSESSMENTS: Assessment[] = [
         name: 'Addiction Assessment',
         screeningTypeId: 94856237,
         screeningLabel: 'Addiction assessment',
+        priceOverride: '140.00',
     },
     {
         name: 'ADHD Assessment',
@@ -101,3 +109,14 @@ export const ASSESSMENTS: Assessment[] = [
 export const ASSESSMENT_SCREENING_TYPE_IDS = ASSESSMENTS.map(
     (a) => a.screeningTypeId
 ).filter((id): id is number => typeof id === 'number');
+
+/**
+ * Price override for an Acuity appointment type, when the assessment is sold
+ * at a different price than the Acuity record lists (see priceOverride).
+ */
+export function getAssessmentPriceOverride(
+    appointmentTypeId: number
+): string | undefined {
+    return ASSESSMENTS.find((a) => a.screeningTypeId === appointmentTypeId)
+        ?.priceOverride;
+}
