@@ -24,7 +24,12 @@ import {
     useAcuityAppointments,
     AcuityCalendar,
 } from '@/hooks/useAcuity';
-import { useNextAvailable, formatNextAvailable } from '@/hooks/useNextAvailable';
+import {
+    useNextAvailable,
+    formatNextAvailable,
+    resolveSlotCalendar,
+    type NextAvailableSlot,
+} from '@/hooks/useNextAvailable';
 import { useActivePackages } from '@/hooks/useUserPackages';
 import { useReferrals } from '@/hooks/useReferrals';
 import { useQueryClient } from '@tanstack/react-query';
@@ -935,6 +940,44 @@ export function BookingModal({
         setStep('details');
     };
 
+    // Jump straight to a slot picked from an option card's "next available"
+    // hint: select the type, resolve the owning therapist when needed (pooled
+    // availability doesn't say which calendar a slot belongs to), and land on
+    // the details step with date and time filled in.
+    const handlePickTypeSlot = async (
+        typeId: number,
+        slot: NextAvailableSlot
+    ) => {
+        setSelectedType(typeId);
+
+        let calendarId: number | null = slot.calendarId ?? null;
+        let time = slot.time;
+        if (sessionCategory === 'assessment') {
+            // Pooled booking — Acuity assigns the clinician.
+            calendarId = null;
+        } else if (
+            !selectedCalendar &&
+            (slot.candidateCalendarIds?.length ?? 0) > 1
+        ) {
+            const resolved = await resolveSlotCalendar(
+                typeId,
+                slot.candidateCalendarIds!,
+                slot.isoDate
+            );
+            if (resolved) {
+                calendarId = resolved.calendarId;
+                time = resolved.time;
+            }
+        }
+        setSelectedCalendar(calendarId);
+
+        const d = new Date(time);
+        setSelectedDate(d);
+        setViewingMonth(d);
+        setSelectedTime(time);
+        setStep('details');
+    };
+
     /** Format a tag string for display: "cbt" → "CBT", "anxiety" → "Anxiety" */
     const formatTag = (tag: string) => {
         const upper = tag.toUpperCase();
@@ -1144,6 +1187,12 @@ export function BookingModal({
                                                                 typeId={
                                                                     screeningType.id
                                                                 }
+                                                                onPick={(slot) =>
+                                                                    handlePickTypeSlot(
+                                                                        screeningType.id,
+                                                                        slot
+                                                                    )
+                                                                }
                                                             />
                                                         </div>
                                                         <div className="flex items-center gap-2 shrink-0 ml-4">
@@ -1292,6 +1341,12 @@ export function BookingModal({
                                                         typeId={type.id}
                                                         calendarId={
                                                             selectedCalendar
+                                                        }
+                                                        onPick={(slot) =>
+                                                            handlePickTypeSlot(
+                                                                type.id,
+                                                                slot
+                                                            )
                                                         }
                                                     />
                                                 </div>
