@@ -32,6 +32,8 @@ export interface AcuityAppointmentType {
   category: string;
   color: string;
   calendarIDs: number[];
+  active?: boolean;
+  private?: boolean;
 }
 
 export interface AcuityCalendar {

@@ -66,7 +66,22 @@ const stripePromise = stripePublishableKey
     ? loadStripe(stripePublishableKey)
     : null;
 console.log('[Stripe Debug] stripePromise created:', !!stripePromise);
-export type SessionCategory = 'individual' | 'couples' | 'youth';
+export type SessionCategory = 'individual' | 'couples' | 'youth' | 'assessment';
+
+// Assessments booked through fettle.ie partners rather than Acuity. Shown as
+// link-out cards at the end of the assessment type list (no native booking).
+const PARTNER_ASSESSMENTS = [
+    {
+        name: 'ADHD Assessment',
+        partner: 'ADHD Now',
+        url: 'https://fettle.ie/adhd-assessment/',
+    },
+    {
+        name: 'Autism Assessment',
+        partner: 'AutismCare',
+        url: 'https://fettle.ie/autism-assesments/',
+    },
+] as const;
 
 interface BookingModalProps {
     open: boolean;
@@ -219,6 +234,25 @@ export function BookingModal({
 
     // Filter appointment types based on session category and whether we're rebooking
     const filteredAppointmentTypes = useMemo(() => {
+        // Assessments are identified by Acuity's own category — a stable,
+        // explicit grouping — rather than by name matching. Screenings (€89)
+        // sort ahead of full assessments and follow-ups via price, so the
+        // natural entry point is listed first.
+        if (sessionCategory === 'assessment') {
+            return types
+                .filter(
+                    (type) =>
+                        type.category === 'Assessments' &&
+                        type.active !== false &&
+                        type.private !== true
+                )
+                .sort(
+                    (a, b) =>
+                        parseFloat(a.price || '0') - parseFloat(b.price || '0') ||
+                        a.name.localeCompare(b.name)
+                );
+        }
+
         if (preselectedCalendarName && !ignorePreselectedTherapist) {
             // When rebooking, show only session types for the specific therapist
             // Trim the name as some calendars (like Ken Gallagher) have trailing spaces from Acuity API
@@ -291,6 +325,8 @@ export function BookingModal({
                 return "Couple's Therapy";
             case 'youth':
                 return 'Youth Therapy';
+            case 'assessment':
+                return 'Assessment';
             default:
                 return 'Individual Therapy';
         }
@@ -301,6 +337,13 @@ export function BookingModal({
         name: string,
         isTherapistSpecific: boolean = false
     ) => {
+        // Assessment type names are already client-facing (e.g. "OCD Assessment
+        // Screening") — show them verbatim, just trimmed (some have trailing
+        // spaces in Acuity).
+        if (sessionCategory === 'assessment') {
+            return name.trim();
+        }
+
         // For couples and youth sessions, show just the therapist name
         if (sessionCategory === 'couples' || sessionCategory === 'youth') {
             const therapistName = extractTherapistFromTypeName(name);
@@ -600,10 +643,16 @@ export function BookingModal({
                 intakeFormFields: JSON.stringify(intakeFormFields),
                 // User's timezone for email formatting
                 timezone: profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-                // Optional loyalty coupon (validated + applied server-side)
-                couponCode: couponCode.trim() || undefined,
+                // Optional loyalty coupon (validated + applied server-side).
+                // Coupons/referral credit are therapy rewards — never sent for
+                // assessments (the UI also hides both options there).
+                couponCode:
+                    sessionCategory === 'assessment'
+                        ? undefined
+                        : couponCode.trim() || undefined,
                 // Apply referral credit (server reduces the charge / may fully cover)
-                useReferralCredit: applyReferralCredit,
+                useReferralCredit:
+                    sessionCategory === 'assessment' ? false : applyReferralCredit,
             };
 
             console.log(
@@ -797,6 +846,15 @@ export function BookingModal({
     // For couples/youth sessions, the therapist is embedded in the type name, so extract calendar and skip to date
     const handleTypeSelection = (typeId: number) => {
         setSelectedType(typeId);
+
+        // Assessments don't require choosing a clinician: availability is
+        // pooled across the assessment calendars and Acuity assigns one at
+        // booking time (calendarID stays unset).
+        if (sessionCategory === 'assessment') {
+            setSelectedCalendar(null);
+            setStep('date');
+            return;
+        }
 
         // For couples and youth sessions, therapist is part of the type name - extract calendar ID and skip to date
         if (sessionCategory === 'couples' || sessionCategory === 'youth') {
@@ -1042,6 +1100,8 @@ export function BookingModal({
                             {preselectedCalendarName &&
                             !ignorePreselectedTherapist
                                 ? `Select a session type to book with ${preselectedCalendarName}`
+                                : sessionCategory === 'assessment'
+                                ? "Select the assessment you'd like to book"
                                 : sessionCategory === 'couples' ||
                                   sessionCategory === 'youth'
                                 ? 'Select your therapist'
@@ -1119,6 +1179,45 @@ export function BookingModal({
                                             </div>
                                         </button>
                                     ))}
+
+                                    {/* ADHD & Autism assessments run on partner
+                                        booking systems (not Acuity), so they
+                                        link out to fettle.ie instead. */}
+                                    {sessionCategory === 'assessment' && (
+                                        <>
+                                            <div className="relative py-2">
+                                                <div className="absolute inset-0 flex items-center">
+                                                    <span className="w-full border-t" />
+                                                </div>
+                                                <div className="relative flex justify-center text-xs uppercase">
+                                                    <span className="bg-background px-2 text-muted-foreground">
+                                                        With our partners
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            {PARTNER_ASSESSMENTS.map((partner) => (
+                                                <a
+                                                    key={partner.name}
+                                                    href={partner.url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="block w-full p-4 rounded-xl border-2 border-border text-left transition-all hover:border-primary/50 hover:bg-accent/50">
+                                                    <div className="flex justify-between items-start">
+                                                        <div>
+                                                            <h4 className="font-semibold text-foreground">
+                                                                {partner.name}
+                                                            </h4>
+                                                            <p className="text-sm text-muted-foreground mt-1">
+                                                                Booked via our partner{' '}
+                                                                {partner.partner}
+                                                            </p>
+                                                        </div>
+                                                        <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0 ml-4 mt-1" />
+                                                    </div>
+                                                </a>
+                                            ))}
+                                        </>
+                                    )}
                                 </div>
                             </ScrollArea>
                         )}
@@ -1255,14 +1354,17 @@ export function BookingModal({
                             onClick={() =>
                                 setStep(
                                     sessionCategory === 'couples' ||
-                                        sessionCategory === 'youth'
+                                        sessionCategory === 'youth' ||
+                                        sessionCategory === 'assessment'
                                         ? 'type'
                                         : 'therapist'
                                 )
                             }
                             className="w-full">
-                            {sessionCategory === 'couples' ||
-                            sessionCategory === 'youth'
+                            {sessionCategory === 'assessment'
+                                ? 'Back to assessments'
+                                : sessionCategory === 'couples' ||
+                                  sessionCategory === 'youth'
                                 ? 'Back to session types'
                                 : 'Back to therapist selection'}
                         </Button>
@@ -1418,7 +1520,11 @@ export function BookingModal({
                                         notes: e.target.value,
                                     }))
                                 }
-                                placeholder="Any information you'd like your therapist to know..."
+                                placeholder={
+                                    sessionCategory === 'assessment'
+                                        ? "Any information you'd like your clinician to know..."
+                                        : "Any information you'd like your therapist to know..."
+                                }
                                 rows={3}
                             />
                         </div>
@@ -1553,10 +1659,14 @@ export function BookingModal({
                                 <div>
                                     <p className="font-medium">
                                         {getTherapistDisplayName() ||
-                                            'Your therapist'}
+                                            (sessionCategory === 'assessment'
+                                                ? 'Assessment clinician'
+                                                : 'Your therapist')}
                                     </p>
                                     <p className="text-sm text-muted-foreground">
-                                        Your therapist
+                                        {sessionCategory === 'assessment'
+                                            ? 'Assigned automatically'
+                                            : 'Your therapist'}
                                     </p>
                                 </div>
                             </div>
@@ -1699,7 +1809,9 @@ export function BookingModal({
                                     <div className="bg-primary/5 rounded-lg p-3 border border-primary/20">
                                         <div className="flex justify-between items-center">
                                             <span className="text-sm text-muted-foreground">
-                                                Session fee
+                                                {sessionCategory === 'assessment'
+                                                    ? 'Assessment fee'
+                                                    : 'Session fee'}
                                             </span>
                                             <span className="text-lg font-bold text-primary">
                                                 €{selectedTypeData.price}
@@ -1709,8 +1821,11 @@ export function BookingModal({
                                 </div>
                             )}
 
-                        {/* Coupon code - only show when paying */}
+                        {/* Coupon code - only show when paying. Loyalty coupons
+                            and referral credits are therapy-session rewards, so
+                            neither is offered on assessment bookings. */}
                         {!usePackageCredits &&
+                            sessionCategory !== 'assessment' &&
                             selectedTypeData?.price &&
                             parseFloat(selectedTypeData.price) > 0 && (
                                 <div className="space-y-2">
@@ -1733,6 +1848,7 @@ export function BookingModal({
 
                         {/* Referral credit - only when paying by card and you have credit */}
                         {!usePackageCredits &&
+                            sessionCategory !== 'assessment' &&
                             selectedTypeData?.price &&
                             parseFloat(selectedTypeData.price) > 0 &&
                             referralBalanceCents > 0 && (() => {
@@ -1940,7 +2056,9 @@ export function BookingModal({
                                 Booking Confirmed!
                             </h3>
                             <p className="text-muted-foreground">
-                                Your session has been booked successfully.
+                                {sessionCategory === 'assessment'
+                                    ? 'Your assessment has been booked successfully.'
+                                    : 'Your session has been booked successfully.'}
                             </p>
                         </div>
 
@@ -1949,9 +2067,12 @@ export function BookingModal({
                                 <p className="font-medium">
                                     {bookingResult.appointment.type}
                                 </p>
-                                <p className="text-sm text-muted-foreground">
-                                    with {bookingResult.appointment.therapist}
-                                </p>
+                                {bookingResult.appointment.therapist && (
+                                    <p className="text-sm text-muted-foreground">
+                                        with{' '}
+                                        {bookingResult.appointment.therapist}
+                                    </p>
+                                )}
                                 <p className="text-sm text-muted-foreground">
                                     {new Date(
                                         bookingResult.appointment.datetime
@@ -1984,8 +2105,10 @@ export function BookingModal({
         const categoryLabel = getSessionCategoryLabel();
         switch (step) {
             case 'type':
-                return sessionCategory === 'couples' ||
-                    sessionCategory === 'youth'
+                return sessionCategory === 'assessment'
+                    ? 'Book an Assessment'
+                    : sessionCategory === 'couples' ||
+                      sessionCategory === 'youth'
                     ? `${categoryLabel} - Choose Therapist`
                     : `${categoryLabel} - Choose Session`;
             case 'therapist':
@@ -2005,7 +2128,9 @@ export function BookingModal({
         }
     };
 
-    // Progress indicator steps (excluding success which is the final state)
+    // Progress indicator steps (excluding success which is the final state).
+    // Assessments never visit the therapist step (pooled availability), so it
+    // is dropped from their indicator.
     const progressSteps = [
         { key: 'type', label: 'Type' },
         { key: 'therapist', label: 'Therapist' },
@@ -2014,7 +2139,9 @@ export function BookingModal({
         { key: 'details', label: 'Details' },
         { key: 'confirm', label: 'Confirm' },
         { key: 'payment', label: 'Payment' },
-    ] as const;
+    ].filter(
+        (s) => !(sessionCategory === 'assessment' && s.key === 'therapist')
+    );
 
     const currentStepIndex = progressSteps.findIndex((s) => s.key === step);
     const isSuccessStep = step === 'success';

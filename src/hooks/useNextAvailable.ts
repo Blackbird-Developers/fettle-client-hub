@@ -73,10 +73,15 @@ export function matchesCategory(
         case 'youth':
             return name.startsWith('Youth Therapy - Individual Session');
         case 'assessment':
-            // Assessment types come from a sibling task; match defensively by
-            // name until a firmer convention exists. Callers can override via
-            // the `typeFilter` option below.
-            return name.toLowerCase().includes('assessment');
+            // Assessments are grouped under Acuity's own "Assessments"
+            // category — matching on it (rather than the type name, which
+            // would also catch psychiatry/wellbeing assessments) keeps this in
+            // lockstep with the booking flow's filtering.
+            return (
+                type.category === 'Assessments' &&
+                type.active !== false &&
+                type.private !== true
+            );
         default: // individual
             return name.startsWith('Individual Therapy Session');
     }
