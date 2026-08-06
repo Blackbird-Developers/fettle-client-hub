@@ -4,16 +4,18 @@ import Stripe from "https://esm.sh/stripe@18.5.0";
 // Stripe webhook safety net.
 //
 // WHY THIS EXISTS:
-// Session payments are auto-captured the instant the customer confirms on the
-// client (create-payment-intent uses automatic_payment_methods with no manual
-// capture). The Acuity appointment, however, is only created when the client
-// subsequently calls confirm-payment-and-book. If the browser never gets there
-// — closed tab, dropped Revolut/PayPal redirect, lost network — the money is
-// captured but no booking and no refund happen, and nothing is even logged.
+// Payments are auto-captured the instant the customer confirms on the client
+// (create-payment-intent / create-package-payment-intent use
+// automatic_payment_methods with no manual capture). Fulfilment, however, only
+// happens when the client subsequently calls back — confirm-payment-and-book
+// for a session, confirm-package-payment for a bundle. If the browser never
+// gets there — closed tab, dropped Revolut/PayPal redirect, lost network — the
+// money is captured but nothing is created and nothing is even logged.
 //
 // This webhook is invoked by Stripe directly (server-to-server), so it fires
 // regardless of what the client does. On payment_intent.succeeded it completes
-// the booking via the (now idempotent) confirm-payment-and-book function.
+// the work via the (idempotent) confirm-payment-and-book for sessions and
+// confirm-package-payment for bundles.
 //
 // ACTIVATION (one-time, outside this code):
 //   1. Stripe Dashboard → Developers → Webhooks → Add endpoint:
@@ -116,16 +118,57 @@ serve(async (req) => {
       logStep("Already booked — nothing to do", { paymentIntentId: pi.id, appointmentId: md.acuity_appointment_id });
       return ack();
     }
+    if (md.acuity_certificate_id) {
+      logStep("Bundle already fulfilled — nothing to do", { paymentIntentId: pi.id, certificateId: md.acuity_certificate_id });
+      return ack();
+    }
     if (md.booking_outcome) {
       logStep("Already settled (failed/refunded) — nothing to do", { paymentIntentId: pi.id, outcome: md.booking_outcome });
       return ack();
     }
 
-    // Session bookings carry appointmentTypeID. Package purchases carry packageId
-    // and are completed by their own client flow + sync-acuity-packages
-    // reconciliation, so we don't backstop them here.
+    // BUNDLE PURCHASES. Same failure mode as session bookings: the charge is
+    // auto-captured the moment the customer confirms, but the Acuity certificate
+    // is only created when the browser calls confirm-package-payment afterwards.
+    // Redirect payment methods (Revolut, PayPal, Link) frequently never make it
+    // back to the site, and nothing else recovers it — sync-acuity-packages only
+    // reads Acuity → Supabase, so it can never create a missing certificate.
+    // Result was money taken with no bundle in Acuity. Backstop it here.
+    if (md.packageId) {
+      logStep("Backstop: fulfilling bundle purchase", { paymentIntentId: pi.id, email: md.email, packageId: md.packageId });
+
+      const packageResp = await fetch(`${supabaseUrl}/functions/v1/confirm-package-payment`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({ paymentIntentId: pi.id }),
+      });
+
+      const packageBody = await packageResp.text();
+      logStep("confirm-package-payment responded", { status: packageResp.status, body: packageBody.slice(0, 500) });
+
+      // Trust the PaymentIntent, not the response shape: confirm-package-payment
+      // stamps acuity_certificate_id only once the certificate genuinely exists.
+      // Its Acuity failures are deliberately soft (so the customer still sees a
+      // successful purchase), which means a 200 does NOT imply the bundle landed.
+      const refreshedPkg = await stripe.paymentIntents.retrieve(pi.id);
+      if (refreshedPkg.metadata?.acuity_certificate_id) {
+        logStep("Backstop bundle fulfilled", { certificateId: refreshedPkg.metadata.acuity_certificate_id });
+        return ack();
+      }
+
+      logStep("Bundle not fulfilled — asking Stripe to retry", { paymentIntentId: pi.id });
+      return new Response(JSON.stringify({ received: true, settled: false }), {
+        headers: { "Content-Type": "application/json" },
+        status: 500,
+      });
+    }
+
+    // Anything else that isn't a session booking is not ours to fulfil.
     if (!md.appointmentTypeID) {
-      logStep("PI is not a session booking — skipping", { paymentIntentId: pi.id, hasPackageId: !!md.packageId });
+      logStep("PI is neither a session booking nor a bundle — skipping", { paymentIntentId: pi.id });
       return ack();
     }
 

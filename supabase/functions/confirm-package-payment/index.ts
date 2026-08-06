@@ -267,20 +267,28 @@ serve(async (req) => {
       throw new Error("Supabase configuration missing");
     }
 
-    // Authenticate user
+    // Resolve the caller. Two legitimate callers exist:
+    //   1. The browser, presenting the buyer's JWT.
+    //   2. The stripe-webhook backstop, server-to-server with the anon key —
+    //      Stripe cannot mint a Supabase JWT, so there is no user token to send.
+    // When a real user token is present we bind to it (and reject mismatches
+    // below). Otherwise we fall back to the PaymentIntent's userId, which is
+    // trustworthy: only create-package-payment-intent writes that metadata, and
+    // we read it back from Stripe with our own secret key.
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("No authorization header");
+    let jwtUserId: string | null = null;
 
-    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
-    const token = authHeader.replace("Bearer ", "");
-    const { data: userData, error: userError } = await supabaseAuth.auth.getUser(token);
-
-    if (userError || !userData.user) {
-      throw new Error("User not authenticated");
+    if (authHeader) {
+      const token = authHeader.replace("Bearer ", "").trim();
+      // The anon key is not a user token — don't waste a round trip on it.
+      if (token && token !== supabaseAnonKey) {
+        const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
+        const { data: userData } = await supabaseAuth.auth.getUser(token);
+        jwtUserId = userData?.user?.id ?? null;
+      }
     }
 
-    const userId = userData.user.id;
-    logStep("User authenticated", { userId });
+    logStep(jwtUserId ? "Authenticated via user JWT" : "No user JWT — server-to-server call", { jwtUserId });
 
     const body = await req.json();
     const { paymentIntentId } = body;
@@ -312,17 +320,128 @@ serve(async (req) => {
       throw new Error("Missing package information in payment metadata");
     }
 
-    // Verify user matches
-    if (metadata.userId !== userId) {
+    // The purchase always belongs to the userId recorded on the PaymentIntent.
+    // A browser caller must BE that user; a server-to-server caller inherits it.
+    if (!metadata.userId) {
+      throw new Error("Payment metadata has no userId — cannot attribute this package");
+    }
+    if (jwtUserId && jwtUserId !== metadata.userId) {
       throw new Error("User mismatch");
     }
+    const userId = metadata.userId;
 
-    logStep("Package details", { packageId, packageName, sessions });
+    logStep("Package details", { packageId, packageName, sessions, userId });
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Idempotency check: if this payment intent was already processed, return the existing package
-    // Check for exact paymentIntentId match first
+    const packageResponse = (row: {
+      id: string;
+      package_name?: string;
+      total_sessions?: number;
+      remaining_sessions?: number;
+      expires_at?: string;
+    }, extra: Record<string, unknown> = {}) =>
+      new Response(JSON.stringify({
+        success: true,
+        package: {
+          id: row.id,
+          name: row.package_name ?? packageName,
+          sessions: row.total_sessions ?? sessions,
+          remaining: row.remaining_sessions ?? sessions,
+          expiresAt: row.expires_at,
+        },
+        ...extra,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+
+    // IDEMPOTENCY. The authoritative "this purchase is fully fulfilled" marker is
+    // acuity_certificate_id stamped on the PaymentIntent — durable, visible to
+    // every caller (browser, redirect handler, webhook backstop), and unlike the
+    // DB row it is only ever written AFTER the Acuity certificate really exists.
+    if (paymentIntent.metadata?.acuity_certificate_id) {
+      logStep("Already fulfilled — certificate exists", {
+        certificateId: paymentIntent.metadata.acuity_certificate_id,
+      });
+      const { data: row } = await supabaseAdmin
+        .from('user_packages')
+        .select('id, package_name, total_sessions, remaining_sessions, expires_at')
+        .eq('stripe_session_id', `acuity-cert-${paymentIntent.metadata.acuity_certificate_id}`)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (row) return packageResponse(row, { alreadyProcessed: true });
+      // Cert exists but no row (e.g. cert made manually by staff) — let
+      // sync-acuity-packages reconcile it rather than minting a second cert.
+      return new Response(JSON.stringify({
+        success: true,
+        alreadyProcessed: true,
+        acuitySync: { success: true, certificateId: paymentIntent.metadata.acuity_certificate_id },
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+    }
+
+    // CONCURRENCY GUARD. The browser call, the redirect-return handler and the
+    // stripe-webhook backstop can all run for this PaymentIntent at once. The
+    // check above is start-of-function only, so without a lock two callers both
+    // pass it and the customer gets TWO Acuity certificates for one payment.
+    // Reuses the same atomic claim as confirm-payment-and-book (keyed on the PI).
+    let claimAcquired = true; // fail-open: never block a paid fulfilment on lock infra
+    try {
+      const { data: claimed, error: claimError } = await supabaseAdmin.rpc("claim_booking", {
+        p_payment_intent_id: paymentIntentId,
+      });
+      if (claimError) {
+        logStep("WARNING: claim_booking failed — proceeding WITHOUT concurrency lock", { error: claimError.message });
+      } else {
+        claimAcquired = claimed === true;
+      }
+    } catch (e) {
+      logStep("WARNING: claim_booking threw — proceeding WITHOUT concurrency lock", { error: String(e) });
+    }
+
+    if (!claimAcquired) {
+      // Another invocation is fulfilling this payment. Wait for it to stamp the
+      // certificate, then mirror its result instead of creating a duplicate.
+      logStep("Another invocation holds the claim — mirroring its outcome", { paymentIntentId });
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const latest = await stripe.paymentIntents.retrieve(paymentIntentId);
+        const certId = latest.metadata?.acuity_certificate_id;
+        if (certId) {
+          logStep("Winner fulfilled — returning success", { certificateId: certId });
+          const { data: row } = await supabaseAdmin
+            .from('user_packages')
+            .select('id, package_name, total_sessions, remaining_sessions, expires_at')
+            .eq('stripe_session_id', `acuity-cert-${certId}`)
+            .eq('user_id', userId)
+            .maybeSingle();
+          if (row) return packageResponse(row, { alreadyProcessed: true });
+          return new Response(JSON.stringify({
+            success: true,
+            alreadyProcessed: true,
+            acuitySync: { success: true, certificateId: certId },
+          }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+        }
+      }
+      // Winner didn't settle in time. Report not-settled so the webhook backstop
+      // returns 500 and Stripe retries later; the browser just sees a soft error.
+      logStep("Winner did not settle within wait window", { paymentIntentId });
+      return new Response(JSON.stringify({
+        success: false,
+        settled: false,
+        error: "Your package is still being activated. Please refresh in a moment.",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+    }
+
+    // Find-or-create the user_packages row.
+    //
+    // A row may already exist from an earlier attempt whose Acuity certificate
+    // call failed (the row is inserted BEFORE the cert is created, and cert
+    // failure is soft). Such a row still carries the raw PI id as its
+    // stripe_session_id — it is unfulfilled, so we reuse it and retry the
+    // certificate rather than returning early. Returning early here was why a
+    // failed certificate could never be recovered: every retry saw the row,
+    // declared success, and left the customer with no bundle in Acuity.
     const { data: existingByPi } = await supabaseAdmin
       .from('user_packages')
       .select('id, package_name, total_sessions, remaining_sessions, expires_at, stripe_session_id')
@@ -330,78 +449,42 @@ serve(async (req) => {
       .eq('user_id', userId)
       .maybeSingle();
 
-    if (existingByPi) {
-      logStep("Payment already processed (exact pi match)", { id: existingByPi.id });
-      return new Response(JSON.stringify({
-        success: true,
-        package: {
-          id: existingByPi.id,
-          name: existingByPi.package_name,
-          sessions: existingByPi.total_sessions,
-          remaining: existingByPi.remaining_sessions,
-          expiresAt: existingByPi.expires_at,
-        },
-        alreadyProcessed: true,
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 200,
+    let insertedPackage: { id: string; expires_at: string } | null = existingByPi
+      ? { id: existingByPi.id, expires_at: existingByPi.expires_at }
+      : null;
+
+    if (insertedPackage) {
+      logStep("Reusing unfulfilled package row from earlier attempt — retrying certificate", {
+        id: insertedPackage.id,
       });
+    } else {
+      // Calculate expiry date (1 year from now)
+      const expiresAt = new Date();
+      expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+
+      const { data: created, error: insertError } = await supabaseAdmin
+        .from('user_packages')
+        .insert({
+          user_id: userId,
+          package_id: packageId,
+          package_name: packageName,
+          total_sessions: sessions,
+          remaining_sessions: sessions,
+          amount_paid: paymentIntent.amount / 100,
+          stripe_session_id: paymentIntentId,
+          expires_at: expiresAt.toISOString(),
+        })
+        .select()
+        .single();
+
+      if (insertError || !created) {
+        logStep("Error saving package", { error: insertError });
+        throw new Error("Failed to save package to database");
+      }
+      insertedPackage = { id: created.id, expires_at: created.expires_at };
     }
 
-    // Also check if this function already ran and linked an Acuity cert (within last 5 min)
-    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const { data: recentLinked } = await supabaseAdmin
-      .from('user_packages')
-      .select('id, package_name, total_sessions, remaining_sessions, expires_at')
-      .eq('user_id', userId)
-      .eq('package_id', packageId)
-      .like('stripe_session_id', 'acuity-cert-%')
-      .gte('created_at', fiveMinAgo)
-      .maybeSingle();
-
-    if (recentLinked) {
-      logStep("Payment already processed (recently linked to Acuity cert)", { id: recentLinked.id });
-      return new Response(JSON.stringify({
-        success: true,
-        package: {
-          id: recentLinked.id,
-          name: recentLinked.package_name,
-          sessions: recentLinked.total_sessions,
-          remaining: recentLinked.remaining_sessions,
-          expiresAt: recentLinked.expires_at,
-        },
-        alreadyProcessed: true,
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 200,
-      });
-    }
-
-    // Save to user_packages table
-
-    // Calculate expiry date (1 year from now)
-    const expiresAt = new Date();
-    expiresAt.setFullYear(expiresAt.getFullYear() + 1);
-
-    const { data: insertedPackage, error: insertError } = await supabaseAdmin
-      .from('user_packages')
-      .insert({
-        user_id: userId,
-        package_id: packageId,
-        package_name: packageName,
-        total_sessions: sessions,
-        remaining_sessions: sessions,
-        amount_paid: paymentIntent.amount / 100,
-        stripe_session_id: paymentIntentId,
-        expires_at: expiresAt.toISOString(),
-      })
-      .select()
-      .single();
-
-    if (insertError) {
-      logStep("Error saving package", { error: insertError });
-      throw new Error("Failed to save package to database");
-    }
+    const expiresAt = new Date(insertedPackage.expires_at);
 
     logStep("Package saved to database", { packageId: insertedPackage.id });
 
@@ -432,6 +515,21 @@ serve(async (req) => {
         logStep("Failed to link Acuity cert to package row", { error: linkError });
       } else {
         logStep("Linked package row to Acuity certificate", { acuityCertId });
+      }
+
+      // Stamp the PaymentIntent with the certificate id. This is the durable,
+      // cross-process "fulfilled" marker: the stripe-webhook backstop reads it
+      // back to decide whether to ack or ask Stripe to retry, and concurrent
+      // callers use it to avoid minting a second certificate. Best-effort — if
+      // it fails, the worst case is a redundant retry that hits the DB-row
+      // reuse path above, not a duplicate certificate.
+      try {
+        await stripe.paymentIntents.update(paymentIntentId, {
+          metadata: { ...metadata, acuity_certificate_id: String(acuityCertResult.certificateId) },
+        });
+        logStep("Stamped PaymentIntent with certificate id", { certificateId: acuityCertResult.certificateId });
+      } catch (stampErr) {
+        logStep("WARNING: failed to stamp PI with certificate id", { error: String(stampErr) });
       }
 
       // Ensure an Acuity Client record exists so the cert is visible on the
