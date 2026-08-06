@@ -27,6 +27,14 @@ verify_jwt = false
 [functions.confirm-payment-and-book]
 verify_jwt = false
 
+# Same reason as confirm-payment-and-book: the stripe-webhook backstop invokes
+# this server-to-server and cannot present a user JWT. The function still binds
+# the purchase to the buyer — it reads userId/email from the PaymentIntent
+# metadata, which only our own create-package-payment-intent can write, and it
+# can never fulfil a payment that did not actually succeed.
+[functions.confirm-package-payment]
+verify_jwt = false
+
 # Stripe calls this server-to-server and cannot present a Supabase JWT;
 # the function authenticates the request via the Stripe webhook signature instead.
 [functions.stripe-webhook]
