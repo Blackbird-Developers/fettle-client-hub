@@ -641,9 +641,10 @@ export function BookingModal({
                 intakeFormFields: JSON.stringify(intakeFormFields),
                 // User's timezone for email formatting
                 timezone: profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-                // Optional loyalty coupon (validated + applied server-side).
-                // Coupons/referral credit are therapy rewards — never sent for
-                // assessments (the UI also hides both options there).
+                // Optional discount code (validated + applied server-side):
+                // either a loyalty reward or a Stripe promotion code — see
+                // create-payment-intent. Codes/referral credit are never sent
+                // for assessments (the UI also hides both options there).
                 couponCode:
                     sessionCategory === 'assessment'
                         ? undefined
@@ -708,11 +709,16 @@ export function BookingModal({
                 return;
             }
 
-            // Surface the loyalty-coupon outcome before charging.
+            // Surface the discount-code outcome before charging.
             if (couponCode.trim()) {
                 if (data.discountApplied) {
+                    // Percentage codes report discountPercent; fixed-amount
+                    // codes report only discountAmount (cents off).
+                    const offLabel = data.discountPercent
+                        ? `${data.discountPercent}% off`
+                        : `€${((data.discountAmount || 0) / 100).toFixed(2)} off`;
                     toast({
-                        title: `Coupon applied — ${data.discountPercent}% off`,
+                        title: `Coupon applied — ${offLabel}`,
                         description: `You're paying €${((data.amount || 0) / 100).toFixed(2)} instead of €${((data.originalAmount || 0) / 100).toFixed(2)}.`,
                     });
                 } else if (data.couponRejected) {
@@ -726,6 +732,12 @@ export function BookingModal({
                         coupon_not_found: "This coupon is no longer valid.",
                         coupon_no_discount: "This coupon is no longer valid.",
                         below_minimum: "This coupon can't be applied to this session.",
+                        promo_inactive: 'This discount code is no longer active.',
+                        promo_expired: 'This discount code has expired.',
+                        promo_restricted: "This discount code can't be used here.",
+                        promo_minimum: 'This discount code needs a higher order total.',
+                        promo_currency: "This discount code isn't valid for euro payments.",
+                        promo_no_discount: "This discount code doesn't reduce this payment.",
                     };
                     toast({
                         title: 'Coupon not applied',
@@ -2100,8 +2112,9 @@ export function BookingModal({
                                 </div>
                             )}
 
-                        {/* Coupon code - only show when paying. Loyalty coupons
-                            and referral credits are therapy-session rewards, so
+                        {/* Coupon code - only show when paying. Accepts loyalty
+                            rewards and Stripe promotion codes; discounts and
+                            referral credits are therapy-session perks, so
                             neither is offered on assessment bookings. */}
                         {!usePackageCredits &&
                             sessionCategory !== 'assessment' &&

@@ -104,22 +104,110 @@ serve(async (req) => {
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
     logStep("Stripe client initialized");
 
-    // ── Loyalty coupon (optional) ─────────────────────────────────────────
-    // A coupon NEVER blocks the booking — any problem just means full price
-    // plus a `couponRejected` reason the UI can surface. We (1) confirm the
-    // code is a known loyalty reward, (2) confirm the signed-in caller earned
-    // it (user_achievements), then (3) read the discount from the Stripe coupon.
+    // ── Discount codes (optional) ─────────────────────────────────────────
+    // Two kinds share the one input field:
+    //   1. Loyalty rewards (FETTLELOYALTY…) — achievement-gated per account,
+    //      validated against user_achievements.
+    //   2. Marketing discount codes — Stripe PROMOTION CODES on the shared
+    //      Stripe account, resolved exactly like the main fettle.ie booking
+    //      widget does, so one code works on both booking surfaces.
+    // Codes set up only in Acuity can NOT apply here: Acuity never takes the
+    // payment in this flow, so marketing codes must be created in Stripe
+    // (Products → Coupons → promotion code).
+    // A code NEVER blocks the booking — any problem just means full price
+    // plus a `couponRejected` reason the UI can surface.
     const originalAmount = amountInCents;
     let discountApplied = false;
-    let appliedDiscountPercent = 0;
+    let appliedDiscountPercent = 0; // 0 when a fixed-amount code applied
+    let appliedDiscountAmount = 0;  // cents off (set for every applied code)
+    let appliedPromotionCodeId = "";
+    let appliedCouponId = "";
     let couponRejected: string | null = null;
-    const normalizedCoupon = (couponCode || "").toString().trim().toUpperCase();
+    const trimmedCoupon = (couponCode || "").toString().trim();
+    const normalizedCoupon = trimmedCoupon.toUpperCase();
 
     if (normalizedCoupon) {
       const loyalty = LOYALTY_COUPONS[normalizedCoupon];
       if (!loyalty) {
-        couponRejected = "unknown_code";
-        logStep("Coupon rejected: unknown code", { normalizedCoupon });
+        // Not a loyalty reward — try it as a Stripe promotion code. Mirrors
+        // computeDiscountBreakdown in the [Website] booking widget: same
+        // checks, same order, so a code behaves identically on both surfaces.
+        try {
+          const listed = await stripe.promotionCodes.list({
+            code: trimmedCoupon,
+            active: true,
+            limit: 20,
+          });
+          const matches = Array.isArray(listed?.data) ? listed.data : [];
+          const promo = matches.find(
+            (p: any) => (p?.code || "").trim().toLowerCase() === trimmedCoupon.toLowerCase(),
+          );
+          if (!promo) {
+            couponRejected = "unknown_code";
+            logStep("Discount code rejected: no matching Stripe promotion code", { trimmedCoupon });
+          } else {
+            const promoCoupon = promo.coupon;
+            const restrictions = promo.restrictions || {};
+            if (!promo.active || !promoCoupon || promoCoupon.valid === false) {
+              couponRejected = "promo_inactive";
+            } else if (promo.customer) {
+              // Customer-restricted codes can't be safely honoured here.
+              couponRejected = "promo_restricted";
+            } else if (promo.expires_at && promo.expires_at * 1000 <= Date.now()) {
+              couponRejected = "promo_expired";
+            } else if (restrictions.first_time_transaction) {
+              // Only Stripe-hosted checkout can enforce first-time-only.
+              couponRejected = "promo_restricted";
+            } else if (
+              typeof restrictions.minimum_amount === "number" &&
+              (String(restrictions.minimum_amount_currency || "eur").toLowerCase() !== "eur" ||
+                originalAmount < restrictions.minimum_amount)
+            ) {
+              couponRejected = "promo_minimum";
+            } else {
+              let off = 0;
+              if (typeof promoCoupon.percent_off === "number" && promoCoupon.percent_off > 0) {
+                off = Math.round(originalAmount * promoCoupon.percent_off / 100);
+                appliedDiscountPercent = promoCoupon.percent_off;
+              } else if (typeof promoCoupon.amount_off === "number" && promoCoupon.amount_off > 0) {
+                if (promoCoupon.currency && String(promoCoupon.currency).toLowerCase() !== "eur") {
+                  couponRejected = "promo_currency";
+                } else {
+                  off = promoCoupon.amount_off;
+                }
+              } else {
+                const eurOption = (promoCoupon.currency_options || {})["eur"];
+                if (eurOption && typeof eurOption.amount_off === "number" && eurOption.amount_off > 0) {
+                  off = eurOption.amount_off;
+                }
+              }
+              if (!couponRejected) {
+                if (off <= 0) {
+                  couponRejected = "promo_no_discount";
+                } else {
+                  appliedDiscountAmount = Math.min(off, originalAmount);
+                  amountInCents = originalAmount - appliedDiscountAmount;
+                  discountApplied = true;
+                  appliedPromotionCodeId = promo.id;
+                  appliedCouponId = promoCoupon.id || "";
+                  logStep("Marketing discount code applied", {
+                    trimmedCoupon,
+                    promotionCodeId: promo.id,
+                    originalAmount,
+                    newAmount: amountInCents,
+                    percentOff: appliedDiscountPercent || null,
+                  });
+                }
+              }
+            }
+            if (couponRejected) {
+              logStep("Discount code rejected", { trimmedCoupon, reason: couponRejected });
+            }
+          }
+        } catch (e) {
+          couponRejected = "validation_error";
+          logStep("Discount code lookup failed", { trimmedCoupon, error: String(e) });
+        }
       } else {
         const supabaseUrl = Deno.env.get("SUPABASE_URL");
         const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -169,9 +257,11 @@ serve(async (req) => {
                 appliedDiscountPercent = coupon.percent_off;
                 const discount = Math.round(originalAmount * coupon.percent_off / 100);
                 amountInCents = Math.max(originalAmount - discount, 0);
+                appliedDiscountAmount = originalAmount - amountInCents;
                 discountApplied = true;
               } else if (typeof coupon.amount_off === "number" && coupon.amount_off > 0) {
                 amountInCents = Math.max(originalAmount - coupon.amount_off, 0);
+                appliedDiscountAmount = originalAmount - amountInCents;
                 discountApplied = true;
               } else {
                 couponRejected = "coupon_no_discount";
@@ -189,13 +279,17 @@ serve(async (req) => {
       }
     }
 
-    // Stripe rejects charges under €0.50; loyalty discounts (≤10%) can't reach
-    // that on a real session price, but guard anyway.
+    // Stripe rejects charges under €0.50. A 100%-off marketing code lands here
+    // too — there's no no-charge booking path for coupons, so it reverts to
+    // full price with a reason the UI explains.
     if (discountApplied && amountInCents < 50) {
       logStep("Discount would drop below Stripe minimum — reverting to full price", { amountInCents });
       amountInCents = originalAmount;
       discountApplied = false;
       appliedDiscountPercent = 0;
+      appliedDiscountAmount = 0;
+      appliedPromotionCodeId = "";
+      appliedCouponId = "";
       couponRejected = "below_minimum";
     }
 
@@ -258,6 +352,7 @@ serve(async (req) => {
         currency: "eur",
         discountApplied,
         discountPercent: appliedDiscountPercent,
+        discountAmount: appliedDiscountAmount,
         couponRejected,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -300,9 +395,14 @@ serve(async (req) => {
       notes: notes || "",
       intakeFormFields: intakeFormFields || "", // Acuity intake form fields as JSON string
       timezone: timezone || "Europe/Dublin", // User's timezone for email formatting
-      // Loyalty discount audit trail (empty unless a coupon was actually applied)
+      // Discount audit trail (empty unless a code was actually applied).
+      // promotionCodeId/couponId identify the Stripe object behind a
+      // marketing code; loyalty rewards leave promotionCodeId empty.
       couponCode: discountApplied ? normalizedCoupon : "",
-      discountPercent: discountApplied ? String(appliedDiscountPercent) : "",
+      discountPercent: discountApplied && appliedDiscountPercent ? String(appliedDiscountPercent) : "",
+      discountAmount: discountApplied ? String(appliedDiscountAmount) : "",
+      promotionCodeId: appliedPromotionCodeId,
+      couponId: appliedCouponId,
       originalAmount: discountApplied ? String(originalAmount) : "",
       // Referral credit reserved for this booking; redeemed on confirm.
       referralCreditApplied: referralCreditApplied ? String(referralCreditApplied) : "",
@@ -334,10 +434,13 @@ serve(async (req) => {
       amount: amountInCents,
       currency: "eur",
       livemode: paymentIntent.livemode,
-      // Loyalty coupon outcome — the UI uses these to show the discount or to
+      // Discount outcome — the UI uses these to show the discount or to
       // explain why a code wasn't applied. originalAmount lets it show was/now.
+      // discountPercent is 0 for fixed-amount codes; discountAmount (cents off)
+      // is set for every applied code.
       discountApplied,
       discountPercent: appliedDiscountPercent,
+      discountAmount: appliedDiscountAmount,
       originalAmount,
       couponRejected,
       referralCreditApplied,
