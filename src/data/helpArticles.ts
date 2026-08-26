@@ -151,7 +151,7 @@ export const helpArticles: HelpArticle[] = [
       "When you book with Fettle, you'll be asked to pick a session type. The right choice depends on who the therapy is for and what you want to work on. Here's a quick guide.",
     sections: [
       {
-        heading: "Individual Therapy — €85 per 50-minute session",
+        heading: "Individual Therapy — €95 per 50-minute session",
         paragraphs: [
           "One-on-one sessions for adults (18+). This is the most common starting point. You'll talk with a qualified therapist about whatever is on your mind — anxiety, stress, relationships, work, past experiences, big life changes. No topic is off the table, and your therapist will work at your pace.",
         ],
@@ -447,9 +447,9 @@ export const helpArticles: HelpArticle[] = [
         heading: "The three package sizes",
         paragraphs: ["Fettle offers three bundles:"],
         items: [
-          "**3 sessions — €241.50** (€80.50 per session, save 6%)",
-          "**6 sessions — €468** (€78 per session, save 13%)",
-          "**9 sessions — €675** (€75 per session, save 19%)",
+          "**3 sessions — €271.50** (€90.50 per session, save €13.50)",
+          "**6 sessions — €528** (€88 per session, save €42)",
+          "**9 sessions — €765** (€85 per session, save €90)",
         ],
       },
       {
@@ -512,10 +512,10 @@ export const helpArticles: HelpArticle[] = [
       {
         heading: "The quick math (per Individual Therapy session)",
         items: [
-          "Pay-as-you-go: **€85** per session",
-          "3-pack: **€80.50** per session (save €13.50 total)",
-          "6-pack: **€78** per session (save €42 total)",
-          "9-pack: **€75** per session (save €90 total)",
+          "Pay-as-you-go: **€95** per session",
+          "3-pack: **€90.50** per session (save €13.50 total)",
+          "6-pack: **€88** per session (save €42 total)",
+          "9-pack: **€85** per session (save €90 total)",
         ],
       },
       {

@@ -13,13 +13,13 @@ const logStep = (step: string, details?: any) => {
 
 // Package definitions with Acuity IDs
 const PACKAGES = {
-  1122832: { name: "3 Session Bundle", sessions: 3, price: 241.50 },
-  996385: { name: "6 Session Bundle", sessions: 6, price: 468 },
-  1197875: { name: "9 Session Bundle", sessions: 9, price: 675 },
-  1370588: { name: "Youth Bundle 3 x 60min", sessions: 3, price: 305 },
-  1975510: { name: "Youth Bundle 5 x 60min", sessions: 5, price: 505 },
-  2000708: { name: "Couples 3 x 60 min", sessions: 3, price: 320 },
-  1967869: { name: "Couples 5 x 60 min", sessions: 5, price: 525 },
+  1122832: { name: "3 Session Bundle", sessions: 3, price: 271.50 },
+  996385: { name: "6 Session Bundle", sessions: 6, price: 528 },
+  1197875: { name: "9 Session Bundle", sessions: 9, price: 765 },
+  1370588: { name: "Youth Bundle 3 x 60min", sessions: 3, price: 325 },
+  1975510: { name: "Youth Bundle 5 x 60min", sessions: 5, price: 550 },
+  2000708: { name: "Couples 3 x 60 min", sessions: 3, price: 345 },
+  1967869: { name: "Couples 5 x 60 min", sessions: 5, price: 575 },
 };
 
 serve(async (req) => {

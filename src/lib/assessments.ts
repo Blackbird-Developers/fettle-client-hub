@@ -56,7 +56,7 @@ const CLINICAL_STAGES: AssessmentStage[] = [
     },
     {
         label: 'Aftercare therapy',
-        price: 'From €80/session',
+        price: 'From €85/session',
         note: 'Available once your clinical assessment is complete.',
     },
 ];

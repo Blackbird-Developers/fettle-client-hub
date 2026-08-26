@@ -84,7 +84,7 @@ export function PackagesPromo() {
         </Button>
         
         <p className="text-xs text-center text-muted-foreground">
-          Individual sessions: €85 each • Packages: from €75/session
+          Individual sessions: €95 each • Packages: from €85/session
         </p>
       </CardContent>
       

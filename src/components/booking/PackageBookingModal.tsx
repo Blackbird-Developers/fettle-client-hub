@@ -49,8 +49,8 @@ const PACKAGES = [
     name: "3 Session Bundle",
     sessions: 3,
     sessionDuration: 50,
-    price: 241.50,
-    individualPrice: 85,
+    price: 271.50,
+    individualPrice: 95,
     savings: 13.50,
     popular: false
   },
@@ -60,8 +60,8 @@ const PACKAGES = [
     name: "6 Session Bundle",
     sessions: 6,
     sessionDuration: 50,
-    price: 468,
-    individualPrice: 85,
+    price: 528,
+    individualPrice: 95,
     savings: 42,
     popular: true
   },
@@ -71,8 +71,8 @@ const PACKAGES = [
     name: "9 Session Bundle",
     sessions: 9,
     sessionDuration: 50,
-    price: 675,
-    individualPrice: 85,
+    price: 765,
+    individualPrice: 95,
     savings: 90,
     popular: false
   },
@@ -82,9 +82,9 @@ const PACKAGES = [
     name: "Youth Bundle 3 x 60min",
     sessions: 3,
     sessionDuration: 60,
-    price: 305,
-    individualPrice: 105,
-    savings: 10,
+    price: 325,
+    individualPrice: 125,
+    savings: 50,
     popular: false
   },
   {
@@ -93,9 +93,9 @@ const PACKAGES = [
     name: "Youth Bundle 5 x 60min",
     sessions: 5,
     sessionDuration: 60,
-    price: 505,
-    individualPrice: 105,
-    savings: 20,
+    price: 550,
+    individualPrice: 125,
+    savings: 75,
     popular: true
   },
   {
@@ -104,9 +104,9 @@ const PACKAGES = [
     name: "Couples 3 x 60 min",
     sessions: 3,
     sessionDuration: 60,
-    price: 320,
-    individualPrice: 110,
-    savings: 10,
+    price: 345,
+    individualPrice: 135,
+    savings: 60,
     popular: false
   },
   {
@@ -115,9 +115,9 @@ const PACKAGES = [
     name: "Couples 5 x 60 min",
     sessions: 5,
     sessionDuration: 60,
-    price: 525,
-    individualPrice: 110,
-    savings: 25,
+    price: 575,
+    individualPrice: 135,
+    savings: 100,
     popular: true
   },
 ];
@@ -328,7 +328,7 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
 
             <p className="text-xs text-center text-muted-foreground pt-2">
               {packageCategory === 'individual'
-                ? 'Individual sessions are €85 each. Packages give you the flexibility to book sessions when you need them.'
+                ? 'Individual sessions are €95 each. Packages give you the flexibility to book sessions when you need them.'
                 : packageCategory === 'youth'
                   ? 'Youth sessions are €105 each. Bundles apply to youth therapy sessions only.'
                   : 'Couples sessions are €110 each. Bundles apply to couples therapy sessions only.'}
