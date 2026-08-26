@@ -25,3 +25,4 @@ dist-ssr
 
 # Local Claude Code dev tooling
 .claude/
+supabase/.temp/
