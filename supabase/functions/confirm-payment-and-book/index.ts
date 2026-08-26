@@ -370,6 +370,14 @@ serve(async (req) => {
     appointmentBody.phone = phone || "0000000000";
     if (notes) appointmentBody.notes = notes;
 
+    // An Acuity coupon funded this payment's discount (see create-payment-intent).
+    // Sending it on the booking makes Acuity record the redemption and apply the
+    // discount on its side, keeping Acuity's reporting in line with the charge.
+    if (metadata.acuityCertificate) {
+      appointmentBody.certificate = metadata.acuityCertificate;
+      logStep("Attaching Acuity coupon certificate to booking", { certificate: metadata.acuityCertificate });
+    }
+
     // Add Acuity intake form fields if provided
     if (intakeFormFields) {
       try {
@@ -461,6 +469,18 @@ serve(async (req) => {
         // Required field we can't satisfy (no id, or already present) → stop.
         logStep("Required field could not be satisfied — giving up", { reqId });
         break;
+      }
+
+      // The coupon can die between payment and booking (last use claimed by a
+      // racing booking, expiry). The customer already paid the discounted
+      // price, so completing their booking beats coupon bookkeeping: drop the
+      // certificate and retry rather than refunding a paid session.
+      if (appointmentBody.certificate && /certificate/i.test(lastErrorText)) {
+        logStep("Acuity rejected the certificate at booking time — retrying without it", {
+          certificate: appointmentBody.certificate,
+        });
+        delete appointmentBody.certificate;
+        continue;
       }
 
       // Any other error (slot unavailable, in the past, conflict, auth) cannot

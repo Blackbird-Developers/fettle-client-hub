@@ -122,6 +122,7 @@ serve(async (req) => {
     let appliedDiscountAmount = 0;  // cents off (set for every applied code)
     let appliedPromotionCodeId = "";
     let appliedCouponId = "";
+    let appliedAcuityCertificate = ""; // set when an Acuity coupon funds the discount
     let couponRejected: string | null = null;
     const trimmedCoupon = (couponCode || "").toString().trim();
     const normalizedCoupon = trimmedCoupon.toUpperCase();
@@ -208,6 +209,88 @@ serve(async (req) => {
           couponRejected = "validation_error";
           logStep("Discount code lookup failed", { trimmedCoupon, error: String(e) });
         }
+
+        // ── Acuity coupon fallback ────────────────────────────────────────
+        // The clinic team creates most marketing coupons in Acuity (Business
+        // Settings → Coupons), not Stripe. If Stripe knows nothing about the
+        // code, ask Acuity's certificate check. Verified response shape for a
+        // coupon: { couponID, type: "coupon", discountType: "price"|
+        // "percentage", discountAmount, appointmentTypeIDs, expiration }.
+        // On success we discount the Stripe charge here and stamp the code in
+        // metadata so confirm-payment-and-book passes `certificate` on the
+        // Acuity booking — Acuity then records the redemption itself.
+        if (couponRejected === "unknown_code") {
+          const acuityUserId = Deno.env.get("ACUITY_USER_ID");
+          const acuityApiKey = Deno.env.get("ACUITY_API_KEY");
+          if (acuityUserId && acuityApiKey) {
+            try {
+              const checkUrl =
+                "https://acuityscheduling.com/api/v1/certificates/check" +
+                `?certificate=${encodeURIComponent(trimmedCoupon)}` +
+                `&appointmentTypeID=${encodeURIComponent(String(appointmentTypeID))}` +
+                `&email=${encodeURIComponent(email || "")}`;
+              const certResp = await fetch(checkUrl, {
+                headers: { Authorization: `Basic ${btoa(`${acuityUserId}:${acuityApiKey}`)}` },
+              });
+              if (certResp.ok) {
+                const cert = await certResp.json();
+                if (cert?.type === "coupon") {
+                  const dt = String(cert.discountType || "").toLowerCase();
+                  const da = Number(cert.discountAmount);
+                  let off = 0;
+                  if (dt === "price" && da > 0) {
+                    off = Math.round(da * 100); // euros off → cents
+                  } else if (dt.startsWith("percent") && da > 0) {
+                    off = Math.round(originalAmount * da / 100);
+                    appliedDiscountPercent = da;
+                  }
+                  if (off > 0) {
+                    appliedDiscountAmount = Math.min(off, originalAmount);
+                    amountInCents = originalAmount - appliedDiscountAmount;
+                    discountApplied = true;
+                    appliedAcuityCertificate = trimmedCoupon;
+                    couponRejected = null;
+                    logStep("Acuity coupon applied", {
+                      trimmedCoupon,
+                      couponID: cert.couponID,
+                      discountType: cert.discountType,
+                      discountAmount: cert.discountAmount,
+                      originalAmount,
+                      newAmount: amountInCents,
+                    });
+                  } else {
+                    couponRejected = "coupon_no_discount";
+                    logStep("Acuity coupon has no usable discount", { trimmedCoupon, cert });
+                  }
+                } else {
+                  // "appointments"/"minutes" = session-package certificate, not
+                  // a discount coupon — those redeem via the packages flow.
+                  couponRejected = "acuity_package_code";
+                  logStep("Acuity certificate is a package credit, not a coupon", {
+                    trimmedCoupon,
+                    certType: cert?.type,
+                  });
+                }
+              } else {
+                const errText = await certResp.text();
+                if (/expired/i.test(errText)) couponRejected = "acuity_expired";
+                else if (/appointment type|not valid for/i.test(errText)) couponRejected = "acuity_not_applicable";
+                // invalid_certificate → keep unknown_code
+                logStep("Acuity certificate check rejected", {
+                  trimmedCoupon,
+                  status: certResp.status,
+                  error: errText.slice(0, 200),
+                  reason: couponRejected,
+                });
+              }
+            } catch (e) {
+              // Fail soft: the code stays rejected as unknown, booking proceeds.
+              logStep("Acuity certificate check failed (non-fatal)", { trimmedCoupon, error: String(e) });
+            }
+          } else {
+            logStep("Acuity coupon fallback skipped: ACUITY env missing");
+          }
+        }
       } else {
         const supabaseUrl = Deno.env.get("SUPABASE_URL");
         const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -290,6 +373,7 @@ serve(async (req) => {
       appliedDiscountAmount = 0;
       appliedPromotionCodeId = "";
       appliedCouponId = "";
+      appliedAcuityCertificate = "";
       couponRejected = "below_minimum";
     }
 
@@ -403,6 +487,9 @@ serve(async (req) => {
       discountAmount: discountApplied ? String(appliedDiscountAmount) : "",
       promotionCodeId: appliedPromotionCodeId,
       couponId: appliedCouponId,
+      // Non-empty ⇒ confirm-payment-and-book must send `certificate` on the
+      // Acuity booking so the coupon is redeemed there.
+      acuityCertificate: appliedAcuityCertificate,
       originalAmount: discountApplied ? String(originalAmount) : "",
       // Referral credit reserved for this booking; redeemed on confirm.
       referralCreditApplied: referralCreditApplied ? String(referralCreditApplied) : "",

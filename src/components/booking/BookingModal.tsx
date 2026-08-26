@@ -738,6 +738,9 @@ export function BookingModal({
                         promo_minimum: 'This discount code needs a higher order total.',
                         promo_currency: "This discount code isn't valid for euro payments.",
                         promo_no_discount: "This discount code doesn't reduce this payment.",
+                        acuity_expired: 'This coupon has expired.',
+                        acuity_not_applicable: "This coupon doesn't apply to this session type.",
+                        acuity_package_code: 'This is a session-package code — redeem it via Packages, not the coupon field.',
                     };
                     toast({
                         title: 'Coupon not applied',
