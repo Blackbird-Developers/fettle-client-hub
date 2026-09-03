@@ -111,9 +111,11 @@ serve(async (req) => {
     //   2. Marketing discount codes — Stripe PROMOTION CODES on the shared
     //      Stripe account, resolved exactly like the main fettle.ie booking
     //      widget does, so one code works on both booking surfaces.
-    // Codes set up only in Acuity can NOT apply here: Acuity never takes the
-    // payment in this flow, so marketing codes must be created in Stripe
-    // (Products → Coupons → promotion code).
+    //   3. Acuity coupons — checked via /certificates/check when Stripe has
+    //      no matching promotion code (see the fallback below).
+    //   4. Session-bundle certificates — not a discount at all; detected in
+    //      the same fallback and returned as `packageCertificate` so the UI
+    //      links the bundle and books with a package credit.
     // A code NEVER blocks the booking — any problem just means full price
     // plus a `couponRejected` reason the UI can surface.
     const originalAmount = amountInCents;
@@ -123,6 +125,16 @@ serve(async (req) => {
     let appliedPromotionCodeId = "";
     let appliedCouponId = "";
     let appliedAcuityCertificate = ""; // set when an Acuity coupon funds the discount
+    // Set when the "coupon" turns out to be a session-bundle certificate. The
+    // UI links it to the account (redeem-package-code) and books with a
+    // package credit instead — no PaymentIntent is created (see below).
+    let packageCertificate: {
+      code: string;
+      certificateId: number | null;
+      type: string;
+      name: string;
+      productID: string;
+    } | null = null;
     let couponRejected: string | null = null;
     const trimmedCoupon = (couponCode || "").toString().trim();
     const normalizedCoupon = trimmedCoupon.toUpperCase();
@@ -263,13 +275,35 @@ serve(async (req) => {
                     logStep("Acuity coupon has no usable discount", { trimmedCoupon, cert });
                   }
                 } else {
-                  // "appointments"/"minutes" = session-package certificate, not
-                  // a discount coupon — those redeem via the packages flow.
-                  couponRejected = "acuity_package_code";
-                  logStep("Acuity certificate is a package credit, not a coupon", {
-                    trimmedCoupon,
-                    certType: cert?.type,
-                  });
+                  const certType = String(cert?.type ?? "").toLowerCase();
+                  if (certType === "appointments" || certType === "counts" || certType === "minutes") {
+                    // A session-bundle certificate (bought on fettle.ie / Acuity's
+                    // store, or issued by the clinic). It can't discount a card
+                    // payment, but it IS the client's prepaid sessions — so tell
+                    // the UI, which links it to the account via
+                    // redeem-package-code and books with a package credit.
+                    packageCertificate = {
+                      code: trimmedCoupon,
+                      certificateId: typeof cert?.id === "number" ? cert.id : null,
+                      type: certType,
+                      name: String(cert?.name ?? ""),
+                      productID: cert?.productID ? String(cert.productID) : "",
+                    };
+                    couponRejected = "acuity_package_code"; // kept for older UI builds
+                    logStep("Acuity certificate is a session bundle — handing to the package flow", {
+                      trimmedCoupon,
+                      certId: cert?.id,
+                      certType,
+                      productID: cert?.productID ?? null,
+                    });
+                  } else {
+                    // e.g. a monetary gift certificate — nothing we can apply here.
+                    couponRejected = "acuity_unsupported";
+                    logStep("Acuity certificate type not supported in the coupon field", {
+                      trimmedCoupon,
+                      certType,
+                    });
+                  }
                 }
               } else {
                 const errText = await certResp.text();
@@ -375,6 +409,25 @@ serve(async (req) => {
       appliedCouponId = "";
       appliedAcuityCertificate = "";
       couponRejected = "below_minimum";
+    }
+
+    // ── Session-bundle code entered as a coupon ───────────────────────────
+    // Stop here: the client has prepaid sessions, so charging them (even at a
+    // discount) would be wrong. The UI links the bundle to the account and
+    // re-submits through book-with-package. No PaymentIntent is created.
+    if (packageCertificate) {
+      return new Response(JSON.stringify({
+        packageCertificate,
+        discountApplied: false,
+        discountPercent: 0,
+        discountAmount: 0,
+        originalAmount,
+        couponRejected,
+        referralCreditApplied: 0,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
     }
 
     // ── Referral credit (optional, opt-in via useReferralCredit) ──────────────

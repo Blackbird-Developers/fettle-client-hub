@@ -189,9 +189,16 @@ export function BookingModal({
     // also scope the UI so users are never offered credits they can't use.
     const categoryPackages = useMemo(
         () =>
-            activePackages.filter(
-                (pkg) => getPackageCategory(pkg.package_id) === sessionCategory
-            ),
+            activePackages.filter((pkg) => {
+                const category = getPackageCategory(pkg.package_id);
+                if (category) return category === sessionCategory;
+                // Bundles linked from a code (redeem-package-code) can carry
+                // a product ID the hub doesn't know — clinic-issued
+                // certificates. Acuity enforces their own appointment-type
+                // restriction at booking time, so offer them for any therapy
+                // session, never for assessments.
+                return sessionCategory !== 'assessment';
+            }),
         [activePackages, sessionCategory]
     );
     const categoryRemainingSessions = useMemo(
@@ -575,6 +582,78 @@ export function BookingModal({
         }
     };
 
+    // The "coupon" the client typed is really a session-bundle certificate
+    // (create-payment-intent tells us via `packageCertificate`). Link it to the
+    // account and flip this booking over to a package credit — the client has
+    // already paid for these sessions, so we must not charge them again.
+    const handleBundleCodeDetected = async (code: string) => {
+        const categoryLabel: Record<string, string> = {
+            individual: 'individual therapy',
+            couples: 'couples therapy',
+            youth: 'youth therapy',
+            assessment: 'assessment',
+        };
+        try {
+            const { data: link, error: linkError } = await supabase.functions.invoke(
+                'redeem-package-code',
+                { body: { code, appointmentTypeID: selectedType } }
+            );
+            if (linkError) {
+                // Non-2xx (e.g. expired session at the gateway) — surface the
+                // function's own message when there is one.
+                let message = "We couldn't link this bundle code right now. Please try again.";
+                try {
+                    const body = await (linkError as { context?: Response }).context?.json();
+                    if (body?.message) message = body.message;
+                } catch {
+                    /* keep the default message */
+                }
+                throw new Error(message);
+            }
+            if (!link?.ok) {
+                throw new Error(link?.message || "We couldn't link this bundle code to your account.");
+            }
+
+            // Refresh credits so the confirm step shows the linked bundle.
+            await queryClient.invalidateQueries({ queryKey: ['user-packages'] });
+            setCouponCode('');
+            setHasUserMadePaymentChoice(true);
+
+            const remaining: number = link.remainingSessions ?? 0;
+            const sessionsText = `${remaining} session${remaining === 1 ? '' : 's'}`;
+
+            if (link.applicable === false) {
+                // Linked, but restricted to another session type (e.g. a youth
+                // bundle typed on an individual booking). Leave this booking on
+                // card payment and explain.
+                setUsePackageCredits(false);
+                setSelectedPackageId(null);
+                const bundleFor = link.categoryLabel ? ` for ${link.categoryLabel}` : '';
+                toast({
+                    title: 'Bundle linked to your account',
+                    description: `${sessionsText} available${bundleFor}. It can't be used for this ${categoryLabel[sessionCategory] || ''} session — choose a matching session type to use it, or continue to pay for this one.`,
+                });
+                return;
+            }
+
+            setUsePackageCredits(true);
+            setSelectedPackageId(link.package?.id ?? null);
+            toast({
+                title: link.alreadyLinked ? 'Bundle found on your account' : 'Bundle linked to your account',
+                description: `${sessionsText} available. Press "Book Session" to use one for this booking — no payment needed.`,
+            });
+        } catch (error) {
+            const message = error instanceof Error
+                ? error.message
+                : "We couldn't link this bundle code. Please try again or contact hello@fettle.ie for support.";
+            toast({
+                title: 'Bundle code not linked',
+                description: message,
+                variant: 'destructive',
+            });
+        }
+    };
+
     const handleProceedToPayment = async () => {
         // If using package credits, book with package instead
         if (usePackageCredits && selectedPackageId) {
@@ -709,6 +788,13 @@ export function BookingModal({
                 return;
             }
 
+            // The code is a session bundle, not a discount: no PaymentIntent
+            // was created. Link it and switch to a package credit instead.
+            if (data.packageCertificate?.code) {
+                await handleBundleCodeDetected(data.packageCertificate.code);
+                return;
+            }
+
             // Surface the discount-code outcome before charging.
             if (couponCode.trim()) {
                 if (data.discountApplied) {
@@ -740,7 +826,8 @@ export function BookingModal({
                         promo_no_discount: "This discount code doesn't reduce this payment.",
                         acuity_expired: 'This coupon has expired.',
                         acuity_not_applicable: "This coupon doesn't apply to this session type.",
-                        acuity_package_code: 'This is a session-package code — redeem it via Packages, not the coupon field.',
+                        acuity_package_code: "This is a session-bundle code, but we couldn't link it to your account just now — please try again or email hello@fettle.ie.",
+                        acuity_unsupported: "This code can't be applied here. Email hello@fettle.ie and we'll apply it for you.",
                     };
                     toast({
                         title: 'Coupon not applied',
@@ -2115,17 +2202,20 @@ export function BookingModal({
                                 </div>
                             )}
 
-                        {/* Coupon code - only show when paying. Accepts loyalty
-                            rewards and Stripe promotion codes; discounts and
-                            referral credits are therapy-session perks, so
-                            neither is offered on assessment bookings. */}
+                        {/* Coupon / bundle code - only show when paying. Accepts
+                            loyalty rewards, Stripe promotion codes, Acuity
+                            coupons, and session-bundle certificate codes (which
+                            get linked to the account and booked as a package
+                            credit). Discounts and referral credits are
+                            therapy-session perks, so neither is offered on
+                            assessment bookings. */}
                         {!usePackageCredits &&
                             sessionCategory !== 'assessment' &&
                             selectedTypeData?.price &&
                             parseFloat(selectedTypeData.price) > 0 && (
                                 <div className="space-y-2">
                                     <Label htmlFor="couponCode">
-                                        Coupon Code (optional)
+                                        Coupon or bundle code (optional)
                                     </Label>
                                     <Input
                                         id="couponCode"
@@ -2135,9 +2225,12 @@ export function BookingModal({
                                                 e.target.value.toUpperCase()
                                             )
                                         }
-                                        placeholder="Enter coupon code"
+                                        placeholder="Enter coupon or bundle code"
                                         className="uppercase"
                                     />
+                                    <p className="text-xs text-muted-foreground">
+                                        Bought a session bundle on fettle.ie or been given a bundle code? Enter it here and we'll link it to your account and book with a credit.
+                                    </p>
                                 </div>
                             )}
 

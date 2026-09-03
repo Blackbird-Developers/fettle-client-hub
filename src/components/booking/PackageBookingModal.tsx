@@ -17,7 +17,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { PackagePaymentForm } from './PackagePaymentForm';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Check, Gift, Loader2, Sparkles, TrendingDown, CheckCircle, Receipt, ExternalLink, Heart, Users } from 'lucide-react';
+import { Check, Gift, Loader2, Sparkles, TrendingDown, CheckCircle, Receipt, ExternalLink, Heart, Users, Ticket, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // Initialize Stripe
@@ -29,7 +29,7 @@ interface PackageBookingModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type Step = 'select' | 'details' | 'payment' | 'success';
+type Step = 'select' | 'details' | 'payment' | 'success' | 'linked';
 
 type PackageCategory = 'individual' | 'youth' | 'couples';
 
@@ -149,6 +149,16 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
     receiptUrl?: string 
   } | null>(null);
 
+  // "Already have a bundle code?" — link an Acuity certificate to the account.
+  const [bundleCode, setBundleCode] = useState('');
+  const [isLinking, setIsLinking] = useState(false);
+  const [linkedResult, setLinkedResult] = useState<{
+    packageName: string;
+    remainingSessions: number;
+    categoryLabel: string | null;
+    alreadyLinked: boolean;
+  } | null>(null);
+
   const { toast } = useToast();
   const { profile } = useAuth();
   const queryClient = useQueryClient();
@@ -203,6 +213,53 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
     }
   };
 
+  // Bundles bought on fettle.ie / Acuity's store, or issued by the clinic,
+  // come with a certificate code the hub can't see until it's linked.
+  // redeem-package-code validates it with Acuity and creates the same
+  // user_packages row the sync would, so it shows up as a package credit.
+  const handleLinkBundleCode = async () => {
+    const code = bundleCode.replace(/\s+/g, '').toUpperCase();
+    if (!code || isLinking) return;
+
+    setIsLinking(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('redeem-package-code', {
+        body: { code },
+      });
+      if (error) {
+        let message = "We couldn't link this bundle code right now. Please try again.";
+        try {
+          const body = await (error as { context?: Response }).context?.json();
+          if (body?.message) message = body.message;
+        } catch {
+          /* keep default */
+        }
+        throw new Error(message);
+      }
+      if (!data?.ok) {
+        throw new Error(data?.message || "We couldn't link this bundle code to your account.");
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['user-packages'] });
+      setLinkedResult({
+        packageName: data.packageName || 'Session bundle',
+        remainingSessions: data.remainingSessions ?? 0,
+        categoryLabel: data.categoryLabel ?? null,
+        alreadyLinked: !!data.alreadyLinked,
+      });
+      setBundleCode('');
+      setStep('linked');
+    } catch (error) {
+      toast({
+        title: 'Bundle code not linked',
+        description: error instanceof Error ? error.message : 'Please check the code and try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLinking(false);
+    }
+  };
+
   const handlePaymentSuccess = (result: { package: any; receiptUrl?: string }) => {
     setPurchaseResult(result);
     setStep('success');
@@ -225,6 +282,9 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
     setPaymentIntentId(null);
     setPaymentAmount(0);
     setPurchaseResult(null);
+    setBundleCode('');
+    setIsLinking(false);
+    setLinkedResult(null);
     onOpenChange(false);
   };
 
@@ -241,6 +301,7 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
       case 'details': return 'Your Details';
       case 'payment': return 'Payment';
       case 'success': return 'Purchase Complete!';
+      case 'linked': return 'Bundle Linked!';
     }
   };
 
@@ -325,6 +386,43 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
                 </TabsContent>
               ))}
             </Tabs>
+
+            {/* Already have a code? Link a bundle bought elsewhere. */}
+            <div className="rounded-xl border border-dashed border-border p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Ticket className="h-4 w-4 text-primary" />
+                <p className="text-sm font-semibold text-foreground">Already have a bundle code?</p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Bought a bundle on fettle.ie, or been given a code by the Fettle team? Link it here to book with those sessions.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  id="bundleCode"
+                  value={bundleCode}
+                  onChange={(e) => setBundleCode(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleLinkBundleCode();
+                    }
+                  }}
+                  placeholder="e.g. 7A4E39B1"
+                  className="uppercase"
+                  maxLength={32}
+                  autoComplete="off"
+                  disabled={isLinking}
+                />
+                <Button
+                  onClick={handleLinkBundleCode}
+                  disabled={!bundleCode.trim() || isLinking}
+                  className="gap-2 shrink-0"
+                >
+                  {isLinking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+                  Link
+                </Button>
+              </div>
+            </div>
 
             <p className="text-xs text-center text-muted-foreground pt-2">
               {packageCategory === 'individual'
@@ -487,6 +585,39 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
             </div>
           </div>
         );
+
+      case 'linked':
+        return (
+          <div className="flex flex-col items-center justify-center py-8 space-y-6">
+            <div className="h-20 w-20 rounded-full bg-success/10 flex items-center justify-center">
+              <CheckCircle className="h-10 w-10 text-success" />
+            </div>
+
+            <div className="text-center space-y-2">
+              <h3 className="text-xl font-semibold">
+                {linkedResult?.alreadyLinked ? 'Bundle already on your account' : 'Bundle linked!'}
+              </h3>
+              <p className="text-muted-foreground">
+                <span className="font-semibold text-foreground">{linkedResult?.packageName}</span>
+                {' — '}
+                <span className="font-semibold text-foreground">
+                  {linkedResult?.remainingSessions} session{linkedResult?.remainingSessions === 1 ? '' : 's'}
+                </span>{' '}
+                ready to book
+                {linkedResult?.categoryLabel ? ` for ${linkedResult.categoryLabel}` : ''}.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                When you book, choose <span className="font-medium">Use Package Credit</span> on the confirm step.
+              </p>
+            </div>
+
+            <div className="w-full pt-4">
+              <Button onClick={handleClose} className="w-full">
+                Start Booking Sessions
+              </Button>
+            </div>
+          </div>
+        );
     }
   };
 
@@ -508,7 +639,7 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
         </DialogHeader>
         
         {/* Progress Indicator */}
-        {step !== 'success' && (
+        {step !== 'success' && step !== 'linked' && (
           <div className="flex items-center justify-center gap-1.5 pb-2">
             {progressSteps.map((s, index) => (
               <div
