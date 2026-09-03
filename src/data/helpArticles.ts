@@ -784,13 +784,20 @@ export const helpArticles: HelpArticle[] = [
       {
         heading: "How to redeem a code",
         paragraphs: [
-          "On the **Confirm** step of booking (when you're paying per-session), enter your code in the Coupon Code field before continuing to payment. The discount is applied immediately.",
+          "On the **Confirm** step of booking (when you're paying per-session), enter your code in the **Coupon or bundle code** field before continuing to payment. The discount is applied immediately.",
+        ],
+      },
+      {
+        heading: "Session bundle codes",
+        paragraphs: [
+          "Bought a session bundle on fettle.ie, or been given a bundle code by the Fettle team? Those codes aren't discounts — they're your prepaid sessions. Enter the code in the same field on the Confirm step and we'll link the bundle to your account and switch the booking to **Use Package Credit**, so there's nothing to pay.",
+          "You can also link a bundle before booking: open **Packages** and use **Already have a bundle code?**. Once linked, your remaining sessions show on your dashboard like any other package.",
         ],
       },
       {
         heading: "Restrictions",
         paragraphs: [
-          "Coupons apply to pay-per-session bookings only, not to package purchases (packages are already discounted). One code per booking.",
+          "Coupons apply to pay-per-session bookings only, not to package purchases (packages are already discounted). One code per booking. Bundle codes can only be used for the session type they were bought for (for example, a youth bundle for youth therapy).",
         ],
       },
       {
