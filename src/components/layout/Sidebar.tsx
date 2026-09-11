@@ -11,6 +11,7 @@ import {
   Shield,
   HelpCircle,
   Gift,
+  Stethoscope,
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 const authenticatedNavigation = [
   { name: "Dashboard", href: "/dashboard", icon: Home },
   { name: "My Sessions", href: "/sessions", icon: Calendar },
+  { name: "Psychiatry", href: "/psychiatry", icon: Stethoscope, badge: "New" },
   { name: "Invoices", href: "/invoices", icon: FileText },
   { name: "Profile", href: "/profile", icon: User },
   { name: "Refer & Earn", href: "/referrals", icon: Gift, badge: "New" },

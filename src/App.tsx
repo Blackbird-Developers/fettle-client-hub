@@ -21,6 +21,7 @@ import TermsConditions from "./pages/TermsConditions";
 import Admin from "./pages/Admin";
 import Packages from "./pages/Packages";
 import Referrals from "./pages/Referrals";
+import Psychiatry from "./pages/Psychiatry";
 import HelpCenter from "./pages/HelpCenter";
 import HelpArticle from "./pages/HelpArticle";
 
@@ -41,6 +42,7 @@ const App = () => (
             <Route path="/invoices" element={<ProtectedRoute><Invoices /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             <Route path="/referrals" element={<ProtectedRoute><Referrals /></ProtectedRoute>} />
+            <Route path="/psychiatry" element={<ProtectedRoute><Psychiatry /></ProtectedRoute>} />
             <Route path="/booking-success" element={<ProtectedRoute><BookingSuccess /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
             <Route path="/login" element={<Login />} />
