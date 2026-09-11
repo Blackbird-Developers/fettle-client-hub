@@ -23,10 +23,10 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 const authenticatedNavigation = [
   { name: "Dashboard", href: "/dashboard", icon: Home },
   { name: "My Sessions", href: "/sessions", icon: Calendar },
-  { name: "Psychiatry", href: "/psychiatry", icon: Stethoscope, badge: "New" },
+  { name: "Psychiatry", href: "/psychiatry", icon: Stethoscope },
   { name: "Invoices", href: "/invoices", icon: FileText },
   { name: "Profile", href: "/profile", icon: User },
-  { name: "Refer & Earn", href: "/referrals", icon: Gift, badge: "New" },
+  { name: "Refer & Earn", href: "/referrals", icon: Gift },
   { name: "Help Center", href: "/help", icon: HelpCircle },
 ];
 
