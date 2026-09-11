@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { BookingModal, SessionCategory } from '@/components/booking/BookingModal';
 import { PackageBookingModal } from '@/components/booking/PackageBookingModal';
-import { CalendarPlus, Plus, ChevronDown, User, Gift, Users, Heart, Zap, ClipboardCheck } from 'lucide-react';
+import { CalendarPlus, Plus, ChevronDown, User, Gift, Users, Heart, Zap, ClipboardCheck, Stethoscope } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNextAvailable, formatNextAvailableShort } from '@/hooks/useNextAvailable';
 
@@ -128,6 +128,17 @@ export function BookSessionDropdown({
               <span className="font-medium">Assessments</span>
               <span className="text-xs text-muted-foreground">Screenings & clinical assessments</span>
               <NextAvailableHint category="assessment" enabled={menuOpen} />
+            </div>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => openBookingModal('psychiatry')}
+            className="cursor-pointer py-3 px-4"
+          >
+            <Stethoscope className="h-4 w-4 mr-3 text-indigo-500" />
+            <div className="flex flex-col">
+              <span className="font-medium">Psychiatry</span>
+              <span className="text-xs text-muted-foreground">Medication reviews with a psychiatrist</span>
+              <NextAvailableHint category="psychiatry" enabled={menuOpen} />
             </div>
           </DropdownMenuItem>
           <DropdownMenuSeparator />

@@ -10,7 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { TherapistAvatar } from "@/components/dashboard/MyTherapist";
 import { useTherapistImages } from "@/hooks/useTherapistImages";
 
-function CompactSessionCard({ appointment, therapistImageUrl }: { appointment: AcuityAppointment; therapistImageUrl?: string }) {
+export function CompactSessionCard({ appointment, therapistImageUrl }: { appointment: AcuityAppointment; therapistImageUrl?: string }) {
   const dateTime = parseISO(appointment.datetime);
   const isVideo = appointment.location?.toLowerCase().includes('video') || 
                   appointment.location?.toLowerCase().includes('online') ||

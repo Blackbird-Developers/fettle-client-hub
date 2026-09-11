@@ -7,13 +7,19 @@ import {
     type AcuityAvailableTime,
 } from '@/hooks/useAcuity';
 import { ASSESSMENT_SCREENING_TYPE_IDS } from '@/lib/assessments';
+import { PSYCHIATRY_BOOKABLE_TYPE_IDS } from '@/lib/psychiatry';
 
 /**
- * Booking categories the hub can surface "next available" for. This is a
- * superset of BookingModal's SessionCategory so it can also cover the new
- * assessment booking category without creating an import cycle with the modal.
+ * Booking categories the hub can surface "next available" for. Mirrors
+ * BookingModal's SessionCategory (declared separately to avoid an import cycle
+ * with the modal).
  */
-export type BookingCategory = 'individual' | 'couples' | 'youth' | 'assessment';
+export type BookingCategory =
+    | 'individual'
+    | 'couples'
+    | 'youth'
+    | 'assessment'
+    | 'psychiatry';
 
 export interface NextAvailableSlot {
     /** Acuity appointment type that owns the earliest slot. */
@@ -78,6 +84,10 @@ export function matchesCategory(
             // are bookable in the hub (full assessments and follow-ups are
             // arranged by the clinical team), so the hint only looks at those.
             return ASSESSMENT_SCREENING_TYPE_IDS.includes(type.id);
+        case 'psychiatry':
+            // Only the initial consultation is bookable; follow-ups and repeat
+            // prescriptions are arranged by the psychiatrist.
+            return PSYCHIATRY_BOOKABLE_TYPE_IDS.includes(type.id);
         default: // individual
             return name.startsWith('Individual Therapy Session');
     }

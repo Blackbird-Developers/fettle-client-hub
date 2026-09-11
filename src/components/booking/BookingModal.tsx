@@ -52,6 +52,7 @@ import {
     ArrowRight,
     Zap,
     Lock,
+    FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getPackageCategory } from '@/lib/packageCategory';
@@ -61,6 +62,20 @@ import {
     getAssessmentDurationOverride,
     type Assessment,
 } from '@/lib/assessments';
+import {
+    PSYCHIATRY_CONSULTATION_TYPE_ID,
+    PSYCHIATRY_LATER_STAGES,
+    PSYCHIATRY_FREE_CALL_URL,
+    PSYCHIATRY_REASONS,
+    PSYCHIATRY_HEARD_ABOUT_OPTIONS,
+    PSYCHIATRY_INTAKE_FIELD_IDS,
+    PSYCHIATRY_NOTES_MAX_LENGTH,
+    EMPTY_PSYCHIATRY_INTAKE,
+    buildPsychiatryNotes,
+    isAdultDateOfBirth,
+    latestAdultDateOfBirth,
+    type PsychiatryIntake,
+} from '@/lib/psychiatry';
 import { NextAvailableTypeHint } from './NextAvailableTypeHint';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TherapistAvatar, toSlug } from '@/components/dashboard/MyTherapist';
@@ -79,7 +94,12 @@ const stripePromise = stripePublishableKey
     ? loadStripe(stripePublishableKey)
     : null;
 console.log('[Stripe Debug] stripePromise created:', !!stripePromise);
-export type SessionCategory = 'individual' | 'couples' | 'youth' | 'assessment';
+export type SessionCategory =
+    | 'individual'
+    | 'couples'
+    | 'youth'
+    | 'assessment'
+    | 'psychiatry';
 
 interface BookingModalProps {
     open: boolean;
@@ -151,7 +171,14 @@ export function BookingModal({
         contactConsent: false,
         termsAccepted: false,
         youthConsentAcknowledged: false, // Required for Youth Therapy sessions
+        emergencyAcknowledged: false, // Required for psychiatry: not an emergency service
     });
+
+    // Clinical intake for psychiatry bookings (reason, DOB, GP, medication,
+    // emergency contact), collected on the details step like fettle.ie.
+    const [psychiatryIntake, setPsychiatryIntake] = useState<PsychiatryIntake>(
+        EMPTY_PSYCHIATRY_INTAKE
+    );
 
     // Payment state
     const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -178,6 +205,11 @@ export function BookingModal({
     const referralBalanceCents = referralData?.balance_cents ?? 0;
     const queryClient = useQueryClient();
 
+    // Assessments and psychiatry are clinician-assigned, card-only bookings:
+    // no therapist step, and no package credits, coupons or referral credit.
+    const isClinicalCategory =
+        sessionCategory === 'assessment' || sessionCategory === 'psychiatry';
+
     // Fetch user's active packages
     const { packages: activePackages, isLoading: packagesLoading } =
         useActivePackages();
@@ -196,10 +228,10 @@ export function BookingModal({
                 // a product ID the hub doesn't know — clinic-issued
                 // certificates. Acuity enforces their own appointment-type
                 // restriction at booking time, so offer them for any therapy
-                // session, never for assessments.
-                return sessionCategory !== 'assessment';
+                // session, never for assessments or psychiatry.
+                return !isClinicalCategory;
             }),
-        [activePackages, sessionCategory]
+        [activePackages, isClinicalCategory, sessionCategory]
     );
     const categoryRemainingSessions = useMemo(
         () =>
@@ -320,6 +352,8 @@ export function BookingModal({
                 return 'Youth Therapy';
             case 'assessment':
                 return 'Assessment';
+            case 'psychiatry':
+                return 'Psychiatry';
             default:
                 return 'Individual Therapy';
         }
@@ -330,10 +364,10 @@ export function BookingModal({
         name: string,
         isTherapistSpecific: boolean = false
     ) => {
-        // Assessment type names are already client-facing (e.g. "OCD Assessment
-        // Screening") — show them verbatim, just trimmed (some have trailing
-        // spaces in Acuity).
-        if (sessionCategory === 'assessment') {
+        // Assessment and psychiatry type names are already client-facing (e.g.
+        // "OCD Assessment Screening") — show them verbatim, just trimmed (some
+        // have trailing spaces in Acuity).
+        if (isClinicalCategory) {
             return name.trim();
         }
 
@@ -592,6 +626,7 @@ export function BookingModal({
             couples: 'couples therapy',
             youth: 'youth therapy',
             assessment: 'assessment',
+            psychiatry: 'psychiatry',
         };
         try {
             const { data: link, error: linkError } = await supabase.functions.invoke(
@@ -698,11 +733,24 @@ export function BookingModal({
                     { id: 9292405, value: 'yes' },                     // Terms accepted
                     { id: 10104284, value: formData.partnerName },     // Partner's name & pronouns
                   ]
+                : sessionCategory === 'psychiatry'
+                ? [
+                    // The fields the fettle.ie psychiatry widget sends for this type
+                    { id: PSYCHIATRY_INTAKE_FIELD_IDS.heardAbout, value: psychiatryIntake.heardAbout },
+                    { id: PSYCHIATRY_INTAKE_FIELD_IDS.termsAccepted, value: 'yes' },
+                  ]
                 : [
                     { id: 10466116, value: 'yes' }, // Over 18 confirmation
                     { id: 9292394, value: 'yes' },  // Contact consent
                     { id: 9292405, value: 'yes' },  // Terms accepted
                   ];
+
+            // Psychiatry passes its clinical intake to the psychiatrist in the
+            // appointment notes, the same way the website's widget does.
+            const bookingNotes =
+                sessionCategory === 'psychiatry'
+                    ? buildPsychiatryNotes(psychiatryIntake, formData.notes)
+                    : formData.notes;
 
             const requestBody = {
                 appointmentTypeID: selectedType,
@@ -715,7 +763,7 @@ export function BookingModal({
                 lastName: formData.lastName,
                 email: formData.email,
                 phone: formData.phone || undefined,
-                notes: formData.notes || undefined,
+                notes: bookingNotes || undefined,
                 // Acuity intake form fields (JSON stringified for Stripe metadata)
                 intakeFormFields: JSON.stringify(intakeFormFields),
                 // User's timezone for email formatting
@@ -723,14 +771,15 @@ export function BookingModal({
                 // Optional discount code (validated + applied server-side):
                 // either a loyalty reward or a Stripe promotion code — see
                 // create-payment-intent. Codes/referral credit are never sent
-                // for assessments (the UI also hides both options there).
-                couponCode:
-                    sessionCategory === 'assessment'
-                        ? undefined
-                        : couponCode.trim() || undefined,
+                // for assessments or psychiatry (the UI also hides both
+                // options there).
+                couponCode: isClinicalCategory
+                    ? undefined
+                    : couponCode.trim() || undefined,
                 // Apply referral credit (server reduces the charge / may fully cover)
-                useReferralCredit:
-                    sessionCategory === 'assessment' ? false : applyReferralCredit,
+                useReferralCredit: isClinicalCategory
+                    ? false
+                    : applyReferralCredit,
             };
 
             console.log(
@@ -769,7 +818,7 @@ export function BookingModal({
                             lastName: formData.lastName,
                             email: formData.email,
                             phone: formData.phone || undefined,
-                            notes: formData.notes || undefined,
+                            notes: bookingNotes || undefined,
                             intakeFormFields: JSON.stringify(intakeFormFields),
                             timezone: profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
                         },
@@ -915,7 +964,9 @@ export function BookingModal({
             contactConsent: false,
             termsAccepted: false,
             youthConsentAcknowledged: false,
+            emergencyAcknowledged: false,
         });
+        setPsychiatryIntake(EMPTY_PSYCHIATRY_INTAKE);
         setClientSecret(null);
         setPaymentIntentId(null);
         setPaymentAmount(0);
@@ -948,10 +999,10 @@ export function BookingModal({
     const handleTypeSelection = (typeId: number) => {
         setSelectedType(typeId);
 
-        // Assessments don't require choosing a clinician: availability is
-        // pooled across the assessment calendars and Acuity assigns one at
-        // booking time (calendarID stays unset).
-        if (sessionCategory === 'assessment') {
+        // Assessments and psychiatry don't require choosing a clinician:
+        // availability is pooled across the type's calendars and Acuity
+        // assigns one at booking time (calendarID stays unset).
+        if (isClinicalCategory) {
             setSelectedCalendar(null);
             setStep('date');
             return;
@@ -1054,7 +1105,7 @@ export function BookingModal({
 
         let calendarId: number | null = slot.calendarId ?? null;
         let time = slot.time;
-        if (sessionCategory === 'assessment') {
+        if (isClinicalCategory) {
             // Pooled booking — Acuity assigns the clinician.
             calendarId = null;
         } else if (
@@ -1365,6 +1416,123 @@ export function BookingModal({
                                     </div>
                                 </ScrollArea>
                             )}
+                        </div>
+                    );
+                }
+
+                // Psychiatry flow step 1: the bookable initial consultation,
+                // with the rest of the pathway shown for context. Follow-ups
+                // and repeat prescriptions are arranged by the psychiatrist,
+                // mirroring fettle.ie/psychiatry.
+                if (sessionCategory === 'psychiatry') {
+                    const consultationType = types.find(
+                        (t) => t.id === PSYCHIATRY_CONSULTATION_TYPE_ID
+                    );
+                    return (
+                        <div className="space-y-4">
+                            <p className="text-muted-foreground">
+                                A video consultation with a Medical
+                                Council-registered psychiatrist, for adults 18+.
+                            </p>
+                            {typesLoading ? (
+                                <Skeleton className="h-20 w-full rounded-xl" />
+                            ) : consultationType ? (
+                                <button
+                                    onClick={() =>
+                                        handleTypeSelection(consultationType.id)
+                                    }
+                                    className="w-full p-4 rounded-xl border-2 border-primary/30 bg-primary/5 text-left transition-all hover:border-primary hover:bg-primary/10">
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <p className="font-semibold text-foreground">
+                                                Initial consultation
+                                            </p>
+                                            <div className="flex items-center gap-1 text-sm text-muted-foreground mt-0.5">
+                                                <Clock className="h-3.5 w-3.5" />
+                                                {consultationType.duration} min
+                                                · Video
+                                            </div>
+                                            <NextAvailableTypeHint
+                                                category="psychiatry"
+                                                typeId={consultationType.id}
+                                                onPick={(slot) =>
+                                                    handlePickTypeSlot(
+                                                        consultationType.id,
+                                                        slot
+                                                    )
+                                                }
+                                            />
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0 ml-4">
+                                            <p className="text-sm font-medium text-primary">
+                                                €{consultationType.price}
+                                            </p>
+                                            <ArrowRight className="h-4 w-4 text-primary" />
+                                        </div>
+                                    </div>
+                                </button>
+                            ) : (
+                                <div className="p-4 rounded-xl border border-border bg-muted/40 text-sm text-muted-foreground">
+                                    Psychiatry consultations can't be booked
+                                    online right now. Email{' '}
+                                    <a
+                                        href="mailto:hello@fettle.ie"
+                                        className="text-primary hover:underline">
+                                        hello@fettle.ie
+                                    </a>{' '}
+                                    and we'll arrange one for you.
+                                </div>
+                            )}
+
+                            <div className="rounded-xl border border-border bg-muted/40 divide-y divide-border">
+                                <p className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                    After your consultation
+                                </p>
+                                {PSYCHIATRY_LATER_STAGES.map((stage) => (
+                                    <div
+                                        key={stage.label}
+                                        className="flex justify-between items-start gap-4 px-4 py-3">
+                                        <div className="flex items-start gap-2">
+                                            <Lock className="h-3.5 w-3.5 mt-1 text-muted-foreground shrink-0" />
+                                            <div>
+                                                <p className="text-sm font-medium text-muted-foreground">
+                                                    {stage.label}
+                                                </p>
+                                                <p className="text-xs text-muted-foreground mt-0.5">
+                                                    {stage.note}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <p className="text-sm font-medium text-muted-foreground shrink-0">
+                                            {stage.price}
+                                        </p>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                                <FileText className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                                <p className="text-xs text-muted-foreground">
+                                    No GP referral needed. Have your diagnosis
+                                    report from your GP or psychologist ready —
+                                    it's what your psychiatrist reviews with
+                                    you.
+                                </p>
+                            </div>
+                            <p className="text-sm text-muted-foreground text-center">
+                                Not sure what you need?{' '}
+                                <a
+                                    href={PSYCHIATRY_FREE_CALL_URL}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-primary hover:underline">
+                                    Book a free 20-minute call
+                                </a>
+                            </p>
+                            <p className="text-xs text-muted-foreground text-center">
+                                Not an emergency service. If you're in crisis,
+                                call 112 or 999, or Samaritans on 116 123.
+                            </p>
                         </div>
                     );
                 }
@@ -1736,7 +1904,8 @@ export function BookingModal({
                                     sessionCategory === 'assessment'
                                         ? 'pricing'
                                         : sessionCategory === 'couples' ||
-                                          sessionCategory === 'youth'
+                                          sessionCategory === 'youth' ||
+                                          sessionCategory === 'psychiatry'
                                         ? 'type'
                                         : 'therapist'
                                 )
@@ -1744,6 +1913,8 @@ export function BookingModal({
                             className="w-full">
                             {sessionCategory === 'assessment'
                                 ? 'Back to pricing options'
+                                : sessionCategory === 'psychiatry'
+                                ? 'Back to consultation details'
                                 : sessionCategory === 'couples' ||
                                   sessionCategory === 'youth'
                                 ? 'Back to session types'
@@ -1804,11 +1975,33 @@ export function BookingModal({
                     </div>
                 );
 
-            case 'details':
+            case 'details': {
                 // For Youth Therapy, require youth consent instead of over18
                 const allIntakeFieldsChecked = sessionCategory === 'youth'
                     ? intakeForm.youthConsentAcknowledged && intakeForm.contactConsent && intakeForm.termsAccepted
+                    : sessionCategory === 'psychiatry'
+                    ? intakeForm.over18 && intakeForm.emergencyAcknowledged && intakeForm.contactConsent && intakeForm.termsAccepted
                     : intakeForm.over18 && intakeForm.contactConsent && intakeForm.termsAccepted;
+                const psychiatryNotesLength =
+                    sessionCategory === 'psychiatry'
+                        ? buildPsychiatryNotes(psychiatryIntake, formData.notes).length
+                        : 0;
+                const psychiatryNotesTooLong =
+                    psychiatryNotesLength > PSYCHIATRY_NOTES_MAX_LENGTH;
+                const psychiatryDobInvalid =
+                    !!psychiatryIntake.dateOfBirth &&
+                    !isAdultDateOfBirth(psychiatryIntake.dateOfBirth);
+                const psychiatryDetailsIncomplete =
+                    sessionCategory === 'psychiatry' &&
+                    (!psychiatryIntake.reason ||
+                        !isAdultDateOfBirth(psychiatryIntake.dateOfBirth) ||
+                        !formData.phone.trim() ||
+                        !psychiatryIntake.emergencyContactName.trim() ||
+                        !psychiatryIntake.emergencyContactPhone.trim() ||
+                        !psychiatryIntake.heardAbout ||
+                        psychiatryNotesTooLong);
+                const selectClassName =
+                    'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2';
                 return (
                     <div className="space-y-4">
                         <p className="text-muted-foreground">
@@ -1860,7 +2053,11 @@ export function BookingModal({
                             />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="phone">Phone (optional)</Label>
+                            <Label htmlFor="phone">
+                                {sessionCategory === 'psychiatry'
+                                    ? 'Phone'
+                                    : 'Phone (optional)'}
+                            </Label>
                             <Input
                                 id="phone"
                                 type="tel"
@@ -1874,6 +2071,160 @@ export function BookingModal({
                                 placeholder="+353 87 123 4567"
                             />
                         </div>
+                        {sessionCategory === 'psychiatry' && (
+                            <>
+                                <div className="space-y-2">
+                                    <Label htmlFor="psychiatryReason">
+                                        What would you like help with?
+                                    </Label>
+                                    <select
+                                        id="psychiatryReason"
+                                        value={psychiatryIntake.reason}
+                                        onChange={(e) =>
+                                            setPsychiatryIntake((prev) => ({
+                                                ...prev,
+                                                reason: e.target.value,
+                                            }))
+                                        }
+                                        className={selectClassName}>
+                                        <option value="" disabled>
+                                            Select a reason
+                                        </option>
+                                        {PSYCHIATRY_REASONS.map((reason) => (
+                                            <option key={reason} value={reason}>
+                                                {reason}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <p className="text-xs text-muted-foreground">
+                                        Not sure what you need?{' '}
+                                        <a
+                                            href={PSYCHIATRY_FREE_CALL_URL}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-primary hover:underline">
+                                            Book a free 20-minute call
+                                        </a>{' '}
+                                        instead.
+                                    </p>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="dateOfBirth">Date of birth</Label>
+                                    <Input
+                                        id="dateOfBirth"
+                                        type="date"
+                                        max={latestAdultDateOfBirth()}
+                                        value={psychiatryIntake.dateOfBirth}
+                                        onChange={(e) =>
+                                            setPsychiatryIntake((prev) => ({
+                                                ...prev,
+                                                dateOfBirth: e.target.value,
+                                            }))
+                                        }
+                                    />
+                                    {psychiatryDobInvalid && (
+                                        <p className="text-xs text-destructive">
+                                            Our psychiatry service is for adults aged 18 and over.
+                                        </p>
+                                    )}
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="gp">
+                                        Your GP (name &amp; practice, optional)
+                                    </Label>
+                                    <Input
+                                        id="gp"
+                                        maxLength={60}
+                                        value={psychiatryIntake.gp}
+                                        onChange={(e) =>
+                                            setPsychiatryIntake((prev) => ({
+                                                ...prev,
+                                                gp: e.target.value,
+                                            }))
+                                        }
+                                        placeholder="e.g. Dr Murphy, Main St Clinic"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="medication">
+                                        Current medication (optional)
+                                    </Label>
+                                    <Textarea
+                                        id="medication"
+                                        rows={2}
+                                        maxLength={160}
+                                        value={psychiatryIntake.medication}
+                                        onChange={(e) =>
+                                            setPsychiatryIntake((prev) => ({
+                                                ...prev,
+                                                medication: e.target.value,
+                                            }))
+                                        }
+                                        placeholder="Name and dose, if known"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="emergencyContactName">
+                                            Emergency contact name
+                                        </Label>
+                                        <Input
+                                            id="emergencyContactName"
+                                            maxLength={60}
+                                            value={psychiatryIntake.emergencyContactName}
+                                            onChange={(e) =>
+                                                setPsychiatryIntake((prev) => ({
+                                                    ...prev,
+                                                    emergencyContactName: e.target.value,
+                                                }))
+                                            }
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="emergencyContactPhone">
+                                            Emergency contact phone
+                                        </Label>
+                                        <Input
+                                            id="emergencyContactPhone"
+                                            type="tel"
+                                            maxLength={20}
+                                            value={psychiatryIntake.emergencyContactPhone}
+                                            onChange={(e) =>
+                                                setPsychiatryIntake((prev) => ({
+                                                    ...prev,
+                                                    emergencyContactPhone: e.target.value,
+                                                }))
+                                            }
+                                            placeholder="+353 87 123 4567"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="heardAbout">
+                                        Where did you hear about Fettle?
+                                    </Label>
+                                    <select
+                                        id="heardAbout"
+                                        value={psychiatryIntake.heardAbout}
+                                        onChange={(e) =>
+                                            setPsychiatryIntake((prev) => ({
+                                                ...prev,
+                                                heardAbout: e.target.value,
+                                            }))
+                                        }
+                                        className={selectClassName}>
+                                        <option value="" disabled>
+                                            Select an option
+                                        </option>
+                                        {PSYCHIATRY_HEARD_ABOUT_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </>
+                        )}
                         {sessionCategory === 'couples' && (
                             <div className="space-y-2">
                                 <Label htmlFor="partnerName">Partner's Name & Pronouns</Label>
@@ -1902,12 +2253,21 @@ export function BookingModal({
                                     }))
                                 }
                                 placeholder={
-                                    sessionCategory === 'assessment'
+                                    sessionCategory === 'psychiatry'
+                                        ? "Anything you'd like your psychiatrist to know before your consultation..."
+                                        : sessionCategory === 'assessment'
                                         ? "Any information you'd like your clinician to know..."
                                         : "Any information you'd like your therapist to know..."
                                 }
                                 rows={3}
                             />
+                            {psychiatryNotesTooLong && (
+                                <p className="text-xs text-destructive">
+                                    Your answers are too long to send (
+                                    {psychiatryNotesLength}/{PSYCHIATRY_NOTES_MAX_LENGTH}{' '}
+                                    characters). Please shorten your medication list or notes.
+                                </p>
+                            )}
                         </div>
 
                         {/* Required Intake Form Fields */}
@@ -1949,6 +2309,26 @@ export function BookingModal({
                                         htmlFor="over18"
                                         className="text-sm leading-tight cursor-pointer">
                                         This service is for over 18's only. Please tick the box to confirm you are over 18.
+                                    </Label>
+                                </div>
+                            )}
+
+                            {sessionCategory === 'psychiatry' && (
+                                <div className="flex items-start space-x-3">
+                                    <Checkbox
+                                        id="emergencyAcknowledged"
+                                        checked={intakeForm.emergencyAcknowledged}
+                                        onCheckedChange={(checked) =>
+                                            setIntakeForm((prev) => ({
+                                                ...prev,
+                                                emergencyAcknowledged: checked === true,
+                                            }))
+                                        }
+                                    />
+                                    <Label
+                                        htmlFor="emergencyAcknowledged"
+                                        className="text-sm leading-tight cursor-pointer">
+                                        I understand this is not an emergency service. If I'm in crisis, I'll call 112 or 999, or Samaritans on 116 123.
                                     </Label>
                                 </div>
                             )}
@@ -2012,13 +2392,15 @@ export function BookingModal({
                                     !formData.lastName ||
                                     !formData.email ||
                                     !allIntakeFieldsChecked ||
-                                    (sessionCategory === 'couples' && !formData.partnerName)
+                                    (sessionCategory === 'couples' && !formData.partnerName) ||
+                                    psychiatryDetailsIncomplete
                                 }>
                                 Review Booking
                             </Button>
                         </div>
                     </div>
                 );
+            }
 
             case 'confirm':
                 return (
@@ -2032,6 +2414,9 @@ export function BookingModal({
                                     </p>
                                     <p className="text-sm text-muted-foreground">
                                         {selectedTypeDuration} minutes
+                                        {sessionCategory === 'psychiatry' &&
+                                            psychiatryIntake.reason &&
+                                            ` · ${psychiatryIntake.reason}`}
                                     </p>
                                 </div>
                             </div>
@@ -2040,12 +2425,14 @@ export function BookingModal({
                                 <div>
                                     <p className="font-medium">
                                         {getTherapistDisplayName() ||
-                                            (sessionCategory === 'assessment'
+                                            (sessionCategory === 'psychiatry'
+                                                ? 'Psychiatrist'
+                                                : sessionCategory === 'assessment'
                                                 ? 'Assessment clinician'
                                                 : 'Your therapist')}
                                     </p>
                                     <p className="text-sm text-muted-foreground">
-                                        {sessionCategory === 'assessment'
+                                        {isClinicalCategory
                                             ? 'Assigned automatically'
                                             : 'Your therapist'}
                                     </p>
@@ -2192,6 +2579,8 @@ export function BookingModal({
                                             <span className="text-sm text-muted-foreground">
                                                 {sessionCategory === 'assessment'
                                                     ? 'Assessment fee'
+                                                    : sessionCategory === 'psychiatry'
+                                                    ? 'Consultation fee'
                                                     : 'Session fee'}
                                             </span>
                                             <span className="text-lg font-bold text-primary">
@@ -2208,9 +2597,9 @@ export function BookingModal({
                             get linked to the account and booked as a package
                             credit). Discounts and referral credits are
                             therapy-session perks, so neither is offered on
-                            assessment bookings. */}
+                            assessment or psychiatry bookings. */}
                         {!usePackageCredits &&
-                            sessionCategory !== 'assessment' &&
+                            !isClinicalCategory &&
                             selectedTypeData?.price &&
                             parseFloat(selectedTypeData.price) > 0 && (
                                 <div className="space-y-2">
@@ -2236,7 +2625,7 @@ export function BookingModal({
 
                         {/* Referral credit - only when paying by card and you have credit */}
                         {!usePackageCredits &&
-                            sessionCategory !== 'assessment' &&
+                            !isClinicalCategory &&
                             selectedTypeData?.price &&
                             parseFloat(selectedTypeData.price) > 0 &&
                             referralBalanceCents > 0 && (() => {
@@ -2446,6 +2835,8 @@ export function BookingModal({
                             <p className="text-muted-foreground">
                                 {sessionCategory === 'assessment'
                                     ? 'Your assessment has been booked successfully.'
+                                    : sessionCategory === 'psychiatry'
+                                    ? 'Your psychiatry consultation has been booked. Have your diagnosis report and a list of your current medications ready.'
                                     : 'Your session has been booked successfully.'}
                             </p>
                         </div>
@@ -2495,6 +2886,8 @@ export function BookingModal({
             case 'type':
                 return sessionCategory === 'assessment'
                     ? 'Book an Assessment'
+                    : sessionCategory === 'psychiatry'
+                    ? 'Book a Psychiatry Consultation'
                     : sessionCategory === 'couples' ||
                       sessionCategory === 'youth'
                     ? `${categoryLabel} - Choose Therapist`
@@ -2519,10 +2912,19 @@ export function BookingModal({
     };
 
     // Progress indicator steps (excluding success which is the final state).
-    // Assessments visit a pricing step instead of the therapist step (their
-    // availability is pooled).
+    // Assessments visit a pricing step instead of the therapist step, and
+    // psychiatry skips it entirely (both have pooled availability).
     const progressSteps =
-        sessionCategory === 'assessment'
+        sessionCategory === 'psychiatry'
+            ? [
+                  { key: 'type', label: 'Consultation' },
+                  { key: 'date', label: 'Date' },
+                  { key: 'time', label: 'Time' },
+                  { key: 'details', label: 'Details' },
+                  { key: 'confirm', label: 'Confirm' },
+                  { key: 'payment', label: 'Payment' },
+              ]
+            : sessionCategory === 'assessment'
             ? [
                   { key: 'type', label: 'Assessment' },
                   { key: 'pricing', label: 'Pricing' },

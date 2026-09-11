@@ -8,6 +8,7 @@ export interface AcuityAppointment {
   endTime: string;
   duration: string;
   type: string;
+  appointmentTypeID?: number;
   calendar: string;
   calendarID: number;
   firstName: string;
