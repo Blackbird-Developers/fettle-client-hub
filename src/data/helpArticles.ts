@@ -88,7 +88,7 @@ export const helpArticles: HelpArticle[] = [
     summary:
       "What Fettle is, what signing up gives you, and how to take your first step.",
     intro:
-      "Fettle is an Irish therapy service that connects you with accredited therapists for online and in-person sessions. Whether you're trying therapy for the first time or returning after a break, here's what to expect when you sign up.",
+      "Fettle is an Irish therapy service that connects you with accredited therapists for online sessions. Whether you're trying therapy for the first time or returning after a break, here's what to expect when you sign up.",
     sections: [
       {
         heading: "What is Fettle?",
@@ -663,7 +663,7 @@ export const helpArticles: HelpArticle[] = [
       {
         heading: "Who attends",
         paragraphs: [
-          "Both of you, together, in the same session. Couples sessions are 50 minutes and delivered over video or in person.",
+          "Both of you, together, in the same session. Couples sessions are 50 minutes and delivered over video.",
         ],
       },
       {

@@ -1,4 +1,4 @@
-import { Calendar, Clock, User, Video, MapPin } from "lucide-react";
+import { Calendar, Clock, User, Video } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,6 @@ export interface Session {
   date: string;
   time: string;
   duration: string;
-  type: "video" | "in-person";
   status: "upcoming" | "completed" | "cancelled";
   sessionType: string;
 }
@@ -78,17 +77,9 @@ export function SessionCard({ session, variant = "default" }: SessionCardProps) 
                 {session.time} ({session.duration})
               </span>
               <span className="flex items-center gap-1.5">
-                {session.type === "video" ? (
-                  <>
-                    <Video className="h-4 w-4" />
-                    Video Call
-                  </>
-                ) : (
-                  <>
-                    <MapPin className="h-4 w-4" />
-                    In-Person
-                  </>
-                )}
+                {/* All Fettle sessions are online */}
+                <Video className="h-4 w-4" />
+                Online
               </span>
             </div>
 
