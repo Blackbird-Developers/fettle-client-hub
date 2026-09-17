@@ -9,12 +9,11 @@ import { useAcuityAppointments, AcuityAppointment } from "@/hooks/useAcuity";
 import { useAuth } from "@/contexts/AuthContext";
 import { TherapistAvatar } from "@/components/dashboard/MyTherapist";
 import { useTherapistImages } from "@/hooks/useTherapistImages";
+import { isInPersonSession } from "@/lib/sessionLocation";
 
 export function CompactSessionCard({ appointment, therapistImageUrl }: { appointment: AcuityAppointment; therapistImageUrl?: string }) {
   const dateTime = parseISO(appointment.datetime);
-  const isVideo = appointment.location?.toLowerCase().includes('video') || 
-                  appointment.location?.toLowerCase().includes('online') ||
-                  appointment.location?.toLowerCase().includes('zoom');
+  const isOnline = !isInPersonSession(appointment.location);
 
   return (
     <Card className="group transition-all duration-300 hover:shadow-elevated border-border/50">
@@ -50,10 +49,10 @@ export function CompactSessionCard({ appointment, therapistImageUrl }: { appoint
                 <span className="truncate">{format(dateTime, 'h:mm a')}</span>
               </span>
               <span className="flex items-center gap-1">
-                {isVideo ? (
+                {isOnline ? (
                   <>
                     <Video className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
-                    Video
+                    Online
                   </>
                 ) : (
                   <>

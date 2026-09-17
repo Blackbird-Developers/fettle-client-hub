@@ -24,6 +24,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Plus, Calendar, Clock, Video, MapPin, X, Loader2, AlertTriangle, RefreshCw, ExternalLink, Star, Pencil } from "lucide-react";
+import { isInPersonSession } from "@/lib/sessionLocation";
 import { cn } from "@/lib/utils";
 import { toSlug, TherapistAvatar } from "@/components/dashboard/MyTherapist";
 import { useTherapistImages } from "@/hooks/useTherapistImages";
@@ -59,9 +60,7 @@ function AcuitySessionCard({
   // A session is reviewable only once it has actually taken place and was not
   // cancelled. Cancelled or future appointments never show the review CTA.
   const isCompleted = isPast(dateTime) && !appointment.canceled;
-  const isVideo = appointment.location?.toLowerCase().includes('video') || 
-                  appointment.location?.toLowerCase().includes('online') ||
-                  appointment.location?.toLowerCase().includes('zoom');
+  const isOnline = !isInPersonSession(appointment.location);
 
   const handleCancelWithRefund = async () => {
     if (!clientEmail) {
@@ -161,10 +160,10 @@ function AcuitySessionCard({
                   {format(dateTime, 'h:mm a')}
                 </span>
                 <span className="flex items-center gap-1">
-                  {isVideo ? (
+                  {isOnline ? (
                     <>
                       <Video className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
-                      Video
+                      Online
                     </>
                   ) : (
                     <>
@@ -177,7 +176,7 @@ function AcuitySessionCard({
 
               {isUpcoming && (
                 <div className="flex flex-wrap gap-2 sm:gap-3 mt-4">
-                  {isVideo && (
+                  {isOnline && (
                     <Button 
                       size="sm" 
                       className="shadow-soft text-xs sm:text-sm"
