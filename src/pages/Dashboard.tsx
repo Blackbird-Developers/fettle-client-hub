@@ -8,6 +8,7 @@ import { ProgressDashboard } from "@/components/dashboard/ProgressDashboard";
 import { PackageSessionsCounter } from "@/components/dashboard/PackageSessionsCounter";
 import { AchievementBadges } from "@/components/dashboard/AchievementBadges";
 import { MyTherapist } from "@/components/dashboard/MyTherapist";
+import { BookAgainPrompt } from "@/components/dashboard/BookAgainPrompt";
 
 export default function Dashboard() {
   return (
@@ -19,6 +20,7 @@ export default function Dashboard() {
 
       <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6 mt-4 sm:mt-6 min-w-0 max-w-full">
         <div className="md:col-span-2 xl:col-span-2 space-y-4 lg:space-y-6 min-w-0 w-full">
+          <BookAgainPrompt />
           <UpcomingSessions />
           <ProgressDashboard />
         </div>
