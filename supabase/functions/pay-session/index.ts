@@ -93,6 +93,11 @@ serve(async (req) => {
       if (appt.canceled === true) {
         return json({ error: "This session has been cancelled — there's nothing to pay." }, 400);
       }
+      // Mirrors the unpaid-sessions exclusions: insurer-billed sessions and
+      // assessments are never self-settled here.
+      if (/irish life|laya|vhi|assessment|screening/i.test(appt.type || "")) {
+        return json({ error: "This session can't be paid here. Please contact hello@fettle.ie." }, 400);
+      }
       const priceCents = Math.round(parseFloat(appt.price || "0") * 100);
       if (appt.paid !== "no" || priceCents <= 0 || parseFloat(appt.amountPaid || "0") > 0) {
         return json({ alreadyPaid: true, message: "This session is already settled." });

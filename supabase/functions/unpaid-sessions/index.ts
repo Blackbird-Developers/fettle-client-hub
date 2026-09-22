@@ -43,6 +43,10 @@ const json = (body: unknown, status = 200) =>
 const LOOKBACK_DAYS = 60;
 const LOOKAHEAD_DAYS = 90;
 const MAX_CANDIDATES = 20;
+// Never flag these: insurer-billed sessions (the client doesn't pay us
+// directly) and assessments/screenings (partner flows pay outside our Stripe
+// stamping, so "unpaid" can't be trusted for them).
+const EXCLUDED_TYPES = /irish life|laya|vhi|assessment|screening/i;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -102,7 +106,8 @@ serve(async (req) => {
       a?.canceled !== true &&
       a?.paid === "no" &&
       parseFloat(a?.price || "0") > 0 &&
-      parseFloat(a?.amountPaid || "0") === 0
+      parseFloat(a?.amountPaid || "0") === 0 &&
+      !EXCLUDED_TYPES.test(a?.type || "")
     );
     candidates.sort(
       (a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime(),

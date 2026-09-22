@@ -1,0 +1,26 @@
+# Daily trigger for the unpaid-session payment reminders (4/3/2/1 days before
+# the session). The edge function does all the deciding — including dry-run
+# mode until UNPAID_REMINDERS_LIVE=true is set in Supabase — this workflow
+# just rings the bell once a day.
+name: Unpaid session reminders
+
+on:
+  schedule:
+    - cron: "30 8 * * *" # daily 08:30 UTC (09:30 Irish summer / 08:30 winter)
+  workflow_dispatch: {}
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invoke reminder function
+        run: |
+          set -euo pipefail
+          response=$(curl -sS -w "\n%{http_code}" -X POST \
+            -H "x-cron-secret: ${{ secrets.REMINDER_CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "https://gxeoillrmjezpehmcvrh.supabase.co/functions/v1/unpaid-session-reminders")
+          status=$(echo "$response" | tail -1)
+          echo "$response" | head -n -1
+          test "$status" = "200"

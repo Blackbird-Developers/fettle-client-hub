@@ -48,6 +48,11 @@ verify_jwt = false
 [functions.submit-therapist-review]
 verify_jwt = false
 
+# Machine-invoked by the scheduled GitHub Actions workflow; authenticated by
+# the x-cron-secret header (REMINDER_CRON_SECRET), not a user JWT.
+[functions.unpaid-session-reminders]
+verify_jwt = false
+
 [functions.export-user-data]
 verify_jwt = false
 
