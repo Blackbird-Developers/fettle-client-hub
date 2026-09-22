@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { format, parseISO, isPast } from 'date-fns';
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -23,12 +23,15 @@ import { useAcuityAppointments, AcuityAppointment } from "@/hooks/useAcuity";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Calendar, Clock, Video, X, Loader2, AlertTriangle, RefreshCw, ExternalLink, Star, Pencil } from "lucide-react";
+import { Plus, Calendar, Clock, Video, X, Loader2, AlertTriangle, RefreshCw, ExternalLink, Star, Pencil, CreditCard } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toSlug, TherapistAvatar } from "@/components/dashboard/MyTherapist";
 import { useTherapistImages } from "@/hooks/useTherapistImages";
 import { ReviewTherapistDialog } from "@/components/sessions/ReviewTherapistDialog";
 import { useTherapistReviews, TherapistReview } from "@/hooks/useTherapistReviews";
+import { useUnpaidSessions, type UnpaidSession } from "@/hooks/useUnpaidSessions";
+import { useSettlementRedirectReturn } from "@/hooks/useSettlementRedirectReturn";
+import { PaySessionModal } from "@/components/booking/PaySessionModal";
 
 function AcuitySessionCard({
   appointment,
@@ -38,6 +41,8 @@ function AcuitySessionCard({
   therapistImageUrl,
   review,
   onReviewSubmitted,
+  unpaidSession,
+  onPay,
 }: {
   appointment: AcuityAppointment;
   onCancel?: () => void;
@@ -46,6 +51,9 @@ function AcuitySessionCard({
   therapistImageUrl?: string;
   review?: TherapistReview;
   onReviewSubmitted?: () => void;
+  /** Set when unpaid-sessions lists this appointment as genuinely unpaid. */
+  unpaidSession?: UnpaidSession;
+  onPay?: (session: UnpaidSession) => void;
 }) {
   const [isCancelling, setIsCancelling] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
@@ -143,8 +151,13 @@ function AcuitySessionCard({
                   </div>
                   <p className="text-sm text-muted-foreground truncate">{appointment.type}</p>
                 </div>
-                <div className="shrink-0">
+                <div className="shrink-0 flex flex-col items-end gap-1">
                   {getStatusBadge()}
+                  {unpaidSession && (
+                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-900">
+                      Unpaid
+                    </Badge>
+                  )}
                 </div>
               </div>
 
@@ -166,6 +179,16 @@ function AcuitySessionCard({
 
               {isUpcoming && (
                 <div className="flex flex-wrap gap-2 sm:gap-3 mt-4">
+                  {unpaidSession && onPay && (
+                    <Button
+                      size="sm"
+                      className="gap-1.5 text-xs sm:text-sm"
+                      onClick={() => onPay(unpaidSession)}
+                    >
+                      <CreditCard className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      Pay now
+                    </Button>
+                  )}
                     <Button 
                       size="sm" 
                       className="shadow-soft text-xs sm:text-sm"
@@ -237,6 +260,16 @@ function AcuitySessionCard({
               {!isUpcoming && (
                 <div className="mt-4 space-y-3">
                   <div className="flex flex-wrap gap-2 sm:gap-3">
+                    {unpaidSession && onPay && (
+                      <Button
+                        size="sm"
+                        className="gap-1.5 text-xs sm:text-sm"
+                        onClick={() => onPay(unpaidSession)}
+                      >
+                        <CreditCard className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        Pay now
+                      </Button>
+                    )}
                     {onRebook && (
                       <Button
                         size="sm"
@@ -398,6 +431,15 @@ export default function Sessions() {
   const { appointments, loading, error, refetch } = useAcuityAppointments(user?.email);
   const { images: therapistImages } = useTherapistImages();
   const { reviewsByAppointment, refetch: refetchReviews } = useTherapistReviews();
+  const { data: unpaidSessions = [] } = useUnpaidSessions();
+  const [payingSession, setPayingSession] = useState<UnpaidSession | null>(null);
+  useSettlementRedirectReturn();
+
+  // Matched by Acuity appointment id; empty on any error, so no badges show.
+  const unpaidById = useMemo(
+    () => new Map(unpaidSessions.map((session) => [session.id, session])),
+    [unpaidSessions]
+  );
 
   // State for rebook modal
   const [rebookOpen, setRebookOpen] = useState(false);
@@ -479,6 +521,8 @@ export default function Sessions() {
                 onCancel={refetch}
                 clientEmail={user?.email}
                 therapistImageUrl={therapistImages.get(appointment.calendarID)}
+                unpaidSession={unpaidById.get(appointment.id)}
+                onPay={setPayingSession}
               />
             ))
           ) : (
@@ -507,6 +551,8 @@ export default function Sessions() {
                 therapistImageUrl={therapistImages.get(appointment.calendarID)}
                 review={reviewsByAppointment.get(String(appointment.id))}
                 onReviewSubmitted={refetchReviews}
+                unpaidSession={unpaidById.get(appointment.id)}
+                onPay={setPayingSession}
               />
             ))
           ) : (
@@ -516,6 +562,14 @@ export default function Sessions() {
           )}
         </TabsContent>
       </Tabs>
+
+      <PaySessionModal
+        session={payingSession}
+        open={!!payingSession}
+        onOpenChange={(open) => {
+          if (!open) setPayingSession(null);
+        }}
+      />
 
       {/* Rebook Modal */}
       <BookingModal 

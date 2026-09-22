@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { SETTLEMENT_RETURN_PARAM } from '@/hooks/useUnpaidSessions';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
 
@@ -34,6 +35,11 @@ export function usePaymentRedirectReturn() {
     const paymentIntentIdFromUrl = urlParams.get('payment_intent');
 
     if (!clientSecret || !paymentIntentIdFromUrl) return;
+
+    // Settling an existing unpaid session returns to /sessions?settled={id},
+    // which useSettlementRedirectReturn owns. Never route those into the
+    // booking or package confirm endpoints.
+    if (urlParams.has(SETTLEMENT_RETURN_PARAM)) return;
 
     handleRedirectReturn(clientSecret, paymentIntentIdFromUrl);
   }, []);

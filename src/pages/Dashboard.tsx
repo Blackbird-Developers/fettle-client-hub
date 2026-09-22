@@ -9,10 +9,12 @@ import { PackageSessionsCounter } from "@/components/dashboard/PackageSessionsCo
 import { AchievementBadges } from "@/components/dashboard/AchievementBadges";
 import { MyTherapist } from "@/components/dashboard/MyTherapist";
 import { BookAgainPrompt } from "@/components/dashboard/BookAgainPrompt";
+import { UnpaidSessionsBanner } from "@/components/dashboard/UnpaidSessionsBanner";
 
 export default function Dashboard() {
   return (
     <DashboardLayout>
+      <UnpaidSessionsBanner />
       <WelcomeHeader />
       <div className="mt-4 sm:mt-6">
         <QuickStats />
