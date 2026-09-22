@@ -109,8 +109,67 @@ changes.
       function logs show "Excluded: paid via Stripe" for it).
 - [ ] Banner dismiss works and returns on next login.
 
-## Not in scope yet
+## Pay now flow (backend live: `pay-session`)
 
-Self-serve "Pay now" (Stripe form + stamping the Acuity appointment as settled)
-is designed but not built — the banner CTA is contact/manual for v1. Ask before
-building it; the backend will need one more function.
+Replace the contact-CTA with a **Pay now** button per unpaid session. Two-step,
+mirroring how `PackageBookingModal` + `PackagePaymentForm` drive an embedded
+PaymentIntent:
+
+### 1. Create the payment
+
+```ts
+const { data, error } = await supabase.functions.invoke('pay-session', {
+  body: { action: 'create', appointmentId: session.id },
+});
+// data: { clientSecret, paymentIntentId, amount, currency, livemode }
+// OR   { alreadyPaid: true, message } → treat as settled: refetch
+//       unpaid-sessions, show a "already settled" toast, hide the banner row.
+// OR   { error } → toast the message, keep the banner.
+```
+
+The server re-derives the amount from Acuity and refuses if the session is
+already settled anywhere (Acuity, Stripe, or a pending duplicate) — never
+trust or display a locally computed amount; show `data.amount / 100`.
+
+### 2. Collect payment
+
+Render Stripe Elements with the `clientSecret`, exactly like
+`PackagePaymentForm` does (copy that component as `SettlePaymentForm`; it's
+the closest shape — payment only, no booking step afterwards). On
+`stripe.confirmPayment` success:
+
+```ts
+const { data } = await supabase.functions.invoke('pay-session', {
+  body: { action: 'confirm', paymentIntentId },
+});
+// data: { success: true, receiptUrl?, noteRecorded?, alreadyRecorded? }
+```
+
+Then: success toast ("Session paid — thank you"), show `receiptUrl` as a
+"View receipt" link if present, invalidate the `['unpaid-sessions']` query so
+the banner/badge disappear. `confirm` is idempotent — safe to retry on flaky
+networks. If `confirm` errors but the card was charged, DON'T scare the user:
+the banner clears on next refetch regardless (the server finds the succeeded
+payment); show "Payment received — your receipt will follow".
+
+Redirect-based wallets (Revolut/PayPal): pass a `return_url` back to
+`/sessions?settled={appointmentId}` and call `confirm` on landing when
+`redirect_status=succeeded` — same pattern as `usePaymentRedirectReturn`.
+
+### What the backend guarantees (so the FE doesn't have to)
+
+- Ownership: only the appointment's own account can create/confirm.
+- Amount: always Acuity's price for that appointment.
+- Double-charge: `create` refuses if any succeeded payment exists.
+- The clinic sees settlement: a "PAID EUR … via My Fettle (Stripe …)" note is
+  appended to the Acuity appointment on confirm.
+- The stripe-webhook booking machinery ignores these payments entirely.
+
+### Extra verification (add to the checklist)
+
+- [ ] Pay a genuinely unpaid session with a real card → banner clears, Acuity
+      appointment shows the PAID note, receipt link works.
+- [ ] Click Pay now twice fast / in two tabs → second attempt reports
+      "already settled" after the first completes.
+- [ ] Try `action:'create'` with an appointment id belonging to another
+      account (dev tools) → 403.
