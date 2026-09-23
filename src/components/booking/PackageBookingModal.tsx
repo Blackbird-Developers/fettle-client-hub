@@ -19,7 +19,7 @@ import { PackagePaymentForm } from './PackagePaymentForm';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Check, Gift, Loader2, Sparkles, TrendingDown, CheckCircle, Receipt, ExternalLink, Heart, Users, Ticket, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SESSION_BUNDLES as PACKAGES } from '@/lib/sessionBundles';
+import { SESSION_BUNDLES as PACKAGES, formatEuro } from '@/lib/sessionBundles';
 
 // Initialize Stripe
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
@@ -305,17 +305,17 @@ export function PackageBookingModal({
                         </div>
 
                         <div className="flex items-baseline gap-2 mb-2">
-                          <span className="text-2xl font-bold text-primary">€{pkg.price}</span>
-                          <span className="text-sm text-muted-foreground line-through">€{fullPrice}</span>
+                          <span className="text-2xl font-bold text-primary">{formatEuro(pkg.price)}</span>
+                          <span className="text-sm text-muted-foreground line-through">{formatEuro(fullPrice)}</span>
                         </div>
 
                         <div className="flex items-center gap-4 text-xs text-muted-foreground">
                           <span className="flex items-center gap-1">
                             <Check className="h-3.5 w-3.5 text-success" />
-                            €{Math.round(pkg.price / pkg.sessions)} per session
+                            {formatEuro(pkg.price / pkg.sessions)} per session
                           </span>
                           <span className="text-success font-medium">
-                            You save €{savings}
+                            You save {formatEuro(savings)}
                           </span>
                         </div>
                       </button>
@@ -385,8 +385,8 @@ export function PackageBookingModal({
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xl font-bold text-primary">€{selectedPackage.price}</p>
-                    <p className="text-xs text-success">Save €{calculateSavings(selectedPackage).savings}</p>
+                    <p className="text-xl font-bold text-primary">{formatEuro(selectedPackage.price)}</p>
+                    <p className="text-xs text-success">Save {formatEuro(calculateSavings(selectedPackage).savings)}</p>
                   </div>
                 </div>
               </div>

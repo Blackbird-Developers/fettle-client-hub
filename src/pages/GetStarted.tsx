@@ -11,7 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useActivePackages } from "@/hooks/useUserPackages";
 import { useAcuityAppointmentTypes } from "@/hooks/useAcuity";
 import { getPackageCategory } from "@/lib/packageCategory";
-import { getSessionBundle } from "@/lib/sessionBundles";
+import { formatEuro, getSessionBundle } from "@/lib/sessionBundles";
 import {
   FUNNEL_THERAPIES,
   clearBundleFunnelIntent,
@@ -223,16 +223,16 @@ export default function GetStarted() {
                         </p>
                       </div>
                       <Badge className="bg-success/10 text-success border-success/20 shrink-0">
-                        Save €{bundle.savings}
+                        Save {formatEuro(bundle.savings)}
                       </Badge>
                     </div>
                     <div className="mt-3 flex items-baseline gap-2">
-                      <span className="text-2xl font-bold text-primary">€{bundle.price}</span>
+                      <span className="text-2xl font-bold text-primary">{formatEuro(bundle.price)}</span>
                       <span className="text-sm text-muted-foreground line-through">
-                        €{bundle.sessions * bundle.individualPrice}
+                        {formatEuro(bundle.sessions * bundle.individualPrice)}
                       </span>
                       <span className="text-xs text-muted-foreground">
-                        · €{Math.round(bundle.price / bundle.sessions)} per session
+                        · {formatEuro(bundle.price / bundle.sessions)} per session
                       </span>
                     </div>
                   </div>
@@ -275,9 +275,17 @@ export default function GetStarted() {
 
             <Step number={3} title="Book your first session" state={sessionState}>
               {sessionState === "locked" ? (
-                <p className="text-sm text-muted-foreground">
-                  Available as soon as your bundle is ready.
-                </p>
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    Just pick a date and time for your first{" "}
+                    {therapy && category === "individual" ? `${therapy.topic} ` : ""}session.
+                    We'll match you with an accredited therapist who is free then, so
+                    there's no need to choose one yourself.
+                  </p>
+                  <p className="text-xs text-muted-foreground/80">
+                    Available as soon as your bundle is ready.
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">

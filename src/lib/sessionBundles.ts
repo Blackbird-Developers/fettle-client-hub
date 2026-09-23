@@ -105,6 +105,12 @@ export const SESSION_BUNDLES: SessionBundle[] = [
   },
 ];
 
+/** Euro amount for display: "€528", "€271.50", "€13.50". */
+export function formatEuro(amount: number): string {
+  const cents = Math.round(amount * 100);
+  return cents % 100 === 0 ? `€${cents / 100}` : `€${(cents / 100).toFixed(2)}`;
+}
+
 export function getSessionBundle(id: number | null | undefined): SessionBundle | undefined {
   if (!id) return undefined;
   return SESSION_BUNDLES.find((bundle) => bundle.id === id);
