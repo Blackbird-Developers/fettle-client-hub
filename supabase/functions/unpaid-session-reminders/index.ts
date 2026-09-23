@@ -314,6 +314,29 @@ serve(async (req) => {
       appointments: sessions.map((s) => ({ id: s.id, daysBefore: s.daysBefore, price: s.price })),
     }));
 
+    // One-time seed after a pause: stamp everything CURRENTLY due into the
+    // sent-log WITHOUT emailing, so re-enabling never produces a catch-up
+    // burst — reminders resume only as sessions newly enter a day bucket.
+    if (body?.seed === true) {
+      // Plain ISO stamp — the pruning in the send path Date.parse()es these.
+      const stamp = now.toISOString();
+      for (const s of due) sentLog[`${s.id}:${s.daysBefore}`] = stamp;
+      try {
+        const blob = new Blob([JSON.stringify(sentLog)], { type: "application/json" });
+        let up = await admin.storage.from(STATE_BUCKET).upload(STATE_PATH, blob, { upsert: true });
+        if (up.error && /not found/i.test(up.error.message || "")) {
+          await admin.storage.createBucket(STATE_BUCKET, { public: false });
+          up = await admin.storage.from(STATE_BUCKET).upload(STATE_PATH, blob, { upsert: true });
+        }
+        if (up.error) throw up.error;
+      } catch (e) {
+        logStep("Seed save failed", { error: String(e).slice(0, 200) });
+        return json({ error: "seed_save_failed" }, 500);
+      }
+      logStep("Seeded sent-log — nothing sent", { seeded: due.length, plan });
+      return json({ seeded: due.length, plan, sent: 0, checkedAt: now.toISOString() });
+    }
+
     if (!live) {
       logStep("DRY RUN — nothing sent", { recipients: plan.length, plan });
       return json({ dryRun: true, wouldEmail: plan, checkedAt: now.toISOString() });
