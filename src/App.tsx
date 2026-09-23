@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { PaymentRedirectHandler } from "@/components/booking/PaymentRedirectHandler";
+import { BundleFunnelResume } from "@/components/onboarding/BundleFunnelResume";
 import Dashboard from "./pages/Dashboard";
 import Sessions from "./pages/Sessions";
 import Invoices from "./pages/Invoices";
@@ -22,6 +23,7 @@ import Admin from "./pages/Admin";
 import Packages from "./pages/Packages";
 import Referrals from "./pages/Referrals";
 import Psychiatry from "./pages/Psychiatry";
+import GetStarted from "./pages/GetStarted";
 import HelpCenter from "./pages/HelpCenter";
 import HelpArticle from "./pages/HelpArticle";
 
@@ -35,6 +37,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <PaymentRedirectHandler />
+          <BundleFunnelResume />
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
@@ -43,6 +46,7 @@ const App = () => (
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             <Route path="/referrals" element={<ProtectedRoute><Referrals /></ProtectedRoute>} />
             <Route path="/psychiatry" element={<ProtectedRoute><Psychiatry /></ProtectedRoute>} />
+            <Route path="/get-started" element={<ProtectedRoute><GetStarted /></ProtectedRoute>} />
             <Route path="/booking-success" element={<ProtectedRoute><BookingSuccess /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
             <Route path="/login" element={<Login />} />

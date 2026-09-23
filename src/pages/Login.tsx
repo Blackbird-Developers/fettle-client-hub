@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Mail, Lock, ArrowRight, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { BundleFunnelNotice } from "@/components/onboarding/BundleFunnelNotice";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -113,6 +114,8 @@ export default function Login() {
           </Link>
           <p className="mt-2 text-muted-foreground">Your therapy journey starts here</p>
         </div>
+
+        <BundleFunnelNotice mode="login" />
 
         <Card className="border-border/50 shadow-elevated">
           <CardHeader className="text-center">

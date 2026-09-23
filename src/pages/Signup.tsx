@@ -9,6 +9,7 @@ import { Mail, Lock, User, ArrowRight, CheckCircle, Loader2, Gift } from "lucide
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { BundleFunnelNotice } from "@/components/onboarding/BundleFunnelNotice";
 
 export default function Signup() {
   const [firstName, setFirstName] = useState("");
@@ -172,6 +173,7 @@ export default function Signup() {
               <p className="font-medium text-foreground mt-1">{email}</p>
             </CardHeader>
             <CardContent className="space-y-4">
+              <BundleFunnelNotice mode="verify" />
               <div className="bg-muted/50 rounded-lg p-4 text-sm text-muted-foreground">
                 <p className="mb-2">
                   Click the link in the email to verify your account and complete your registration.
@@ -231,6 +233,8 @@ export default function Signup() {
           </Link>
           <p className="mt-2 text-muted-foreground">Start your therapy journey</p>
         </div>
+
+        <BundleFunnelNotice mode="signup" />
 
         <Card className="border-border/50 shadow-elevated">
           <CardHeader className="text-center">

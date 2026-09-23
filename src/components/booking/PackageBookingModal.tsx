@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements } from '@stripe/react-stripe-js';
 import {
@@ -19,6 +19,7 @@ import { PackagePaymentForm } from './PackagePaymentForm';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Check, Gift, Loader2, Sparkles, TrendingDown, CheckCircle, Receipt, ExternalLink, Heart, Users, Ticket, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { SESSION_BUNDLES as PACKAGES } from '@/lib/sessionBundles';
 
 // Initialize Stripe
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
@@ -27,100 +28,17 @@ const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : 
 interface PackageBookingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Tab to show when the modal opens. */
+  initialCategory?: PackageCategory;
+  /** Acuity product ID to pre-select: the modal opens on the details step. */
+  initialPackageId?: number | null;
 }
 
 type Step = 'select' | 'details' | 'payment' | 'success' | 'linked';
 
 type PackageCategory = 'individual' | 'youth' | 'couples';
 
-// Package definitions
-// Acuity links:
-// Individual 3: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1122832
-// Individual 6: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=996385
-// Individual 9: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1197875
-// Youth 3: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1370588
-// Youth 5: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1975510
-// Couples 3: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=2000708
-// Couples 5: https://app.acuityscheduling.com/catalog.php?owner=21301568&action=addCart&clear=1&id=1967869
-const PACKAGES = [
-  {
-    id: 1122832,
-    category: 'individual' as PackageCategory,
-    name: "3 Session Bundle",
-    sessions: 3,
-    sessionDuration: 50,
-    price: 271.50,
-    individualPrice: 95,
-    savings: 13.50,
-    popular: false
-  },
-  {
-    id: 996385,
-    category: 'individual' as PackageCategory,
-    name: "6 Session Bundle",
-    sessions: 6,
-    sessionDuration: 50,
-    price: 528,
-    individualPrice: 95,
-    savings: 42,
-    popular: true
-  },
-  {
-    id: 1197875,
-    category: 'individual' as PackageCategory,
-    name: "9 Session Bundle",
-    sessions: 9,
-    sessionDuration: 50,
-    price: 765,
-    individualPrice: 95,
-    savings: 90,
-    popular: false
-  },
-  {
-    id: 1370588,
-    category: 'youth' as PackageCategory,
-    name: "Youth Bundle 3 x 60min",
-    sessions: 3,
-    sessionDuration: 60,
-    price: 325,
-    individualPrice: 125,
-    savings: 50,
-    popular: false
-  },
-  {
-    id: 1975510,
-    category: 'youth' as PackageCategory,
-    name: "Youth Bundle 5 x 60min",
-    sessions: 5,
-    sessionDuration: 60,
-    price: 550,
-    individualPrice: 125,
-    savings: 75,
-    popular: true
-  },
-  {
-    id: 2000708,
-    category: 'couples' as PackageCategory,
-    name: "Couples 3 x 60 min",
-    sessions: 3,
-    sessionDuration: 60,
-    price: 345,
-    individualPrice: 135,
-    savings: 60,
-    popular: false
-  },
-  {
-    id: 1967869,
-    category: 'couples' as PackageCategory,
-    name: "Couples 5 x 60 min",
-    sessions: 5,
-    sessionDuration: 60,
-    price: 575,
-    individualPrice: 135,
-    savings: 100,
-    popular: true
-  },
-];
+// Bundle definitions (Acuity products) live in src/lib/sessionBundles.ts.
 
 const PACKAGE_CATEGORIES: { key: PackageCategory; label: string; icon: typeof Gift }[] = [
   { key: 'individual', label: 'Individual', icon: Gift },
@@ -128,7 +46,12 @@ const PACKAGE_CATEGORIES: { key: PackageCategory; label: string; icon: typeof Gi
   { key: 'couples', label: 'Couples', icon: Heart },
 ];
 
-export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalProps) {
+export function PackageBookingModal({
+  open,
+  onOpenChange,
+  initialCategory,
+  initialPackageId,
+}: PackageBookingModalProps) {
   const [step, setStep] = useState<Step>('select');
   const [packageCategory, setPackageCategory] = useState<PackageCategory>('individual');
   const [selectedPackage, setSelectedPackage] = useState<typeof PACKAGES[0] | null>(null);
@@ -174,6 +97,21 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
     });
     setStep('details');
   };
+
+  // Pre-selection (e.g. from the /get-started funnel), applied once per open.
+  useEffect(() => {
+    if (!open) return;
+    const preselected = initialPackageId
+      ? PACKAGES.find((pkg) => pkg.id === initialPackageId)
+      : undefined;
+    if (preselected) {
+      setPackageCategory(preselected.category);
+      handleSelectPackage(preselected);
+    } else if (initialCategory) {
+      setPackageCategory(initialCategory);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const handleProceedToPayment = async () => {
     if (!selectedPackage) return;
@@ -428,8 +366,8 @@ export function PackageBookingModal({ open, onOpenChange }: PackageBookingModalP
               {packageCategory === 'individual'
                 ? 'Individual sessions are €95 each. Packages give you the flexibility to book sessions when you need them.'
                 : packageCategory === 'youth'
-                  ? 'Youth sessions are €105 each. Bundles apply to youth therapy sessions only.'
-                  : 'Couples sessions are €110 each. Bundles apply to couples therapy sessions only.'}
+                  ? 'Youth sessions are €125 each. Bundles apply to youth therapy sessions only.'
+                  : 'Couples sessions are €135 each. Bundles apply to couples therapy sessions only.'}
             </p>
           </div>
         );
