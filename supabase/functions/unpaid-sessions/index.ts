@@ -48,6 +48,23 @@ const MAX_CANDIDATES = 20;
 // stamping, so "unpaid" can't be trusted for them).
 const EXCLUDED_TYPES = /irish life|laya|vhi|assessment|screening/i;
 
+// Adult sessions BOOKED before the 26 Aug 2026 price rise are honoured at the
+// old €85 rate; booked on/after pay €95 (Art, 23 Sep 2026). Acuity's price
+// snapshot can't be trusted for this band — appointment types briefly read €95
+// before the rise and €85 after it on changeover day — so the booking date
+// (datetimeCreated) decides. Other price bands keep their snapshot.
+// pay-session applies the same rule to the actual charge.
+const PRICE_RISE_CUTOFF = Date.parse("2026-08-26T00:00:00+01:00");
+function effectivePrice(appt: any): string {
+  if (appt?.price === "85.00" || appt?.price === "95.00") {
+    const created = Date.parse(appt?.datetimeCreated || "");
+    if (!Number.isNaN(created)) {
+      return created < PRICE_RISE_CUTOFF ? "85.00" : "95.00";
+    }
+  }
+  return appt?.price;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -185,7 +202,7 @@ serve(async (req) => {
       type: a.type,
       therapist: (a.calendar || "").trim(),
       datetime: a.datetime,
-      price: a.price,
+      price: effectivePrice(a),
       amountPaid: a.amountPaid,
       isPast: new Date(a.datetime).getTime() < now,
     }));

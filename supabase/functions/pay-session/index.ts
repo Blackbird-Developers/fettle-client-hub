@@ -93,6 +93,15 @@ serve(async (req) => {
       if (appt.canceled === true) {
         return json({ error: "This session has been cancelled — there's nothing to pay." }, 400);
       }
+      // Adult sessions BOOKED before the 26 Aug 2026 price rise are honoured
+      // at the old €85 rate; on/after pay €95 (Art, 23 Sep 2026). Mirrors
+      // effectivePrice in unpaid-sessions — the banner shows what we charge.
+      if (appt.price === "85.00" || appt.price === "95.00") {
+        const created = Date.parse(appt.datetimeCreated || "");
+        if (!Number.isNaN(created)) {
+          appt.price = created < Date.parse("2026-08-26T00:00:00+01:00") ? "85.00" : "95.00";
+        }
+      }
       // Mirrors the unpaid-sessions exclusions: insurer-billed sessions and
       // assessments are never self-settled here.
       if (/irish life|laya|vhi|assessment|screening/i.test(appt.type || "")) {

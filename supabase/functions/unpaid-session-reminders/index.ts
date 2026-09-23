@@ -46,6 +46,22 @@ const MAX_RECIPIENTS = parseInt(Deno.env.get("UNPAID_REMINDERS_MAX_RECIPIENTS") 
 // directly) and assessments/screenings (partner flows pay outside our Stripe
 // stamping, so "unpaid" can't be trusted for them).
 const EXCLUDED_TYPES = /irish life|laya|vhi|assessment|screening/i;
+
+// Adult sessions BOOKED before the 26 Aug 2026 price rise are honoured at the
+// old €85 rate; booked on/after pay €95 (Art, 23 Sep 2026). Acuity's price
+// snapshot can't be trusted for this band — appointment types briefly read €95
+// before the rise and €85 after it on changeover day — so the booking date
+// (datetimeCreated) decides. Other price bands keep their snapshot.
+const PRICE_RISE_CUTOFF = Date.parse("2026-08-26T00:00:00+01:00");
+function effectivePrice(appt: any): string {
+  if (appt?.price === "85.00" || appt?.price === "95.00") {
+    const created = Date.parse(appt?.datetimeCreated || "");
+    if (!Number.isNaN(created)) {
+      return created < PRICE_RISE_CUTOFF ? "85.00" : "95.00";
+    }
+  }
+  return appt?.price;
+}
 const STATE_BUCKET = "reminders";
 const STATE_PATH = "unpaid-session-reminders.json";
 const TIME_ZONE = "Europe/Dublin";
@@ -83,35 +99,80 @@ interface DueSession {
   firstName: string;
 }
 
+// Same structure, colors and footer as the house transactional template in
+// send-booking-confirmation — clients should not be able to tell these apart.
 function reminderEmailHtml(firstName: string, sessions: DueSession[]): string {
-  const rows = sessions.map((s) => `
-    <div style="background: white; padding: 16px 20px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #d97706;">
-      <p style="margin: 2px 0;"><strong>${s.type}</strong></p>
-      ${s.therapist ? `<p style="margin: 2px 0;">Therapist: ${s.therapist}</p>` : ""}
-      <p style="margin: 2px 0;">${formatWhen(s.datetime)}</p>
-      <p style="margin: 2px 0;">Amount due: <strong>&euro;${s.price}</strong></p>
-    </div>`).join("");
+  const details = sessions.map((s) => `
+      <div style="background: #faf8f5; border-radius: 12px; padding: 24px; margin-bottom: 24px;">
+        <div style="margin-bottom: 16px;">
+          <p style="color: #666; font-size: 12px; text-transform: uppercase; margin: 0 0 4px 0;">Session Type</p>
+          <p style="color: #1a1a1a; font-size: 16px; margin: 0; font-weight: 500;">${s.type}</p>
+        </div>
+        ${s.therapist ? `
+        <div style="margin-bottom: 16px;">
+          <p style="color: #666; font-size: 12px; text-transform: uppercase; margin: 0 0 4px 0;">Therapist</p>
+          <p style="color: #1a1a1a; font-size: 16px; margin: 0; font-weight: 500;">${s.therapist}</p>
+        </div>
+        ` : ''}
+        <div style="margin-bottom: 16px;">
+          <p style="color: #666; font-size: 12px; text-transform: uppercase; margin: 0 0 4px 0;">Date &amp; Time</p>
+          <p style="color: #1a1a1a; font-size: 16px; margin: 0; font-weight: 500;">${formatWhen(s.datetime)}</p>
+        </div>
+        <div style="border-top: 1px solid #e0e0e0; padding-top: 16px; margin-top: 16px;">
+          <p style="color: #666; font-size: 12px; text-transform: uppercase; margin: 0 0 4px 0;">Amount Due</p>
+          <p style="color: #c67c4e; font-size: 20px; margin: 0; font-weight: 600;">&euro;${s.price}</p>
+        </div>
+      </div>`).join("");
 
   const plural = sessions.length > 1;
-  return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-    <h1 style="color: white; margin: 0; font-size: 22px;">Payment reminder</h1>
-  </div>
-  <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 12px 12px;">
-    <p style="font-size: 16px;">Hi ${firstName},</p>
-    <p style="font-size: 16px;">Your upcoming ${plural ? "sessions haven't" : "session hasn't"} been paid for yet:</p>
-    ${rows}
-    <p style="font-size: 15px;">You can pay securely in a couple of clicks from your Fettle account.</p>
-    <div style="text-align: center; margin: 24px 0;">
-      <a href="${HUB_URL}" style="background: #667eea; color: white; padding: 13px 30px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;">Pay for ${plural ? "your sessions" : "your session"}</a>
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Reminder</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f8f5f0;">
+  <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+    <!-- Header -->
+    <div style="text-align: center; margin-bottom: 32px;">
+      <h1 style="color: #c67c4e; font-size: 28px; margin: 0; font-weight: 600;">fettle<span style="font-size: 14px; color: #666;">.ie</span></h1>
+      <p style="color: #666; margin: 8px 0 0 0; font-size: 14px;">Your therapy journey starts here</p>
     </div>
-    <p style="font-size: 13px; color: #666;">Already sorted this, or think it's not right? Just ignore this email or contact us at hello@fettle.ie and we'll look after it.</p>
-    <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-    <p style="font-size: 12px; color: #999; text-align: center;">Fettle Therapy</p>
+
+    <!-- Main Card -->
+    <div style="background: white; border-radius: 16px; padding: 32px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+      <h2 style="color: #1a1a1a; font-size: 24px; text-align: center; margin: 0 0 8px 0;">Payment Reminder</h2>
+      <p style="color: #666; text-align: center; margin: 0 0 32px 0;">Hi ${firstName}, your upcoming ${plural ? "sessions haven't" : "session hasn't"} been paid for yet.</p>
+
+      <!-- Session Details -->
+      ${details}
+
+      <!-- Pay Button -->
+      <div style="text-align: center; margin-bottom: 24px;">
+        <a href="${HUB_URL}" style="display: inline-block; background: #c67c4e; color: white; text-decoration: none; padding: 12px 32px; border-radius: 8px; font-weight: 500; font-size: 14px;">Pay for ${plural ? "Your Sessions" : "Your Session"}</a>
+      </div>
+
+      <!-- Need Help -->
+      <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e0e0e0;">
+        <p style="color: #666; font-size: 14px; margin: 0;">
+          Already sorted this, or have questions?<br>
+          Contact us at <a href="mailto:operations@fettle.ie" style="color: #c67c4e;">operations@fettle.ie</a>
+        </p>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="text-align: center; margin-top: 32px;">
+      <p style="color: #999; font-size: 12px; margin: 0;">
+        © ${new Date().getFullYear()} Fettle Therapy. All rights reserved.
+      </p>
+    </div>
   </div>
-</body></html>`;
+</body>
+</html>
+  `;
 }
 
 serve(async (req) => {
@@ -233,7 +294,7 @@ serve(async (req) => {
       }
       due.push({
         id: a.id, type: a.type || "Therapy session", therapist: (a.calendar || "").trim(),
-        datetime: a.datetime, price: a.price, daysBefore,
+        datetime: a.datetime, price: effectivePrice(a), daysBefore,
         firstName: a.firstName || "there",
       });
     }
