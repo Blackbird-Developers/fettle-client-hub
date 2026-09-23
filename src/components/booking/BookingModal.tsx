@@ -30,6 +30,14 @@ import {
     resolveSlotCalendar,
     type NextAvailableSlot,
 } from '@/hooks/useNextAvailable';
+import {
+    usePooledDates,
+    usePooledTimes,
+    pickPoolOwner,
+    findFreeCalendar,
+    usePrefetchCalendarDay,
+    type PoolOwner,
+} from '@/hooks/usePooledAvailability';
 import { useActivePackages } from '@/hooks/useUserPackages';
 import { useReferrals } from '@/hooks/useReferrals';
 import { useQueryClient } from '@tanstack/react-query';
@@ -116,6 +124,13 @@ interface BookingModalProps {
      * straight to the details/checkout step with everything preselected.
      */
     preselectedTimeISO?: string;
+    /**
+     * Skip choosing a therapist: the client picks a date and time from every
+     * therapist's availability and is booked with one who is free then.
+     * Ignored for assessments/psychiatry (already pooled) and when a
+     * therapist is preselected.
+     */
+    autoAssignTherapist?: boolean;
 }
 
 type Step =
@@ -138,6 +153,7 @@ export function BookingModal({
     sessionCategory = 'individual',
     preselectedType,
     preselectedTimeISO,
+    autoAssignTherapist = false,
 }: BookingModalProps) {
     const [step, setStep] = useState<Step>(
         preselectedCalendarId ? 'type' : 'type'
@@ -210,6 +226,18 @@ export function BookingModal({
     const isClinicalCategory =
         sessionCategory === 'assessment' || sessionCategory === 'psychiatry';
 
+    // No therapist step: the therapist is assigned from whoever is free at the
+    // chosen time. Youth and couples types are one per therapist, so their
+    // availability is pooled across types; individual types are pooled by
+    // Acuity across the type's calendars.
+    const autoAssign =
+        autoAssignTherapist && !isClinicalCategory && !preselectedCalendarId;
+    const poolsAcrossTypes =
+        autoAssign &&
+        (sessionCategory === 'couples' || sessionCategory === 'youth');
+    // Slot whose therapist is being looked up after the client picked it.
+    const [assigningTime, setAssigningTime] = useState<string | null>(null);
+
     // Fetch user's active packages
     const { packages: activePackages, isLoading: packagesLoading } =
         useActivePackages();
@@ -261,17 +289,21 @@ export function BookingModal({
     const { images: therapistImages, profiles: therapistProfiles } = useTherapistImages();
 
     // Use viewingMonth for availability query - this updates when user navigates calendar
-    const { dates: availableDates, loading: datesLoading } =
+    const viewingMonthKey = format(viewingMonth, 'yyyy-MM');
+    const selectedDateKey = selectedDate
+        ? format(selectedDate, 'yyyy-MM-dd')
+        : null;
+    const { dates: typeDates, loading: typeDatesLoading } =
         useAcuityAvailability(
-            selectedType,
-            format(viewingMonth, 'yyyy-MM'),
-            selectedCalendar
+            poolsAcrossTypes ? null : selectedType,
+            viewingMonthKey,
+            autoAssign ? null : selectedCalendar
         );
 
-    const { times: availableTimes, loading: timesLoading } = useAcuityTimes(
-        selectedType,
-        selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null,
-        selectedCalendar
+    const { times: typeTimes, loading: typeTimesLoading } = useAcuityTimes(
+        poolsAcrossTypes ? null : selectedType,
+        selectedDateKey,
+        autoAssign ? null : selectedCalendar
     );
 
     // Filter appointment types based on session category and whether we're
@@ -342,6 +374,45 @@ export function BookingModal({
         ignorePreselectedTherapist,
         sessionCategory,
     ]);
+
+    // Youth/couples with auto-assign: every therapist's type in the category.
+    const poolOwners = useMemo<PoolOwner[]>(
+        () =>
+            poolsAcrossTypes
+                ? filteredAppointmentTypes
+                      .filter((type) => type.calendarIDs?.length)
+                      .map((type) => ({
+                          typeId: type.id,
+                          calendarId: type.calendarIDs[0],
+                      }))
+                : [],
+        [poolsAcrossTypes, filteredAppointmentTypes]
+    );
+    const pooledDates = usePooledDates(
+        poolOwners,
+        viewingMonthKey,
+        open && poolsAcrossTypes
+    );
+    const pooledTimes = usePooledTimes(
+        selectedDateKey ? pooledDates.ownersByDate[selectedDateKey] ?? [] : [],
+        selectedDateKey,
+        open && poolsAcrossTypes
+    );
+
+    const availableDates = useMemo(
+        () =>
+            poolsAcrossTypes
+                ? Object.keys(pooledDates.ownersByDate).map((date) => ({ date }))
+                : typeDates,
+        [poolsAcrossTypes, pooledDates.ownersByDate, typeDates]
+    );
+    const datesLoading = poolsAcrossTypes
+        ? pooledDates.loading
+        : typeDatesLoading;
+    const availableTimes = poolsAcrossTypes ? pooledTimes.times : typeTimes;
+    const timesLoading = poolsAcrossTypes
+        ? pooledTimes.loading
+        : typeTimesLoading;
 
     // Get a human-readable label for the session category
     const getSessionCategoryLabel = () => {
@@ -462,6 +533,15 @@ export function BookingModal({
     };
 
     const selectedTypeData = types.find((t) => t.id === selectedType);
+
+    // Individual with auto-assign: learn who is free on the chosen day while
+    // the client looks at the times, so picking one is instant.
+    usePrefetchCalendarDay(
+        selectedType,
+        selectedTypeData?.calendarIDs ?? [],
+        selectedDateKey,
+        open && autoAssign && !poolsAcrossTypes && step === 'time'
+    );
     // Price shown and charged for the selected type. Assessments may override
     // the Acuity record's price to match what fettle.ie sells them for (e.g.
     // the addiction assessment is €140 while its Acuity type lists €89).
@@ -978,6 +1058,7 @@ export function BookingModal({
         setSelectedPackageId(null);
         setHasUserMadePaymentChoice(false);
         setIgnorePreselectedTherapist(false);
+        setAssigningTime(null);
     };
 
     const handleClose = () => {
@@ -1003,6 +1084,13 @@ export function BookingModal({
         // availability is pooled across the type's calendars and Acuity
         // assigns one at booking time (calendarID stays unset).
         if (isClinicalCategory) {
+            setSelectedCalendar(null);
+            setStep('date');
+            return;
+        }
+
+        // The therapist is assigned once a time is picked.
+        if (autoAssign) {
             setSelectedCalendar(null);
             setStep('date');
             return;
@@ -1061,6 +1149,11 @@ export function BookingModal({
         } else if (preselectedType) {
             // Type-only preselection: skip just the type-selection step.
             handleTypeSelection(preselectedType);
+        } else if (poolsAcrossTypes) {
+            // Youth/couples types are per therapist, so with auto-assign
+            // there's nothing to choose before the date.
+            resetWizardState();
+            setStep('date');
         } else {
             // No preselection: ensure a clean wizard for this fresh session.
             resetWizardState();
@@ -1079,13 +1172,80 @@ export function BookingModal({
     // Earliest bookable slot for the currently selected type/therapist, shown as
     // a one-tap shortcut above the calendar on the date step.
     const { slot: earliestSlot } = useNextAvailable(sessionCategory, {
-        enabled: open && (step === 'date' || step === 'time') && selectedType !== null,
-        calendarId: selectedCalendar,
-        typeFilter: (t) => t.id === selectedType,
+        enabled:
+            open &&
+            (step === 'date' || step === 'time') &&
+            (poolsAcrossTypes || selectedType !== null),
+        calendarId: autoAssign ? null : selectedCalendar,
+        // Pooled youth/couples: search the whole category.
+        typeFilter: poolsAcrossTypes ? undefined : (t) => t.id === selectedType,
     });
+
+    // Auto-assign: book the picked slot with a therapist who is free then.
+    // `owners` narrows the choice for pooled youth/couples slots.
+    const handlePickAutoAssignedSlot = async (
+        time: string,
+        date: string,
+        owners?: PoolOwner[]
+    ) => {
+        if (assigningTime) return;
+        setAssigningTime(time);
+        try {
+            let assigned: PoolOwner | null = null;
+            if (poolsAcrossTypes) {
+                assigned = pickPoolOwner(owners ?? pooledTimes.ownersByTime[time]);
+            } else if (selectedTypeData) {
+                const calendarId = await findFreeCalendar(
+                    queryClient,
+                    selectedTypeData.id,
+                    selectedTypeData.calendarIDs ?? [],
+                    date,
+                    time
+                );
+                if (calendarId) {
+                    assigned = { typeId: selectedTypeData.id, calendarId };
+                }
+            }
+
+            if (!assigned) {
+                toast({
+                    title: 'That time is no longer available',
+                    description: 'It was just booked. Please choose another time.',
+                    variant: 'destructive',
+                });
+                if (poolsAcrossTypes) pooledTimes.refetch();
+                return;
+            }
+
+            const d = new Date(time);
+            setSelectedType(assigned.typeId);
+            setSelectedCalendar(assigned.calendarId);
+            setSelectedDate(d);
+            setViewingMonth(d);
+            setSelectedTime(time);
+            setStep('details');
+        } finally {
+            setAssigningTime(null);
+        }
+    };
 
     const handlePickEarliestSlot = () => {
         if (!earliestSlot) return;
+        if (autoAssign) {
+            handlePickAutoAssignedSlot(
+                earliestSlot.time,
+                earliestSlot.isoDate,
+                poolsAcrossTypes && earliestSlot.calendarId
+                    ? [
+                          {
+                              typeId: earliestSlot.appointmentTypeId,
+                              calendarId: earliestSlot.calendarId,
+                          },
+                      ]
+                    : undefined
+            );
+            return;
+        }
         const d = new Date(earliestSlot.time);
         setSelectedDate(d);
         setViewingMonth(d);
@@ -1840,18 +2000,29 @@ export function BookingModal({
                     </div>
                 );
 
-            case 'date':
-                const therapistName = getTherapistDisplayName();
+            case 'date': {
+                const therapistName = autoAssign
+                    ? null
+                    : getTherapistDisplayName();
                 return (
                     <div className="space-y-4">
                         <p className="text-muted-foreground">
                             Choose a date
                             {therapistName ? ` with ${therapistName}` : ''}
                         </p>
+                        {autoAssign && (
+                            <p className="flex items-start gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                                <Users className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
+                                Pick any time that suits you and we'll book
+                                you in with one of our accredited therapists
+                                who is free then.
+                            </p>
+                        )}
                         {earliestSlot && !datesLoading && (
                             <button
                                 type="button"
                                 onClick={handlePickEarliestSlot}
+                                disabled={!!assigningTime}
                                 className="w-full flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-left transition-colors hover:bg-primary/10">
                                 <Zap className="h-4 w-4 text-primary shrink-0" />
                                 <span className="flex-1 min-w-0">
@@ -1862,7 +2033,11 @@ export function BookingModal({
                                         {formatNextAvailable(earliestSlot.time)}
                                     </span>
                                 </span>
-                                <ArrowRight className="h-4 w-4 text-primary shrink-0" />
+                                {assigningTime ? (
+                                    <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                                ) : (
+                                    <ArrowRight className="h-4 w-4 text-primary shrink-0" />
+                                )}
                             </button>
                         )}
                         <div className="flex justify-center">
@@ -1897,31 +2072,37 @@ export function BookingModal({
                                 />
                             )}
                         </div>
-                        <Button
-                            variant="ghost"
-                            onClick={() =>
-                                setStep(
-                                    sessionCategory === 'assessment'
-                                        ? 'pricing'
-                                        : sessionCategory === 'couples' ||
-                                          sessionCategory === 'youth' ||
-                                          sessionCategory === 'psychiatry'
-                                        ? 'type'
-                                        : 'therapist'
-                                )
-                            }
-                            className="w-full">
-                            {sessionCategory === 'assessment'
-                                ? 'Back to pricing options'
-                                : sessionCategory === 'psychiatry'
-                                ? 'Back to consultation details'
-                                : sessionCategory === 'couples' ||
-                                  sessionCategory === 'youth'
-                                ? 'Back to session types'
-                                : 'Back to therapist selection'}
-                        </Button>
+                        {/* Pooled youth/couples bookings start on this step. */}
+                        {!poolsAcrossTypes && (
+                            <Button
+                                variant="ghost"
+                                onClick={() =>
+                                    setStep(
+                                        sessionCategory === 'assessment'
+                                            ? 'pricing'
+                                            : autoAssign ||
+                                              sessionCategory === 'couples' ||
+                                              sessionCategory === 'youth' ||
+                                              sessionCategory === 'psychiatry'
+                                            ? 'type'
+                                            : 'therapist'
+                                    )
+                                }
+                                className="w-full">
+                                {sessionCategory === 'assessment'
+                                    ? 'Back to pricing options'
+                                    : sessionCategory === 'psychiatry'
+                                    ? 'Back to consultation details'
+                                    : autoAssign ||
+                                      sessionCategory === 'couples' ||
+                                      sessionCategory === 'youth'
+                                    ? 'Back to session types'
+                                    : 'Back to therapist selection'}
+                            </Button>
+                        )}
                     </div>
                 );
+            }
 
             case 'time':
                 return (
@@ -1938,29 +2119,52 @@ export function BookingModal({
                                 ))}
                             </div>
                         ) : availableTimes.length > 0 ? (
-                            <ScrollArea className="h-[250px]">
-                                <div className="grid grid-cols-3 gap-2 pr-4">
-                                    {availableTimes.map((slot) => (
-                                        <Button
-                                            key={slot.time}
-                                            variant={
-                                                selectedTime === slot.time
-                                                    ? 'default'
-                                                    : 'outline'
-                                            }
-                                            onClick={() => {
-                                                setSelectedTime(slot.time);
-                                                setStep('details');
-                                            }}
-                                            className="h-10">
-                                            {format(
-                                                new Date(slot.time),
-                                                'h:mm a'
-                                            )}
-                                        </Button>
-                                    ))}
-                                </div>
-                            </ScrollArea>
+                            <>
+                                <ScrollArea className="h-[250px]">
+                                    <div className="grid grid-cols-3 gap-2 pr-4">
+                                        {availableTimes.map((slot) => (
+                                            <Button
+                                                key={slot.time}
+                                                variant={
+                                                    selectedTime === slot.time ||
+                                                    assigningTime === slot.time
+                                                        ? 'default'
+                                                        : 'outline'
+                                                }
+                                                disabled={!!assigningTime}
+                                                onClick={() => {
+                                                    if (autoAssign) {
+                                                        if (selectedDateKey) {
+                                                            handlePickAutoAssignedSlot(
+                                                                slot.time,
+                                                                selectedDateKey
+                                                            );
+                                                        }
+                                                        return;
+                                                    }
+                                                    setSelectedTime(slot.time);
+                                                    setStep('details');
+                                                }}
+                                                className="h-10">
+                                                {assigningTime === slot.time ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                ) : (
+                                                    format(
+                                                        new Date(slot.time),
+                                                        'h:mm a'
+                                                    )
+                                                )}
+                                            </Button>
+                                        ))}
+                                    </div>
+                                </ScrollArea>
+                                {assigningTime && (
+                                    <p className="text-center text-sm text-muted-foreground">
+                                        Finding a therapist who is free at{' '}
+                                        {format(new Date(assigningTime), 'h:mm a')}…
+                                    </p>
+                                )}
+                            </>
                         ) : (
                             <p className="text-center text-muted-foreground py-8">
                                 No available times for this date
@@ -1969,6 +2173,7 @@ export function BookingModal({
                         <Button
                             variant="ghost"
                             onClick={() => setStep('date')}
+                            disabled={!!assigningTime}
                             className="w-full">
                             Back to calendar
                         </Button>
@@ -2915,7 +3120,18 @@ export function BookingModal({
     // Assessments visit a pricing step instead of the therapist step, and
     // psychiatry skips it entirely (both have pooled availability).
     const progressSteps =
-        sessionCategory === 'psychiatry'
+        autoAssign
+            ? [
+                  // Auto-assign has no therapist step; pooled youth/couples
+                  // bookings have no type step either.
+                  ...(poolsAcrossTypes ? [] : [{ key: 'type', label: 'Type' }]),
+                  { key: 'date', label: 'Date' },
+                  { key: 'time', label: 'Time' },
+                  { key: 'details', label: 'Details' },
+                  { key: 'confirm', label: 'Confirm' },
+                  { key: 'payment', label: 'Payment' },
+              ]
+            : sessionCategory === 'psychiatry'
             ? [
                   { key: 'type', label: 'Consultation' },
                   { key: 'date', label: 'Date' },

@@ -282,12 +282,12 @@ export default function GetStarted() {
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">
                     {category === "couples"
-                      ? "Choose your therapist and a time that suits you both."
+                      ? "Pick a time that suits you both and we'll match you with a therapist who is free then."
                       : category === "youth"
-                      ? "Choose your therapist and a time. A parent or guardian must have completed our youth therapy consent form before the first session."
+                      ? "Pick a time that suits and we'll match you with a therapist who is free then. A parent or guardian must have completed our youth therapy consent form before the first session."
                       : therapy && therapyTypeId
-                      ? `We've selected ${therapy.topic} for you. Choose your therapist and a time.`
-                      : "Choose the focus of your session, your therapist and a time."}{" "}
+                      ? `We've selected ${therapy.topic} for you. Pick a time and we'll match you with a therapist who is free then.`
+                      : "Choose the focus of your session and a time, and we'll match you with a therapist who is free then."}{" "}
                     Your bundle credit is applied automatically.
                   </p>
                   <Button
@@ -323,6 +323,7 @@ export default function GetStarted() {
         onOpenChange={setBookingOpen}
         sessionCategory={category}
         preselectedType={category === "individual" ? therapyTypeId : undefined}
+        autoAssignTherapist
         onBookingComplete={() => {
           setFirstSessionBooked(true);
           clearBundleFunnelIntent();

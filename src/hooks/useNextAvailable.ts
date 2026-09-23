@@ -93,7 +93,7 @@ export function matchesCategory(
     }
 }
 
-async function fetchDates(
+export async function fetchDates(
     appointmentTypeId: number,
     month: string,
     calendarId?: number | null
@@ -114,11 +114,11 @@ async function fetchDates(
     }
 }
 
-interface AcuityTimeSlot extends AcuityAvailableTime {
+export interface AcuityTimeSlot extends AcuityAvailableTime {
     calendarID?: number;
 }
 
-async function fetchTimes(
+export async function fetchTimes(
     appointmentTypeId: number,
     date: string,
     calendarId?: number | null
