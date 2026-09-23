@@ -258,6 +258,8 @@ export default function GetStarted() {
                   <p className="text-sm text-muted-foreground">
                     {category === "couples"
                       ? "Couples bundles come in 3 or 5 sessions. Pick the one that suits you."
+                      : category === "youth"
+                      ? "Youth bundles come in 3 or 5 sessions. Pick the one that suits you."
                       : "Pick the bundle that suits you."}
                   </p>
                   <Button
@@ -281,6 +283,8 @@ export default function GetStarted() {
                   <p className="text-sm text-muted-foreground">
                     {category === "couples"
                       ? "Choose your therapist and a time that suits you both."
+                      : category === "youth"
+                      ? "Choose your therapist and a time. A parent or guardian must have completed our youth therapy consent form before the first session."
                       : therapy && therapyTypeId
                       ? `We've selected ${therapy.topic} for you. Choose your therapist and a time.`
                       : "Choose the focus of your session, your therapist and a time."}{" "}
@@ -317,8 +321,8 @@ export default function GetStarted() {
       <BookingModal
         open={bookingOpen}
         onOpenChange={setBookingOpen}
-        sessionCategory={category === "couples" ? "couples" : "individual"}
-        preselectedType={category === "couples" ? undefined : therapyTypeId}
+        sessionCategory={category}
+        preselectedType={category === "individual" ? therapyTypeId : undefined}
         onBookingComplete={() => {
           setFirstSessionBooked(true);
           clearBundleFunnelIntent();

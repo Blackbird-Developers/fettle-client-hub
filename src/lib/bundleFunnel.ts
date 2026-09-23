@@ -41,6 +41,10 @@ export const FUNNEL_THERAPIES: Record<string, FunnelTherapy> = {
   marriage: { topic: 'marriage counselling', category: 'couples' },
   menopause: { topic: 'menopause therapy', category: 'individual' },
   trauma: { topic: 'trauma therapy', category: 'individual', appointmentTypeId: 76626984 },
+  // youth.html and couples.html: youth and couples types are per therapist, so
+  // the client picks their therapist at booking.
+  youth: { topic: 'youth therapy', category: 'youth' },
+  couples: { topic: 'couples therapy', category: 'couples' },
 };
 
 export interface BundleFunnelIntent {
@@ -143,10 +147,14 @@ export function clearBundleFunnelIntent(): void {
 export function describeBundleFunnel(intent: BundleFunnelIntent): string {
   const bundle = getSessionBundle(intent.packageId);
   const therapy = intent.therapy ? FUNNEL_THERAPIES[intent.therapy] : undefined;
+  // "couples session bundle for marriage counselling", but not
+  // "couples session bundle for couples therapy".
+  const categoryPrefix =
+    intent.category !== 'individual' && !therapy?.topic.includes(intent.category)
+      ? `${intent.category} `
+      : '';
   const bundleText = bundle
     ? `${bundle.sessions}-session bundle`
-    : intent.category === 'couples'
-    ? 'couples session bundle'
-    : 'session bundle';
+    : `${categoryPrefix}session bundle`;
   return therapy ? `${bundleText} for ${therapy.topic}` : bundleText;
 }
