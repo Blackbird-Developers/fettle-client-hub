@@ -2,6 +2,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { ApiError, classifyApiError } from "@/lib/api-errors";
+import type {
+  AdoptionView,
+  GradeDefinition,
+  ProgressionView,
+} from "../../supabase/functions/admin-customer-insights/logic.ts";
 
 // Types for admin metrics response
 interface AdminMetricsResponse {
@@ -355,4 +360,92 @@ export function useEngagementStats() {
   };
 
   return { stats, isLoading, error: error ?? null };
+}
+
+// Response of the admin-customer-insights edge function (row types come from
+// the function's own logic module so the two can't drift apart).
+export interface CustomerInsightsResponse {
+  generatedAt: string;
+  activeWindowDays: number;
+  progressionPeriods: number[];
+  adoption: AdoptionView & { legend: GradeDefinition[] };
+  progression: ProgressionView & { legend: GradeDefinition[] };
+  dataIssues: {
+    incompleteDates: string[];
+    unknownTypes: { type: string; count: number }[];
+    customersWithoutEmail: number;
+    customersWithoutPhone: number;
+    unverifiedHistory: number;
+  };
+  diagnostics: {
+    windowAppointments: number;
+    customersInWindow: number;
+    historyLookups: number;
+    acuityRequests: number;
+    durationMs: number;
+  };
+}
+
+// Portal adoption + first-to-second-session progression, built from Acuity.
+// One request feeds both admin tabs. It can take a while (it walks Acuity
+// history), so it is cached and never refetched on window focus.
+export function useCustomerInsights() {
+  const { data: isAdmin } = useIsAdmin();
+
+  return useQuery<CustomerInsightsResponse, ApiError>({
+    queryKey: ["admin-customer-insights"],
+    queryFn: async (): Promise<CustomerInsightsResponse> => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+
+      if (!accessToken) {
+        throw {
+          type: "unauthorized",
+          message: "Not authenticated",
+          retryable: false,
+        } as ApiError;
+      }
+
+      let response: Response;
+      try {
+        response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-customer-insights`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      } catch (fetchError) {
+        throw classifyApiError(fetchError);
+      }
+
+      if (!response.ok) {
+        throw classifyApiError(new Error(`HTTP ${response.status}`), response);
+      }
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw {
+          type: "server_error",
+          message: data.error,
+          retryable: true,
+        } as ApiError;
+      }
+
+      return data as CustomerInsightsResponse;
+    },
+    enabled: isAdmin === true,
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+    retry: (failureCount, error) => {
+      const nonRetryableTypes = ["unauthorized", "forbidden", "cors", "network"];
+      if (error?.type && nonRetryableTypes.includes(error.type)) {
+        return false;
+      }
+      return failureCount < 1;
+    },
+  });
 }
