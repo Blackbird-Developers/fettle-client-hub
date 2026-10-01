@@ -1,17 +1,23 @@
 import { ReactNode } from "react";
 import { Sidebar, MobileHeader } from "./Sidebar";
 import { AnnouncementBar } from "./AnnouncementBar";
+import { useAuth } from "@/contexts/AuthContext";
+import { useIsAdmin } from "@/hooks/useAdmin";
 
 interface DashboardLayoutProps {
   children: ReactNode;
 }
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
+  const { user } = useAuth();
+  const { data: isAdmin } = useIsAdmin();
+
   return (
     <>
       {/* Announcement bar sits outside the flex layout so it never
-          creates a nested scroll container on iOS */}
-      <AnnouncementBar />
+          creates a nested scroll container on iOS. It promotes customer
+          services, so admins don't see it. */}
+      {!(user && isAdmin) && <AnnouncementBar />}
 
       <div className="flex flex-col xl:flex-row min-h-screen bg-background w-full overflow-x-hidden">
         {/* Mobile/Tablet Header */}

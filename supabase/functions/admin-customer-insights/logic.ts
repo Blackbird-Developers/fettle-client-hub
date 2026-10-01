@@ -34,14 +34,18 @@ export const PROGRESSION_PERIODS = [7, 14, 30] as const;
 // sessions in both views; the kind is kept so the UI can show it.
 //   therapy    — therapy sessions (individual, couples, youth, teen,
 //                discovery, insurance, business 1:1, Alone clients)
-//   intro      — introductory calls and intro chats
+//   intro      — paid introductory calls (a half session with a therapist)
 //   assessment — assessments, screenings and psychiatry
-//   excluded   — matching, internal calls, demos, Pilates, coaching and
-//                test types; never counted
+//   excluded   — matching, internal calls, demos, Pilates, coaching, test
+//                types, and the free 20-minute consultations ("Fettle
+//                Introduction Chat", "Let's Talk"), which Fettle will
+//                revisit in stage 2 of the portal; never counted
 //   unknown    — anything unrecognised; ignored and surfaced as a data issue
 export type SessionKind = "therapy" | "intro" | "assessment" | "excluded" | "unknown";
 
 const EXCLUDED_TYPE_PATTERNS = [
+  /introduction chat/i,
+  /let.?s talk/i,
   /matching service/i,
   /internal call/i,
   /\bdemo\b/i,
@@ -52,7 +56,7 @@ const EXCLUDED_TYPE_PATTERNS = [
   /\(testing\)/i,
 ];
 
-const INTRO_TYPE_PATTERNS = [/introductory call/i, /introduction chat/i, /let.?s talk/i];
+const INTRO_TYPE_PATTERNS = [/introductory call/i];
 
 const ASSESSMENT_TYPE_PATTERNS = [
   /assessment/i,

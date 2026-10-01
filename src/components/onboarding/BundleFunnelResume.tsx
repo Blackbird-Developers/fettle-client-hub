@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIsAdmin } from "@/hooks/useAdmin";
 import { readBundleFunnelIntent } from "@/lib/bundleFunnel";
 
 // Pages that manage their own navigation during sign-in, or are the funnel itself.
@@ -14,11 +15,15 @@ const SKIP_PATHS = ["/get-started", "/packages", "/login", "/signup", "/reset-pa
  */
 export function BundleFunnelResume() {
   const { user, loading } = useAuth();
+  const { data: isAdmin, isLoading: roleLoading } = useIsAdmin();
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (loading || !user) return;
+    // Admins don't use the funnel (and /get-started would bounce them back
+    // to /admin), so never redirect them.
+    if (roleLoading || isAdmin) return;
     if (SKIP_PATHS.includes(location.pathname)) return;
     // Never interrupt a payment redirect return.
     if (new URLSearchParams(location.search).has("payment_intent")) return;
@@ -26,7 +31,7 @@ export function BundleFunnelResume() {
     if (readBundleFunnelIntent()?.status === "pending-auth") {
       navigate("/get-started", { replace: true });
     }
-  }, [user, loading, location.pathname, location.search, navigate]);
+  }, [user, loading, roleLoading, isAdmin, location.pathname, location.search, navigate]);
 
   return null;
 }

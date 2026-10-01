@@ -8,19 +8,27 @@ import {
   LogIn,
   Plus,
   Menu,
-  Shield,
   HelpCircle,
   Gift,
   Stethoscope,
+  type LucideIcon,
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsAdmin } from "@/hooks/useAdmin";
+import { ADMIN_SECTIONS } from "@/lib/adminNavigation";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
-const authenticatedNavigation = [
+interface NavItem {
+  name: string;
+  href: string;
+  icon: LucideIcon;
+  badge?: string;
+}
+
+const authenticatedNavigation: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: Home },
   { name: "My Sessions", href: "/sessions", icon: Calendar },
   { name: "Psychiatry", href: "/psychiatry", icon: Stethoscope },
@@ -30,17 +38,23 @@ const authenticatedNavigation = [
   { name: "Help Center", href: "/help", icon: HelpCircle },
 ];
 
-const publicNavigation = [
+const publicNavigation: NavItem[] = [
   { name: "Help Center", href: "/help", icon: HelpCircle },
 ];
 
-const adminNavigation = [{ name: "Admin", href: "/admin", icon: Shield }];
+// Admins only get the admin area — no customer pages or booking.
+const adminNavigation: NavItem[] = ADMIN_SECTIONS.map(({ name, href, icon }) => ({
+  name,
+  href,
+  icon,
+}));
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, user, signOut } = useAuth();
   const { data: isAdmin } = useIsAdmin();
+  const adminMode = !!user && isAdmin === true;
 
   const handleSignOut = async () => {
     await signOut();
@@ -51,7 +65,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     ? `${profile.first_name} ${profile.last_name || ""}`.trim()
     : profile?.email || "User";
 
-  const navigation = user ? authenticatedNavigation : publicNavigation;
+  const navigation = adminMode
+    ? adminNavigation
+    : user
+      ? authenticatedNavigation
+      : publicNavigation;
 
   const bookSessionHref = user
     ? "/sessions"
@@ -92,7 +110,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             >
               <item.icon className="h-4 w-4 2xl:h-5 2xl:w-5" />
               <span className="flex-1">{item.name}</span>
-              {"badge" in item && item.badge ? (
+              {item.badge ? (
                 <span
                   className={cn(
                     "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide leading-none",
@@ -107,50 +125,26 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             </NavLink>
           );
         })}
-
-        {/* Admin Navigation - only visible to admins */}
-        {user && isAdmin && (
-          <>
-            <div className="my-3 border-t border-sidebar-border" />
-            {adminNavigation.map((item) => {
-              const isActive = location.pathname === item.href;
-              return (
-                <NavLink
-                  key={item.name}
-                  to={item.href}
-                  onClick={onNavigate}
-                  className={cn(
-                    "flex items-center gap-2.5 2xl:gap-3 px-3 2xl:px-4 py-2.5 2xl:py-3 rounded-lg text-sm font-medium transition-all duration-200",
-                    isActive
-                      ? "bg-amber-500 text-white shadow-soft"
-                      : "text-amber-600 hover:bg-amber-50 hover:text-amber-700"
-                  )}
-                >
-                  <item.icon className="h-4 w-4 2xl:h-5 2xl:w-5" />
-                  {item.name}
-                </NavLink>
-              );
-            })}
-          </>
-        )}
       </nav>
 
       {/* Sticky bottom section */}
       <div className="flex-shrink-0 bg-sidebar">
-        {/* Book Session CTA */}
-        <div className="px-3 2xl:px-4 pb-3 2xl:pb-4">
-          <Button
-            className="w-full gap-2 shadow-soft text-sm"
-            size="default"
-            asChild
-            onClick={onNavigate}
-          >
-            <NavLink to={bookSessionHref}>
-              <Plus className="h-4 w-4" />
-              Book Session
-            </NavLink>
-          </Button>
-        </div>
+        {/* Book Session CTA (customers and visitors only) */}
+        {!adminMode && (
+          <div className="px-3 2xl:px-4 pb-3 2xl:pb-4">
+            <Button
+              className="w-full gap-2 shadow-soft text-sm"
+              size="default"
+              asChild
+              onClick={onNavigate}
+            >
+              <NavLink to={bookSessionHref}>
+                <Plus className="h-4 w-4" />
+                Book Session
+              </NavLink>
+            </Button>
+          </div>
+        )}
 
         {/* User section OR Log in button */}
         <div className="border-t border-sidebar-border p-3 2xl:p-4">

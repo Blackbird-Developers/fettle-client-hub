@@ -165,7 +165,7 @@ export function SessionProgression() {
             <CardDescription>
               Customers whose first-ever session was in the last {period} days, and whether
               they've completed or booked a second one. Intro calls, therapy, assessments and
-              psychiatry all count as sessions.
+              psychiatry all count as sessions; free consultations don't.
             </CardDescription>
           </div>
           <GradeLegend legend={data.progression.legend} />
