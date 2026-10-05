@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
-import { isSessionActive, hasSessionStarted } from "@/lib/sessionTiming";
+import { isSessionActive, hasSessionStarted, hasSessionEnded } from "@/lib/sessionTiming";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -68,9 +68,11 @@ function AcuitySessionCard({
   // so late or reconnecting clients can still get into the call.
   const isUpcoming = isSessionActive(appointment.datetime) && !appointment.canceled;
   const hasStarted = hasSessionStarted(appointment.datetime);
-  // A session is reviewable only once it has moved to the past list and was
-  // not cancelled. Cancelled or future appointments never show the review CTA.
-  const isCompleted = !isUpcoming && !appointment.canceled;
+  // A session is reviewable only once it has actually finished (start time +
+  // duration) and was not cancelled. Cancelled, future or in-progress
+  // appointments never show the review CTA.
+  const isCompleted =
+    !appointment.canceled && hasSessionEnded(appointment.datetime, appointment.duration);
 
   const handleCancelWithRefund = async () => {
     if (!clientEmail) {
@@ -124,6 +126,49 @@ function AcuitySessionCard({
     }
     return <Badge variant="outline" className="bg-info/10 text-info border-info/20">Upcoming</Badge>;
   };
+
+  // Review CTA — only for completed sessions not yet reviewed
+  const reviewButton = isCompleted && !review && (
+    <Button
+      size="sm"
+      className="gap-1.5 text-xs sm:text-sm bg-primary text-white hover:bg-primary/90"
+      onClick={() => setShowReviewDialog(true)}
+    >
+      <Star className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+      Review therapist
+    </Button>
+  );
+
+  // Reviewed state — shows the client's rating with an edit option
+  const reviewSummary = isCompleted && review && (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
+      <div className="flex items-center gap-0.5" aria-label={`You rated ${review.rating} out of 5`}>
+        {[1, 2, 3, 4, 5].map((value) => (
+          <Star
+            key={value}
+            className={cn(
+              "h-3.5 w-3.5 sm:h-4 sm:w-4",
+              value <= review.rating
+                ? "fill-warning text-warning"
+                : "text-muted-foreground/40",
+            )}
+          />
+        ))}
+      </div>
+      <span className="text-xs sm:text-sm text-muted-foreground">
+        Your review
+      </span>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-auto py-1 px-2 gap-1 text-xs text-muted-foreground hover:text-foreground ml-auto"
+        onClick={() => setShowReviewDialog(true)}
+      >
+        <Pencil className="h-3 w-3" />
+        Edit
+      </Button>
+    </div>
+  );
 
   return (
     <>
@@ -263,8 +308,11 @@ function AcuitySessionCard({
                     {isCancelling ? 'Cancelling...' : 'Cancel'}
                   </Button>
                   )}
+                  {/* Today's session has finished but is still listed until end of day */}
+                  {reviewButton}
                 </div>
               )}
+              {isUpcoming && reviewSummary && <div className="mt-3">{reviewSummary}</div>}
 
               {/* Rebook, review & View Profile for past sessions (completed or cancelled) */}
               {!isUpcoming && (
@@ -306,49 +354,10 @@ function AcuitySessionCard({
                         View Profile
                       </a>
                     </Button>
-                    {/* Review CTA — only for completed sessions not yet reviewed */}
-                    {isCompleted && !review && (
-                      <Button
-                        size="sm"
-                        className="gap-1.5 text-xs sm:text-sm bg-primary text-white hover:bg-primary/90"
-                        onClick={() => setShowReviewDialog(true)}
-                      >
-                        <Star className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                        Review therapist
-                      </Button>
-                    )}
+                    {reviewButton}
                   </div>
 
-                  {/* Reviewed state — shows the client's rating with an edit option */}
-                  {isCompleted && review && (
-                    <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
-                      <div className="flex items-center gap-0.5" aria-label={`You rated ${review.rating} out of 5`}>
-                        {[1, 2, 3, 4, 5].map((value) => (
-                          <Star
-                            key={value}
-                            className={cn(
-                              "h-3.5 w-3.5 sm:h-4 sm:w-4",
-                              value <= review.rating
-                                ? "fill-warning text-warning"
-                                : "text-muted-foreground/40",
-                            )}
-                          />
-                        ))}
-                      </div>
-                      <span className="text-xs sm:text-sm text-muted-foreground">
-                        Your review
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-auto py-1 px-2 gap-1 text-xs text-muted-foreground hover:text-foreground ml-auto"
-                        onClick={() => setShowReviewDialog(true)}
-                      >
-                        <Pencil className="h-3 w-3" />
-                        Edit
-                      </Button>
-                    </div>
-                  )}
+                  {reviewSummary}
                 </div>
               )}
             </div>
@@ -531,6 +540,8 @@ export default function Sessions() {
                 onCancel={refetch}
                 clientEmail={user?.email}
                 therapistImageUrl={therapistImages.get(appointment.calendarID)}
+                review={reviewsByAppointment.get(String(appointment.id))}
+                onReviewSubmitted={refetchReviews}
                 unpaidSession={unpaidById.get(appointment.id)}
                 onPay={setPayingSession}
               />
