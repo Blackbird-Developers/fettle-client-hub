@@ -1,4 +1,5 @@
-import { format, parseISO, isPast } from 'date-fns';
+import { format, parseISO } from 'date-fns';
+import { isSessionActive } from "@/lib/sessionTiming";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -87,7 +88,7 @@ export function UpcomingSessions() {
   const { images: therapistImages } = useTherapistImages();
   
   const upcomingSessions = appointments
-    .filter(apt => !apt.canceled && !isPast(parseISO(apt.datetime)))
+    .filter(apt => !apt.canceled && isSessionActive(apt.datetime))
     .sort((a, b) => parseISO(a.datetime).getTime() - parseISO(b.datetime).getTime())
     .slice(0, 2);
 

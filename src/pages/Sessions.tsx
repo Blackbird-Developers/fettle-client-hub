@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { format, parseISO, isPast } from 'date-fns';
+import { format, parseISO } from 'date-fns';
+import { isSessionActive, hasSessionStarted, hasSessionEnded } from "@/lib/sessionTiming";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -63,10 +64,15 @@ function AcuitySessionCard({
   const { toast } = useToast();
 
   const dateTime = parseISO(appointment.datetime);
-  const isUpcoming = !isPast(dateTime) && !appointment.canceled;
-  // A session is reviewable only once it has actually taken place and was not
-  // cancelled. Cancelled or future appointments never show the review CTA.
-  const isCompleted = isPast(dateTime) && !appointment.canceled;
+  // Stays upcoming (with Join available) until the end of the session's day,
+  // so late or reconnecting clients can still get into the call.
+  const isUpcoming = isSessionActive(appointment.datetime) && !appointment.canceled;
+  const hasStarted = hasSessionStarted(appointment.datetime);
+  // A session is reviewable only once it has actually finished (start time +
+  // duration) and was not cancelled. Cancelled, future or in-progress
+  // appointments never show the review CTA.
+  const isCompleted =
+    !appointment.canceled && hasSessionEnded(appointment.datetime, appointment.duration);
 
   const handleCancelWithRefund = async () => {
     if (!clientEmail) {
@@ -112,11 +118,57 @@ function AcuitySessionCard({
     if (appointment.canceled) {
       return <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/20">Cancelled</Badge>;
     }
-    if (isPast(dateTime)) {
+    if (!isUpcoming) {
       return <Badge variant="outline" className="bg-success/10 text-success border-success/20">Completed</Badge>;
+    }
+    if (hasStarted) {
+      return <Badge variant="outline" className="bg-info/10 text-info border-info/20">Today</Badge>;
     }
     return <Badge variant="outline" className="bg-info/10 text-info border-info/20">Upcoming</Badge>;
   };
+
+  // Review CTA — only for completed sessions not yet reviewed
+  const reviewButton = isCompleted && !review && (
+    <Button
+      size="sm"
+      className="gap-1.5 text-xs sm:text-sm bg-primary text-white hover:bg-primary/90"
+      onClick={() => setShowReviewDialog(true)}
+    >
+      <Star className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+      Review therapist
+    </Button>
+  );
+
+  // Reviewed state — shows the client's rating with an edit option
+  const reviewSummary = isCompleted && review && (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
+      <div className="flex items-center gap-0.5" aria-label={`You rated ${review.rating} out of 5`}>
+        {[1, 2, 3, 4, 5].map((value) => (
+          <Star
+            key={value}
+            className={cn(
+              "h-3.5 w-3.5 sm:h-4 sm:w-4",
+              value <= review.rating
+                ? "fill-warning text-warning"
+                : "text-muted-foreground/40",
+            )}
+          />
+        ))}
+      </div>
+      <span className="text-xs sm:text-sm text-muted-foreground">
+        Your review
+      </span>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-auto py-1 px-2 gap-1 text-xs text-muted-foreground hover:text-foreground ml-auto"
+        onClick={() => setShowReviewDialog(true)}
+      >
+        <Pencil className="h-3 w-3" />
+        Edit
+      </Button>
+    </div>
+  );
 
   return (
     <>
@@ -219,7 +271,8 @@ function AcuitySessionCard({
                       )}
                       {isJoining ? 'Opening...' : 'Join Session'}
                     </Button>
-                  {appointment.confirmationPage && (
+                  {/* Reschedule/cancel only before the start time; after that only Join remains */}
+                  {!hasStarted && appointment.confirmationPage && (
                     <Button 
                       size="sm" 
                       variant="outline" 
@@ -239,6 +292,7 @@ function AcuitySessionCard({
                       {isRescheduling ? 'Opening...' : 'Reschedule'}
                     </Button>
                   )}
+                  {!hasStarted && (
                   <Button 
                     size="sm" 
                     variant="ghost" 
@@ -253,8 +307,12 @@ function AcuitySessionCard({
                     )}
                     {isCancelling ? 'Cancelling...' : 'Cancel'}
                   </Button>
+                  )}
+                  {/* Today's session has finished but is still listed until end of day */}
+                  {reviewButton}
                 </div>
               )}
+              {isUpcoming && reviewSummary && <div className="mt-3">{reviewSummary}</div>}
 
               {/* Rebook, review & View Profile for past sessions (completed or cancelled) */}
               {!isUpcoming && (
@@ -296,49 +354,10 @@ function AcuitySessionCard({
                         View Profile
                       </a>
                     </Button>
-                    {/* Review CTA — only for completed sessions not yet reviewed */}
-                    {isCompleted && !review && (
-                      <Button
-                        size="sm"
-                        className="gap-1.5 text-xs sm:text-sm bg-primary text-white hover:bg-primary/90"
-                        onClick={() => setShowReviewDialog(true)}
-                      >
-                        <Star className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                        Review therapist
-                      </Button>
-                    )}
+                    {reviewButton}
                   </div>
 
-                  {/* Reviewed state — shows the client's rating with an edit option */}
-                  {isCompleted && review && (
-                    <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
-                      <div className="flex items-center gap-0.5" aria-label={`You rated ${review.rating} out of 5`}>
-                        {[1, 2, 3, 4, 5].map((value) => (
-                          <Star
-                            key={value}
-                            className={cn(
-                              "h-3.5 w-3.5 sm:h-4 sm:w-4",
-                              value <= review.rating
-                                ? "fill-warning text-warning"
-                                : "text-muted-foreground/40",
-                            )}
-                          />
-                        ))}
-                      </div>
-                      <span className="text-xs sm:text-sm text-muted-foreground">
-                        Your review
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-auto py-1 px-2 gap-1 text-xs text-muted-foreground hover:text-foreground ml-auto"
-                        onClick={() => setShowReviewDialog(true)}
-                      >
-                        <Pencil className="h-3 w-3" />
-                        Edit
-                      </Button>
-                    </div>
-                  )}
+                  {reviewSummary}
                 </div>
               )}
             </div>
@@ -462,10 +481,10 @@ export default function Sessions() {
 
   const now = new Date();
   const upcomingSessions = appointments
-    .filter(apt => !apt.canceled && !isPast(parseISO(apt.datetime)))
+    .filter(apt => !apt.canceled && isSessionActive(apt.datetime))
     .sort((a, b) => parseISO(a.datetime).getTime() - parseISO(b.datetime).getTime());
   const pastSessions = appointments.filter(apt => 
-    apt.canceled || isPast(parseISO(apt.datetime))
+    apt.canceled || !isSessionActive(apt.datetime)
   );
 
   return (
@@ -521,6 +540,8 @@ export default function Sessions() {
                 onCancel={refetch}
                 clientEmail={user?.email}
                 therapistImageUrl={therapistImages.get(appointment.calendarID)}
+                review={reviewsByAppointment.get(String(appointment.id))}
+                onReviewSubmitted={refetchReviews}
                 unpaidSession={unpaidById.get(appointment.id)}
                 onPay={setPayingSession}
               />
