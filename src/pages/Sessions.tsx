@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { format, parseISO, isPast } from 'date-fns';
+import { format, parseISO } from 'date-fns';
+import { isSessionActive, hasSessionStarted } from "@/lib/sessionTiming";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -63,10 +64,13 @@ function AcuitySessionCard({
   const { toast } = useToast();
 
   const dateTime = parseISO(appointment.datetime);
-  const isUpcoming = !isPast(dateTime) && !appointment.canceled;
-  // A session is reviewable only once it has actually taken place and was not
-  // cancelled. Cancelled or future appointments never show the review CTA.
-  const isCompleted = isPast(dateTime) && !appointment.canceled;
+  // Stays upcoming (with Join available) until the end of the session's day,
+  // so late or reconnecting clients can still get into the call.
+  const isUpcoming = isSessionActive(appointment.datetime) && !appointment.canceled;
+  const hasStarted = hasSessionStarted(appointment.datetime);
+  // A session is reviewable only once it has moved to the past list and was
+  // not cancelled. Cancelled or future appointments never show the review CTA.
+  const isCompleted = !isUpcoming && !appointment.canceled;
 
   const handleCancelWithRefund = async () => {
     if (!clientEmail) {
@@ -112,8 +116,11 @@ function AcuitySessionCard({
     if (appointment.canceled) {
       return <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/20">Cancelled</Badge>;
     }
-    if (isPast(dateTime)) {
+    if (!isUpcoming) {
       return <Badge variant="outline" className="bg-success/10 text-success border-success/20">Completed</Badge>;
+    }
+    if (hasStarted) {
+      return <Badge variant="outline" className="bg-info/10 text-info border-info/20">Today</Badge>;
     }
     return <Badge variant="outline" className="bg-info/10 text-info border-info/20">Upcoming</Badge>;
   };
@@ -219,7 +226,8 @@ function AcuitySessionCard({
                       )}
                       {isJoining ? 'Opening...' : 'Join Session'}
                     </Button>
-                  {appointment.confirmationPage && (
+                  {/* Reschedule/cancel only before the start time; after that only Join remains */}
+                  {!hasStarted && appointment.confirmationPage && (
                     <Button 
                       size="sm" 
                       variant="outline" 
@@ -239,6 +247,7 @@ function AcuitySessionCard({
                       {isRescheduling ? 'Opening...' : 'Reschedule'}
                     </Button>
                   )}
+                  {!hasStarted && (
                   <Button 
                     size="sm" 
                     variant="ghost" 
@@ -253,6 +262,7 @@ function AcuitySessionCard({
                     )}
                     {isCancelling ? 'Cancelling...' : 'Cancel'}
                   </Button>
+                  )}
                 </div>
               )}
 
@@ -462,10 +472,10 @@ export default function Sessions() {
 
   const now = new Date();
   const upcomingSessions = appointments
-    .filter(apt => !apt.canceled && !isPast(parseISO(apt.datetime)))
+    .filter(apt => !apt.canceled && isSessionActive(apt.datetime))
     .sort((a, b) => parseISO(a.datetime).getTime() - parseISO(b.datetime).getTime());
   const pastSessions = appointments.filter(apt => 
-    apt.canceled || isPast(parseISO(apt.datetime))
+    apt.canceled || !isSessionActive(apt.datetime)
   );
 
   return (
