@@ -26,3 +26,18 @@ dist-ssr
 # Local Claude Code dev tooling
 .claude/
 supabase/.temp/
+
+# Environment files.
+#
+# .env WAS TRACKED in this repo until Oct 2026 (commit c3fe336). What it held was
+# publishable-by-design - Stripe pk_live_, the Supabase anon key - so nothing
+# leaked, but it was a trap: the next person to add a real secret would have
+# pushed it to GitHub. Acuity credentials were nearly put there.
+#
+# Server-side secrets (ACUITY_API_KEY, Stripe secret, service-role keys) belong
+# in Supabase Edge Function secrets, never in a file in this repo.
+#
+# Copy .env.example to .env to get a working local setup.
+.env
+.env.*
+!.env.example
