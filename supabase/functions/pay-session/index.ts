@@ -107,6 +107,11 @@ serve(async (req) => {
       if (/irish life|laya|vhi|assessment|screening/i.test(appt.type || "")) {
         return json({ error: "This session can't be paid here. Please contact hello@fettle.ie." }, 400);
       }
+      // API-created bookings (website/hub) are paid before Acuity sees them —
+      // never let one be paid a second time here (Oct-1 double-charge).
+      if (appt.scheduledBy === "art@blackbird.marketing") {
+        return json({ error: "This session was already paid for when it was booked. If you think that's wrong, contact hello@fettle.ie." }, 400);
+      }
       const priceCents = Math.round(parseFloat(appt.price || "0") * 100);
       if (appt.paid !== "no" || priceCents <= 0 || parseFloat(appt.amountPaid || "0") > 0) {
         return json({ alreadyPaid: true, message: "This session is already settled." });

@@ -46,6 +46,11 @@ const MAX_RECIPIENTS = parseInt(Deno.env.get("UNPAID_REMINDERS_MAX_RECIPIENTS") 
 // directly) and assessments/screenings (partner flows pay outside our Stripe
 // stamping, so "unpaid" can't be trusted for them).
 const EXCLUDED_TYPES = /irish life|laya|vhi|assessment|screening/i;
+// API-created bookings (website checkout, hub flows) pay BEFORE the Acuity
+// appointment exists — Acuity's unpaid flag is meaningless for them. Oct-1
+// incident: a website client was reminded and paid twice. Staff bookings
+// carry the staff member's own email in scheduledBy.
+const API_BOOKED_BY = "art@blackbird.marketing";
 
 // Adult sessions BOOKED before the 26 Aug 2026 price rise are honoured at the
 // old €85 rate; booked on/after pay €95 (Art, 23 Sep 2026). Acuity's price
@@ -241,6 +246,8 @@ serve(async (req) => {
       parseFloat(a?.amountPaid || "0") === 0 &&
       a?.email &&
       !EXCLUDED_TYPES.test(a?.type || "") &&
+      // Website bookings stamp their Stripe payment id into the notes.
+      !/stripe payment id:/i.test(a?.notes || "") &&
       REMINDER_DAYS.includes(calendarDaysUntil(a.datetime, now))
     );
     logStep("Candidates after Acuity filter", { window: `${minDate}..${maxDate}`, total: appts.length, candidates: candidates.length });
@@ -261,6 +268,29 @@ serve(async (req) => {
       }
     }
     candidates = verified;
+
+    // The bulk listing OMITS scheduledBy (verified 6 Oct — this caused a
+    // website client to be reminded despite the scheduledBy filter), so the
+    // API-booked check needs one detail fetch per remaining candidate. Fetch
+    // failure = can't verify = don't email.
+    const confirmedCandidates: any[] = [];
+    for (const a of candidates) {
+      try {
+        const resp = await fetch(`${ACUITY_API_BASE}/appointments/${a.id}`, {
+          headers: { Authorization: `Basic ${acuityAuth}` },
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        const detail = await resp.json();
+        if (detail?.scheduledBy === API_BOOKED_BY) {
+          logStep("Excluded: API-booked (paid at source)", { appointmentId: a.id });
+          continue;
+        }
+        confirmedCandidates.push(a);
+      } catch (e) {
+        logStep("Detail check failed — excluding as fail-safe", { appointmentId: a.id, error: String(e).slice(0, 120) });
+      }
+    }
+    candidates = confirmedCandidates;
 
     const admin = createClient(supabaseUrl, serviceKey);
     if (candidates.length > 0) {

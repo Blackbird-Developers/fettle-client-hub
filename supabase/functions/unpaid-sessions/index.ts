@@ -48,6 +48,13 @@ const MAX_CANDIDATES = 20;
 // stamping, so "unpaid" can't be trusted for them).
 const EXCLUDED_TYPES = /irish life|laya|vhi|assessment|screening/i;
 
+// Appointments booked through the API (website checkout, hub flows) are paid
+// BEFORE the Acuity appointment exists, and the website's Stripe payment is
+// not stamped with the appointment id — so Acuity's unpaid flag is meaningless
+// for them. Oct-1 incident: a website client was flagged and paid twice.
+// Everything the clinic books by hand carries the staff member's own email.
+const API_BOOKED_BY = "art@blackbird.marketing";
+
 // Adult sessions BOOKED before the 26 Aug 2026 price rise are honoured at the
 // old €85 rate; booked on/after pay €95 (Art, 23 Sep 2026). Acuity's price
 // snapshot can't be trusted for this band — appointment types briefly read €95
@@ -124,7 +131,11 @@ serve(async (req) => {
       a?.paid === "no" &&
       parseFloat(a?.price || "0") > 0 &&
       parseFloat(a?.amountPaid || "0") === 0 &&
-      !EXCLUDED_TYPES.test(a?.type || "")
+      !EXCLUDED_TYPES.test(a?.type || "") &&
+      // Website bookings stamp their Stripe payment id into the notes. The
+      // bulk listing omits scheduledBy, so the API-booked check happens via a
+      // detail fetch further down.
+      !/stripe payment id:/i.test(a?.notes || "")
     );
     candidates.sort(
       (a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime(),
@@ -196,6 +207,28 @@ serve(async (req) => {
         return json({ unpaidSessions: [], degraded: "referral_check_failed" });
       }
     }
+
+    // The bulk listing omits scheduledBy (verified 6 Oct), so API-booked
+    // appointments — paid before Acuity sees them — need one detail fetch
+    // each. Fetch failure = can't verify = don't flag.
+    const apiBookedChecked: any[] = [];
+    for (const a of candidates) {
+      try {
+        const resp = await fetch(`https://acuityscheduling.com/api/v1/appointments/${a.id}`, {
+          headers: { Authorization: `Basic ${acuityAuth}` },
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        const detail = await resp.json();
+        if (detail?.scheduledBy === API_BOOKED_BY) {
+          logStep("Excluded: API-booked (paid at source)", { appointmentId: a.id });
+          continue;
+        }
+        apiBookedChecked.push(a);
+      } catch (e) {
+        logStep("Detail check failed — excluding as fail-safe", { appointmentId: a.id, error: String(e).slice(0, 120) });
+      }
+    }
+    candidates = apiBookedChecked;
 
     const unpaidSessions = candidates.map((a: any) => ({
       id: a.id,
