@@ -1,5 +1,5 @@
 // admin-customer-insights — data for the admin "Portal adoption" and
-// "Progression" tabs. Admin-only: the caller's JWT and admin role are checked
+// "Progression" pages (Session 1–2 … 4–5). Admin-only: the caller's JWT and admin role are checked
 // before any customer data is read. Acuity credentials and the service-role
 // key stay server-side; the browser only receives the finished views.
 //
@@ -15,8 +15,8 @@ import {
   type HistoryLookup,
   ACTIVE_WINDOW_DAYS,
   ADOPTION_LEGEND,
-  PROGRESSION_LEGEND,
   PROGRESSION_PERIODS,
+  PROGRESSION_RANGES,
   addDays,
   buildAdoptionView,
   buildPortalEmailSet,
@@ -26,6 +26,7 @@ import {
   groupCustomers,
   mapWithConcurrency,
   progressionCandidates,
+  progressionLegend,
   summarizeUnknownTypes,
   toDateString,
 } from "./logic.ts";
@@ -150,8 +151,8 @@ serve(async (req) => {
     }
     const portalEmails = buildPortalEmailSet(profileEmails);
 
-    // 3. For everyone with a completed session in the window, look up their
-    //    earlier history to decide whether it was their first ever. Acuity's
+    // 3. For everyone with a completed session in the window, count their
+    //    earlier sessions so window sessions can be numbered. Acuity's
     //    email search ignores case, so one lookup per customer is enough.
     const candidates = progressionCandidates(customers, now);
     const checks = await mapWithConcurrency(
@@ -181,7 +182,13 @@ serve(async (req) => {
     const history = new Map(checks);
 
     const adoption = buildAdoptionView(customers, portalEmails, now);
-    const progression = buildProgressionView(candidates, history, portalEmails, now);
+    const progression = PROGRESSION_RANGES.map((fromSession) => ({
+      ...buildProgressionView(candidates, history, portalEmails, now, fromSession),
+      legend: progressionLegend(fromSession),
+    }));
+    const unverifiedHistory = [...history.values()].filter(
+      (check) => check.status === "unverified"
+    ).length;
 
     const diagnostics = {
       windowAppointments: fetched.appointments.length,
@@ -193,7 +200,7 @@ serve(async (req) => {
     console.log("admin-customer-insights completed", {
       ...diagnostics,
       adoptionRows: adoption.rows.length,
-      progressionRows: progression.rows.length,
+      progressionRows: progression.map((view) => view.rows.length),
       incompleteDates: fetched.incompleteDates.length,
     });
 
@@ -202,13 +209,13 @@ serve(async (req) => {
       activeWindowDays: ACTIVE_WINDOW_DAYS,
       progressionPeriods: PROGRESSION_PERIODS,
       adoption: { ...adoption, legend: ADOPTION_LEGEND },
-      progression: { ...progression, legend: PROGRESSION_LEGEND },
+      progression,
       dataIssues: {
         incompleteDates: fetched.incompleteDates,
         unknownTypes: summarizeUnknownTypes(fetched.appointments),
         customersWithoutEmail: adoption.totals.noEmail,
         customersWithoutPhone: adoption.totals.noPhone,
-        unverifiedHistory: progression.totals.unverified,
+        unverifiedHistory,
       },
       diagnostics,
     });

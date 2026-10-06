@@ -18,6 +18,7 @@ import { daysAgoLabel, formatDate, formatDateTime, matchesSearch } from "@/lib/c
 import {
   type ProgressionRow,
   GRADE_ORDER,
+  sessionOrdinal,
 } from "../../../supabase/functions/admin-customer-insights/logic.ts";
 import {
   CustomerCell,
@@ -33,15 +34,15 @@ import {
   StatTile,
 } from "./CustomerInsightsShared";
 
-type SortKey = "grade" | "name" | "firstSession";
+type SortKey = "grade" | "name" | "fromSession";
 
 // Unverified rows have no grade and always sort after graded ones.
 const gradeRank = (row: ProgressionRow) => (row.grade ? GRADE_ORDER[row.grade] : 99);
 
 const COMPARATORS: Record<SortKey, (a: ProgressionRow, b: ProgressionRow) => number> = {
-  grade: (a, b) => gradeRank(a) - gradeRank(b) || b.daysSinceFirstSession - a.daysSinceFirstSession,
+  grade: (a, b) => gradeRank(a) - gradeRank(b) || b.daysSinceFromSession - a.daysSinceFromSession,
   name: (a, b) => (a.name ?? "").localeCompare(b.name ?? ""),
-  firstSession: (a, b) => a.daysSinceFirstSession - b.daysSinceFirstSession,
+  fromSession: (a, b) => a.daysSinceFromSession - b.daysSinceFromSession,
 };
 
 /** Acuity appointment type, truncated so long names don't stretch the table. */
@@ -54,16 +55,16 @@ function SessionTypeLabel({ type }: { type: string | null }) {
   );
 }
 
-function SecondSessionCell({ row }: { row: ProgressionRow }) {
-  switch (row.secondSessionStatus) {
+function NextSessionCell({ row }: { row: ProgressionRow }) {
+  switch (row.nextSessionStatus) {
     case "completed":
       return (
         <div className="whitespace-nowrap">
           <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
             Completed
           </Badge>
-          <p className="mt-1 text-xs text-muted-foreground">{formatDate(row.secondSessionAt)}</p>
-          <SessionTypeLabel type={row.secondSessionType} />
+          <p className="mt-1 text-xs text-muted-foreground">{formatDate(row.nextSessionAt)}</p>
+          <SessionTypeLabel type={row.nextSessionType} />
         </div>
       );
     case "booked":
@@ -72,8 +73,8 @@ function SecondSessionCell({ row }: { row: ProgressionRow }) {
           <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
             Booked
           </Badge>
-          <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(row.secondSessionAt)}</p>
-          <SessionTypeLabel type={row.secondSessionType} />
+          <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(row.nextSessionAt)}</p>
+          <SessionTypeLabel type={row.nextSessionType} />
         </div>
       );
     default:
@@ -85,7 +86,10 @@ function SecondSessionCell({ row }: { row: ProgressionRow }) {
   }
 }
 
-export function SessionProgression() {
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** "Session N → N+1" progression; `fromSession` = N (1 = first to second). */
+export function SessionProgression({ fromSession }: { fromSession: number }) {
   const { data, error, isLoading, isFetching, refetch } = useCustomerInsights();
   const [period, setPeriod] = useState(30);
   const [search, setSearch] = useState("");
@@ -94,13 +98,18 @@ export function SessionProgression() {
     direction: "asc",
   });
 
-  // Rows whose first session falls inside the selected period. The server
+  const view = data?.progression.find((v) => v.fromSession === fromSession);
+  const from = sessionOrdinal(fromSession);
+  const next = sessionOrdinal(fromSession + 1);
+  const fromLabel = fromSession === 1 ? "first-ever" : from;
+
+  // Rows whose session N falls inside the selected period. The server
   // already limits rows to the full active window, so that period shows all.
   const inPeriod = useMemo(() => {
-    const all = data?.progression.rows ?? [];
+    const all = view?.rows ?? [];
     if (!data || period >= data.activeWindowDays) return all;
-    return all.filter((row) => row.daysSinceFirstSession < period);
-  }, [data, period]);
+    return all.filter((row) => row.daysSinceFromSession < period);
+  }, [data, view, period]);
 
   const rows = useMemo(() => {
     const compare = COMPARATORS[sort.key];
@@ -120,9 +129,9 @@ export function SessionProgression() {
     return error ? <InsightsError error={error} onRetry={() => refetch()} /> : null;
   }
 
-  // Headline figures count confirmed first-timers only.
+  // Headline figures count customers whose session number is confirmed.
   const verified = inPeriod.filter((row) => row.historyStatus === "verified");
-  const progressed = verified.filter((row) => row.secondSessionStatus !== "none").length;
+  const progressed = verified.filter((row) => row.nextSessionStatus !== "none").length;
   const notBooked = verified.length - progressed;
   const unverified = inPeriod.length - verified.length;
   const conversion = verified.length > 0 ? Math.round((progressed / verified.length) * 100) : 0;
@@ -136,7 +145,7 @@ export function SessionProgression() {
         value={String(period)}
         onValueChange={(value) => value && setPeriod(Number(value))}
         className="justify-start"
-        aria-label="First session within"
+        aria-label={`${capitalize(from)} session within`}
       >
         {data.progressionPeriods.map((days) => (
           <ToggleGroupItem key={days} value={String(days)} variant="outline" size="sm">
@@ -146,13 +155,20 @@ export function SessionProgression() {
       </ToggleGroup>
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <StatTile label={`First-time customers (last ${period} days)`} value={String(verified.length)} />
         <StatTile
-          label="Progressed to a second session"
+          label={
+            fromSession === 1
+              ? `First-time customers (last ${period} days)`
+              : `Had their ${from} session (last ${period} days)`
+          }
+          value={String(verified.length)}
+        />
+        <StatTile
+          label={`Progressed to a ${next} session`}
           value={`${conversion}%`}
           hint={`${progressed} completed or booked`}
         />
-        <StatTile label="No second session booked" value={String(notBooked)} />
+        <StatTile label={`No ${next} session booked`} value={String(notBooked)} />
         <StatTile label="Unable to verify" value={String(unverified)} hint="Not included in the rates" />
       </div>
 
@@ -161,14 +177,16 @@ export function SessionProgression() {
       <Card className="border-border/50">
         <CardHeader className="space-y-3">
           <div>
-            <CardTitle className="text-lg font-heading">First-to-second-session progression</CardTitle>
+            <CardTitle className="text-lg font-heading">
+              {capitalize(from)}-to-{next}-session progression
+            </CardTitle>
             <CardDescription>
-              Customers whose first-ever session was in the last {period} days, and whether
-              they've completed or booked a second one. Intro calls, therapy, assessments and
+              Customers whose {fromLabel} session was in the last {period} days, and whether
+              they've completed or booked a {next} one. Intro calls, therapy, assessments and
               psychiatry all count as sessions; free consultations don't.
             </CardDescription>
           </div>
-          <GradeLegend legend={data.progression.legend} />
+          <GradeLegend legend={view?.legend ?? []} />
           <div className="relative max-w-sm">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
@@ -187,7 +205,9 @@ export function SessionProgression() {
               <p className="text-sm">
                 {search
                   ? "No customers match your search."
-                  : `No first-time customers in the last ${period} days.`}
+                  : fromSession === 1
+                    ? `No first-time customers in the last ${period} days.`
+                    : `No customers had their ${from} session in the last ${period} days.`}
               </p>
             </div>
           ) : (
@@ -196,8 +216,13 @@ export function SessionProgression() {
                 <TableRow>
                   <SortableHead label="Priority" sortKey="grade" sort={sort} onSort={onSort} />
                   <SortableHead label="Customer" sortKey="name" sort={sort} onSort={onSort} />
-                  <SortableHead label="First session" sortKey="firstSession" sort={sort} onSort={onSort} />
-                  <TableHead>Second session</TableHead>
+                  <SortableHead
+                    label={`${capitalize(from)} session`}
+                    sortKey="fromSession"
+                    sort={sort}
+                    onSort={onSort}
+                  />
+                  <TableHead>{capitalize(next)} session</TableHead>
                   <TableHead>Portal account</TableHead>
                 </TableRow>
               </TableHeader>
@@ -211,11 +236,11 @@ export function SessionProgression() {
                       <CustomerCell name={row.name} email={row.email} phone={row.phone} />
                     </TableCell>
                     <TableCell className="whitespace-nowrap">
-                      <p>{formatDate(row.firstSessionAt)}</p>
+                      <p>{formatDate(row.fromSessionAt)}</p>
                       <p className="text-xs text-muted-foreground">
-                        {daysAgoLabel(row.daysSinceFirstSession)}
+                        {daysAgoLabel(row.daysSinceFromSession)}
                       </p>
-                      <SessionTypeLabel type={row.firstSessionType} />
+                      <SessionTypeLabel type={row.fromSessionType} />
                       {row.historyStatus === "unverified" && (
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -227,13 +252,13 @@ export function SessionProgression() {
                             </Badge>
                           </TooltipTrigger>
                           <TooltipContent>
-                            {row.historyNote} — this may not be their first-ever session.
+                            {row.historyNote} — this may not be their {fromLabel} session.
                           </TooltipContent>
                         </Tooltip>
                       )}
                     </TableCell>
                     <TableCell>
-                      <SecondSessionCell row={row} />
+                      <NextSessionCell row={row} />
                     </TableCell>
                     <TableCell>
                       <PortalStatusBadge status={row.portalStatus} />

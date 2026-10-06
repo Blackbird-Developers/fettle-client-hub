@@ -369,7 +369,8 @@ export interface CustomerInsightsResponse {
   activeWindowDays: number;
   progressionPeriods: number[];
   adoption: AdoptionView & { legend: GradeDefinition[] };
-  progression: ProgressionView & { legend: GradeDefinition[] };
+  /** One view per range: Session 1–2, 2–3, 3–4, 4–5. */
+  progression: (ProgressionView & { legend: GradeDefinition[] })[];
   dataIssues: {
     incompleteDates: string[];
     unknownTypes: { type: string; count: number }[];
@@ -386,8 +387,8 @@ export interface CustomerInsightsResponse {
   };
 }
 
-// Portal adoption + first-to-second-session progression, built from Acuity.
-// One request feeds both admin tabs. It can take a while (it walks Acuity
+// Portal adoption + session-to-session progression, built from Acuity.
+// One request feeds every admin insights page. It can take a while (it walks Acuity
 // history), so it is cached and never refetched on window focus.
 export function useCustomerInsights() {
   const { data: isAdmin } = useIsAdmin();

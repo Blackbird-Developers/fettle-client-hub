@@ -52,6 +52,7 @@ const App = () => (
             <Route path="/booking-success" element={<ProtectedRoute><CustomerOnly><BookingSuccess /></CustomerOnly></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
             <Route path="/admin/:section" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+            <Route path="/admin/:section/:subsection" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />

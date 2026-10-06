@@ -3,6 +3,7 @@ import {
   type AcuityAppointment,
   type HistoryCheck,
   DAY_MS,
+  PROGRESSION_RANGES,
   buildAdoptionView,
   buildPortalEmailSet,
   buildProgressionView,
@@ -14,6 +15,7 @@ import {
   normalizeEmail,
   phoneKey,
   progressionCandidates,
+  progressionLegend,
   scoreAdoption,
   scoreProgression,
   summarizeUnknownTypes,
@@ -40,9 +42,9 @@ function appt(daysFromNow: number, overrides: Partial<AcuityAppointment> = {}): 
   };
 }
 
-const verified = (hasEarlierSession = false): HistoryCheck => ({
+const verified = (earlierSessions = 0): HistoryCheck => ({
   status: "verified",
-  hasEarlierSession,
+  earlierSessions,
 });
 
 describe("classifyAppointmentType", () => {
@@ -164,12 +166,12 @@ describe("scoring", () => {
 
   it("scores progression rows at the 7 and 14 day boundaries", () => {
     const none = "none" as const;
-    expect(scoreProgression({ secondSessionStatus: none, daysSinceFirstSession: 14 })).toBe("A");
-    expect(scoreProgression({ secondSessionStatus: none, daysSinceFirstSession: 13 })).toBe("B");
-    expect(scoreProgression({ secondSessionStatus: none, daysSinceFirstSession: 7 })).toBe("B");
-    expect(scoreProgression({ secondSessionStatus: none, daysSinceFirstSession: 6 })).toBe("C");
-    expect(scoreProgression({ secondSessionStatus: "booked", daysSinceFirstSession: 20 })).toBe("D");
-    expect(scoreProgression({ secondSessionStatus: "completed", daysSinceFirstSession: 20 })).toBe("E");
+    expect(scoreProgression({ nextSessionStatus: none, daysSinceFromSession: 14 })).toBe("A");
+    expect(scoreProgression({ nextSessionStatus: none, daysSinceFromSession: 13 })).toBe("B");
+    expect(scoreProgression({ nextSessionStatus: none, daysSinceFromSession: 7 })).toBe("B");
+    expect(scoreProgression({ nextSessionStatus: none, daysSinceFromSession: 6 })).toBe("C");
+    expect(scoreProgression({ nextSessionStatus: "booked", daysSinceFromSession: 20 })).toBe("D");
+    expect(scoreProgression({ nextSessionStatus: "completed", daysSinceFromSession: 20 })).toBe("E");
   });
 });
 
@@ -228,29 +230,43 @@ describe("evaluateHistory", () => {
       },
       first
     );
-    expect(check).toEqual({ status: "verified", hasEarlierSession: false });
+    expect(check).toEqual({ status: "verified", earlierSessions: 0 });
   });
 
-  it("detects an earlier session, including intro calls", () => {
-    expect(evaluateHistory({ appointments: [appt(-90)], limit: 100 }, first)).toEqual({
+  it("counts earlier sessions, including intro calls, but not cancelled or excluded ones", () => {
+    const check = evaluateHistory(
+      {
+        appointments: [
+          appt(-90, { type: INTRO_CALL }),
+          appt(-80),
+          appt(-70, { canceled: true }),
+          appt(-60, { type: MATCHING_CALL }),
+          appt(-50, { type: SCREENING }),
+        ],
+        limit: 100,
+      },
+      first
+    );
+    expect(check).toEqual({ status: "verified", earlierSessions: 3 });
+  });
+
+  it("counts a duplicated appointment id once", () => {
+    const earlier = appt(-90);
+    expect(evaluateHistory({ appointments: [earlier, earlier], limit: 100 }, first)).toEqual({
       status: "verified",
-      hasEarlierSession: true,
+      earlierSessions: 1,
     });
-    expect(
-      evaluateHistory({ appointments: [appt(-40, { type: INTRO_CALL })], limit: 100 }, first)
-    ).toEqual({ status: "verified", hasEarlierSession: true });
   });
 
-  it("an earlier session on a full page is still conclusive", () => {
+  it("treats a full page as unverified, keeping what it saw as a lower bound", () => {
     const check = evaluateHistory({ appointments: [appt(-90), appt(-80)], limit: 2 }, first);
-    expect(check).toEqual({ status: "verified", hasEarlierSession: true });
-  });
+    expect(check).toEqual({ status: "unverified", reason: "history_truncated", earlierSessions: 2 });
 
-  it("refuses to confirm when the lookup hit its limit", () => {
     const full = Array.from({ length: 3 }, () => appt(-40, { type: MATCHING_CALL }));
     expect(evaluateHistory({ appointments: full, limit: 3 }, first)).toEqual({
       status: "unverified",
       reason: "history_truncated",
+      earlierSessions: 0,
     });
   });
 
@@ -258,38 +274,73 @@ describe("evaluateHistory", () => {
     expect(evaluateHistory({ appointments: null, limit: 100 }, first)).toEqual({
       status: "unverified",
       reason: "lookup_failed",
+      earlierSessions: 0,
     });
-    expect(evaluateHistory(null, first)).toEqual({ status: "unverified", reason: "no_email" });
+    expect(evaluateHistory(null, first)).toEqual({
+      status: "unverified",
+      reason: "no_email",
+      earlierSessions: 0,
+    });
+  });
+});
+
+describe("progressionLegend", () => {
+  it("names the sessions of each range", () => {
+    expect(progressionLegend(1).map((d) => d.label)).toEqual([
+      "First session 14+ days ago, no second session",
+      "First session 7–13 days ago, no second session",
+      "First session under 7 days ago, no second session",
+      "Second session booked, not yet happened",
+      "Second session already completed",
+    ]);
+    expect(progressionLegend(4)[0].label).toBe("Fourth session 14+ days ago, no fifth session");
+    expect(progressionLegend(4)[4].label).toBe("Fifth session already completed");
+  });
+
+  it("offers Session 1–2 through 4–5", () => {
+    expect([...PROGRESSION_RANGES]).toEqual([1, 2, 3, 4]);
   });
 });
 
 describe("buildProgressionView", () => {
-  function run(appointments: AcuityAppointment[], history: Record<string, HistoryCheck> = {}) {
+  function run(
+    appointments: AcuityAppointment[],
+    history: Record<string, HistoryCheck> = {},
+    fromSession = 1
+  ) {
     const customers = groupCustomers(appointments);
     const candidates = progressionCandidates(customers, NOW);
     const checks = new Map(
       candidates.map((c) => [c.customer.key, history[c.customer.key] ?? verified()])
     );
-    return buildProgressionView(candidates, checks, new Set(["member@example.com"]), NOW);
+    return buildProgressionView(
+      candidates,
+      checks,
+      new Set(["member@example.com"]),
+      NOW,
+      fromSession
+    );
   }
 
   it("detects a completed second session", () => {
     const view = run([appt(-20), appt(-10)]);
+    expect(view.fromSession).toBe(1);
     expect(view.rows[0]).toMatchObject({
-      secondSessionStatus: "completed",
-      daysSinceFirstSession: 20,
+      nextSessionStatus: "completed",
+      daysSinceFromSession: 20,
       grade: "E",
+      gradeReason: "Second session already completed",
     });
   });
 
   it("detects a booked second session and ignores cancelled bookings", () => {
     const booked = run([appt(-10), appt(4, { canceled: true }), appt(6)]);
-    expect(booked.rows[0]).toMatchObject({ secondSessionStatus: "booked", grade: "D" });
+    expect(booked.rows[0]).toMatchObject({ nextSessionStatus: "booked", grade: "D" });
 
     const cancelledOnly = run([appt(-10), appt(4, { canceled: true })]);
     expect(cancelledOnly.rows[0]).toMatchObject({
-      secondSessionStatus: "none",
-      secondSessionAt: null,
+      nextSessionStatus: "none",
+      nextSessionAt: null,
       grade: "B",
     });
   });
@@ -297,46 +348,135 @@ describe("buildProgressionView", () => {
   it("counts an intro call as the first session and reports session types", () => {
     const view = run([appt(-12, { type: INTRO_CALL }), appt(-3)]);
     expect(view.rows[0]).toMatchObject({
-      daysSinceFirstSession: 12,
-      firstSessionType: INTRO_CALL,
-      secondSessionStatus: "completed",
-      secondSessionType: THERAPY,
+      daysSinceFromSession: 12,
+      fromSessionType: INTRO_CALL,
+      nextSessionStatus: "completed",
+      nextSessionType: THERAPY,
     });
   });
 
   it("counts assessments as sessions but never matching calls", () => {
     const assessed = run([appt(-10, { type: SCREENING }), appt(5, { type: SCREENING })]);
-    expect(assessed.rows[0]).toMatchObject({ secondSessionStatus: "booked" });
+    expect(assessed.rows[0]).toMatchObject({ nextSessionStatus: "booked" });
 
     const matching = run([appt(-12, { type: MATCHING_CALL }), appt(-3), appt(4, { type: MATCHING_CALL })]);
-    expect(matching.rows[0]).toMatchObject({ daysSinceFirstSession: 3, secondSessionStatus: "none" });
+    expect(matching.rows[0]).toMatchObject({ daysSinceFromSession: 3, nextSessionStatus: "none" });
   });
 
   it("excludes returning customers and customers outside the window", () => {
     const view = run(
       [appt(-10), appt(-40, { email: "old@example.com" })],
-      { "email:aoife@example.com": verified(true) }
+      { "email:aoife@example.com": verified(1) }
     );
     expect(view.rows).toHaveLength(0);
-    expect(view.totals.returningCustomers).toBe(1);
+    expect(view.totals).toEqual({ verified: 0, unverified: 0 });
   });
 
   it("keeps unverified customers visible but ungraded, after graded rows", () => {
     const view = run(
       [appt(-20, { email: "unknown@example.com" }), appt(-2)],
-      { "email:unknown@example.com": { status: "unverified", reason: "history_truncated" } }
+      {
+        "email:unknown@example.com": {
+          status: "unverified",
+          reason: "history_truncated",
+          earlierSessions: 0,
+        },
+      }
     );
     expect(view.rows.map((r) => [r.email, r.grade, r.historyStatus])).toEqual([
       ["aoife@example.com", "C", "verified"],
       ["unknown@example.com", null, "unverified"],
     ]);
     expect(view.rows[1].historyNote).toMatch(/confirm/);
-    expect(view.totals).toMatchObject({ firstTimers: 1, unverified: 1 });
+    expect(view.totals).toEqual({ verified: 1, unverified: 1 });
   });
 
   it("reports portal status for each row", () => {
     const view = run([appt(-3, { email: "Member@Example.com" })]);
     expect(view.rows[0].portalStatus).toBe("has_account");
+  });
+
+  describe("later session ranges", () => {
+    it("numbers window sessions after earlier history", () => {
+      // Two sessions before the window, then sessions 3 (done), 4 (done), 5 (booked).
+      const appointments = [appt(-25), appt(-12), appt(7)];
+      const history = { "email:aoife@example.com": verified(2) };
+
+      expect(run(appointments, history, 1).rows).toHaveLength(0);
+      expect(run(appointments, history, 2).rows).toHaveLength(0);
+      expect(run(appointments, history, 3).rows[0]).toMatchObject({
+        daysSinceFromSession: 25,
+        nextSessionStatus: "completed",
+        grade: "E",
+        gradeReason: "Fourth session already completed",
+      });
+      expect(run(appointments, history, 4).rows[0]).toMatchObject({
+        daysSinceFromSession: 12,
+        nextSessionStatus: "booked",
+        grade: "D",
+        gradeReason: "Fifth session booked, not yet happened",
+      });
+    });
+
+    it("lists a customer in every range whose from-session was completed in the window", () => {
+      const appointments = [appt(-20), appt(-10), appt(-3)];
+      const statuses = [1, 2, 3, 4].map((from) =>
+        run(appointments, {}, from).rows.map((r) => r.nextSessionStatus)
+      );
+      expect(statuses).toEqual([["completed"], ["completed"], ["none"], []]);
+    });
+
+    it("shows customers who haven't booked the next session yet, graded by wait", () => {
+      const history = (n: number) => ({
+        "email:a@example.com": verified(n),
+        "email:b@example.com": verified(n),
+        "email:c@example.com": verified(n),
+      });
+      const appointments = [
+        appt(-20, { email: "a@example.com" }),
+        appt(-9, { email: "b@example.com" }),
+        appt(-2, { email: "c@example.com" }),
+      ];
+      // Each customer's single window session is session 3 (two earlier ones).
+      const view = run(appointments, history(2), 3);
+      expect(view.rows.map((r) => [r.email, r.nextSessionStatus, r.nextSessionAt, r.grade])).toEqual([
+        ["a@example.com", "none", null, "A"],
+        ["b@example.com", "none", null, "B"],
+        ["c@example.com", "none", null, "C"],
+      ]);
+      expect(view.rows[0].gradeReason).toBe("Third session 14+ days ago, no fourth session");
+    });
+
+    it("does not count a session that hasn't happened yet as the from-session", () => {
+      // Session 2 is only booked, so nobody is in the 2–3 view yet.
+      expect(run([appt(-5), appt(3)], {}, 2).rows).toHaveLength(0);
+    });
+
+    it("ignores cancelled appointments when numbering", () => {
+      const view = run([appt(-15), appt(-10, { canceled: true }), appt(-5)], {}, 2);
+      expect(view.rows[0]).toMatchObject({ daysSinceFromSession: 5, nextSessionStatus: "none" });
+    });
+
+    it("numbers unverified customers from the history it could see", () => {
+      const appointments = [appt(-20), appt(-5)];
+      const history: Record<string, HistoryCheck> = {
+        "email:aoife@example.com": {
+          status: "unverified",
+          reason: "history_truncated",
+          earlierSessions: 1,
+        },
+      };
+      // At least one earlier session, so never in the 1–2 view.
+      expect(run(appointments, history, 1).rows).toHaveLength(0);
+
+      const view = run(appointments, history, 2);
+      expect(view.rows[0]).toMatchObject({
+        daysSinceFromSession: 20,
+        historyStatus: "unverified",
+        grade: null,
+      });
+      expect(view.totals).toEqual({ verified: 0, unverified: 1 });
+    });
   });
 });
 
