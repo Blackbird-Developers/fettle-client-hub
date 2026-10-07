@@ -129,6 +129,23 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
     return error ? <InsightsError error={error} onRetry={() => refetch()} /> : null;
   }
 
+  // An older insights function only returns Session 1–2.
+  if (!view) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <InsightsHeader data={data} isFetching={isFetching} onRefresh={() => refetch()} />
+        <Card className="border-border/50">
+          <CardContent className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
+            <CalendarX className="h-8 w-8" />
+            <p className="text-sm">
+              This view will appear once the latest data update is deployed.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   // Headline figures count customers whose session number is confirmed.
   const verified = inPeriod.filter((row) => row.historyStatus === "verified");
   const progressed = verified.filter((row) => row.nextSessionStatus !== "none").length;
