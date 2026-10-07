@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      customer_followups: {
+        Row: {
+          contacted: boolean
+          contacted_at: string | null
+          contacted_by: string | null
+          contacted_by_email: string | null
+          customer_key: string
+          note: string | null
+          note_updated_at: string | null
+          note_updated_by: string | null
+          note_updated_by_email: string | null
+          updated_at: string
+        }
+        Insert: {
+          contacted?: boolean
+          contacted_at?: string | null
+          contacted_by?: string | null
+          contacted_by_email?: string | null
+          customer_key: string
+          note?: string | null
+          note_updated_at?: string | null
+          note_updated_by?: string | null
+          note_updated_by_email?: string | null
+          updated_at?: string
+        }
+        Update: {
+          contacted?: boolean
+          contacted_at?: string | null
+          contacted_by?: string | null
+          contacted_by_email?: string | null
+          customer_key?: string
+          note?: string | null
+          note_updated_at?: string | null
+          note_updated_by?: string | null
+          note_updated_by_email?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       help_article_feedback: {
         Row: {
           article_slug: string

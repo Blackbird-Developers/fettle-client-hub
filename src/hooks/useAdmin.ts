@@ -3,6 +3,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { ApiError, classifyApiError } from "@/lib/api-errors";
 import { normalizeProgression } from "@/lib/customerInsights";
+import {
+  type CustomerFollowup,
+  type FollowupPatch,
+  applyFollowupPatch,
+  isMissingTableError,
+  replaceFollowup,
+} from "@/lib/customerFollowups";
+
+const FOLLOWUPS_QUERY_KEY = ["customer-followups"];
 import type {
   AdoptionView,
   GradeDefinition,
@@ -448,6 +457,59 @@ export function useCustomerInsights() {
         return false;
       }
       return failureCount < 1;
+    },
+  });
+}
+
+// Staff follow-up (contacted + note) per customer on the Progression pages.
+// Read and written straight from the table; RLS limits both to admins.
+export function useCustomerFollowups() {
+  const { data: isAdmin } = useIsAdmin();
+
+  return useQuery<CustomerFollowup[], { code?: string; message: string }>({
+    queryKey: FOLLOWUPS_QUERY_KEY,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("customer_followups").select("*");
+      if (error) throw error;
+      return data;
+    },
+    enabled: isAdmin === true,
+    staleTime: 1000 * 60,
+    // Missing table = migration not applied yet; retrying won't help.
+    retry: (failureCount, error) => !isMissingTableError(error) && failureCount < 2,
+  });
+}
+
+// Saves one customer's contacted status or note. The table updates
+// straight away and rolls back if the save fails.
+export function useUpdateFollowup() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ customerKey, patch }: { customerKey: string; patch: FollowupPatch }) => {
+      const { data, error } = await supabase
+        .from("customer_followups")
+        .upsert({ customer_key: customerKey, ...patch }, { onConflict: "customer_key" })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onMutate: async ({ customerKey, patch }) => {
+      await queryClient.cancelQueries({ queryKey: FOLLOWUPS_QUERY_KEY });
+      const previous = queryClient.getQueryData<CustomerFollowup[]>(FOLLOWUPS_QUERY_KEY);
+      queryClient.setQueryData<CustomerFollowup[]>(FOLLOWUPS_QUERY_KEY, (rows) =>
+        applyFollowupPatch(rows ?? [], customerKey, patch)
+      );
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      queryClient.setQueryData(FOLLOWUPS_QUERY_KEY, context?.previous);
+    },
+    onSuccess: (saved) => {
+      queryClient.setQueryData<CustomerFollowup[]>(FOLLOWUPS_QUERY_KEY, (rows) =>
+        replaceFollowup(rows ?? [], saved)
+      );
     },
   });
 }
