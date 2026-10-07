@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -6,10 +7,12 @@ import { normalizeProgression } from "@/lib/customerInsights";
 import {
   type CustomerFollowup,
   type FollowupPatch,
+  NOTE_MAX_LENGTH,
   applyFollowupPatch,
   isMissingTableError,
   replaceFollowup,
 } from "@/lib/customerFollowups";
+import { appendNote, runWithConcurrency } from "@/lib/bulkFollowups";
 
 const FOLLOWUPS_QUERY_KEY = ["customer-followups"];
 import type {
@@ -480,21 +483,109 @@ export function useCustomerFollowups() {
   });
 }
 
+// Shared by the single-row and bulk saves.
+async function saveFollowup(customerKey: string, patch: FollowupPatch) {
+  const { data, error } = await supabase
+    .from("customer_followups")
+    .upsert({ customer_key: customerKey, ...patch }, { onConflict: "customer_key" })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// Adds a bulk note below the customer's current note. Reads the latest note
+// first and only writes if it hasn't changed since, so a colleague's edit
+// made in the meantime is never overwritten (that customer fails instead).
+async function appendFollowupNote(customerKey: string, text: string, author: string | null) {
+  const { data: current, error: readError } = await supabase
+    .from("customer_followups")
+    .select("note")
+    .eq("customer_key", customerKey)
+    .maybeSingle();
+  if (readError) throw readError;
+
+  const note = appendNote(current?.note, text, author);
+  if (note.length > NOTE_MAX_LENGTH) {
+    throw { message: `Their note would go over ${NOTE_MAX_LENGTH} characters.` };
+  }
+
+  const changedMeanwhile = { message: "Someone else changed this note just now. Try again." };
+  if (!current) {
+    const { data, error } = await supabase
+      .from("customer_followups")
+      .insert({ customer_key: customerKey, note })
+      .select()
+      .single();
+    // 23505: a row for this customer was created since we looked.
+    if (error) throw error.code === "23505" ? changedMeanwhile : error;
+    return data;
+  }
+
+  const update = supabase
+    .from("customer_followups")
+    .update({ note })
+    .eq("customer_key", customerKey);
+  const { data, error } = await (current.note === null
+    ? update.is("note", null)
+    : update.eq("note", current.note)
+  )
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw changedMeanwhile;
+  return data;
+}
+
+export type BulkFollowupAction =
+  | { kind: "contacted"; contacted: boolean }
+  | { kind: "appendNote"; text: string };
+
+/** Customers saved at once by a bulk action. */
+export const BULK_CONCURRENCY = 4;
+
+// Applies one action to many customers, a few at a time. Never throws: the
+// result says which customers saved and which failed. Saved rows go into the
+// table as each one lands; failed ones keep their previous values.
+export function useBulkUpdateFollowups() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: async ({ keys, action }: { keys: string[]; action: BulkFollowupAction }) => {
+      setProgress({ done: 0, total: keys.length });
+      const save =
+        action.kind === "contacted"
+          ? (key: string) => saveFollowup(key, { contacted: action.contacted })
+          : (key: string) => appendFollowupNote(key, action.text, user?.email ?? null);
+      return runWithConcurrency(
+        keys,
+        BULK_CONCURRENCY,
+        async (key) => {
+          const saved = await save(key);
+          queryClient.setQueryData<CustomerFollowup[]>(FOLLOWUPS_QUERY_KEY, (rows) =>
+            replaceFollowup(rows ?? [], saved)
+          );
+          return saved;
+        },
+        (done, total) => setProgress({ done, total })
+      );
+    },
+    onSettled: () => setProgress(null),
+  });
+
+  return { run: mutation.mutateAsync, isPending: mutation.isPending, progress };
+}
+
 // Saves one customer's contacted status or note. The table updates
 // straight away and rolls back if the save fails.
 export function useUpdateFollowup() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ customerKey, patch }: { customerKey: string; patch: FollowupPatch }) => {
-      const { data, error } = await supabase
-        .from("customer_followups")
-        .upsert({ customer_key: customerKey, ...patch }, { onConflict: "customer_key" })
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    },
+    mutationFn: ({ customerKey, patch }: { customerKey: string; patch: FollowupPatch }) =>
+      saveFollowup(customerKey, patch),
     onMutate: async ({ customerKey, patch }) => {
       await queryClient.cancelQueries({ queryKey: FOLLOWUPS_QUERY_KEY });
       const previous = queryClient.getQueryData<CustomerFollowup[]>(FOLLOWUPS_QUERY_KEY);

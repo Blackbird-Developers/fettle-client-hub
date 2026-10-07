@@ -70,6 +70,12 @@ export function replaceFollowup(
     : [...rows, saved];
 }
 
+// Supabase errors are plain objects with a message, not Error instances.
+export function followupErrorMessage(error: unknown): string {
+  const message = (error as { message?: unknown } | null)?.message;
+  return typeof message === "string" && message ? message : "Please try again.";
+}
+
 // The table doesn't exist until the migration is applied. PostgREST reports
 // that as PGRST205 (not in schema cache); Postgres itself as 42P01.
 export function isMissingTableError(error: unknown): boolean {

@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,8 +14,10 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CalendarX, Search } from "lucide-react";
-import { useCustomerFollowups, useCustomerInsights } from "@/hooks/useAdmin";
+import { useBulkUpdateFollowups, useCustomerFollowups, useCustomerInsights } from "@/hooks/useAdmin";
+import { headerCheckboxState, pruneSelection, toggleAllVisible, toggleSelected } from "@/lib/bulkFollowups";
 import { indexFollowups, isMissingTableError } from "@/lib/customerFollowups";
+import { BulkActionBar } from "./BulkActionBar";
 import { FollowupActions } from "./FollowupActions";
 import { daysAgoLabel, formatDate, formatDateTime, matchesSearch } from "@/lib/customerInsights";
 import {
@@ -130,6 +133,34 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
       .sort((a, b) => (sort.direction === "asc" ? compare(a, b) : compare(b, a)));
   }, [inPeriod, search, sort]);
 
+  // Selected customer keys. Only ever rows currently shown: anything a search,
+  // period change or refresh hides is dropped. Sorting keeps the selection.
+  const bulk = useBulkUpdateFollowups();
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const headerCheckboxRef = useRef<HTMLButtonElement>(null);
+  const visibleKeys = useMemo(() => rows.map((row) => row.key), [rows]);
+  useEffect(() => {
+    setSelected((current) => pruneSelection(current, visibleKeys));
+  }, [visibleKeys]);
+  const selectedKeys = visibleKeys.filter((key) => selected.has(key));
+  const nameByKey = useMemo(() => new Map(rows.map((row) => [row.key, row.name])), [rows]);
+
+  // When everything saves, the bar (and the button that opened any dialog)
+  // goes away with the selection, so focus moves to the header checkbox once
+  // it's enabled again.
+  const [refocusHeader, setRefocusHeader] = useState(false);
+  useEffect(() => {
+    if (refocusHeader && !bulk.isPending) {
+      headerCheckboxRef.current?.focus();
+      setRefocusHeader(false);
+    }
+  }, [refocusHeader, bulk.isPending]);
+
+  const onBulkFinished = (failedKeys: string[]) => {
+    setSelected(new Set(failedKeys));
+    if (failedKeys.length === 0) setRefocusHeader(true);
+  };
+
   const onSort = (key: SortKey) =>
     setSort((current) => ({
       key,
@@ -165,8 +196,11 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
   const unverified = inPeriod.length - verified.length;
   const conversion = verified.length > 0 ? Math.round((progressed / verified.length) * 100) : 0;
 
+  const headerState = headerCheckboxState(visibleKeys, selected);
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    // Extra bottom space while the selection bar is up, so it never covers the last rows.
+    <div className={`space-y-6 animate-fade-in ${selectedKeys.length > 0 ? "pb-24" : ""}`}>
       <InsightsHeader data={data} isFetching={isFetching} onRefresh={() => refetch()} />
 
       <ToggleGroup
@@ -243,6 +277,19 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10 pr-0">
+                    <Checkbox
+                      ref={headerCheckboxRef}
+                      checked={headerState}
+                      onCheckedChange={() => setSelected(toggleAllVisible(visibleKeys, selected))}
+                      disabled={bulk.isPending}
+                      aria-label={
+                        headerState === true
+                          ? `Deselect all ${rows.length} shown customers`
+                          : `Select all ${rows.length} shown customers`
+                      }
+                    />
+                  </TableHead>
                   <SortableHead label="Priority" sortKey="grade" sort={sort} onSort={onSort} />
                   <SortableHead label="Customer" sortKey="name" sort={sort} onSort={onSort} />
                   <SortableHead
@@ -253,12 +300,24 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
                   />
                   <TableHead>{capitalize(next)} session</TableHead>
                   <TableHead>Portal account</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead>Follow-up</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map((row) => (
-                  <TableRow key={row.key}>
+                  <TableRow
+                    key={row.key}
+                    data-state={selected.has(row.key) ? "selected" : undefined}
+                    className="data-[state=selected]:bg-primary/5"
+                  >
+                    <TableCell className="w-10 pr-0">
+                      <Checkbox
+                        checked={selected.has(row.key)}
+                        onCheckedChange={() => setSelected(toggleSelected(selected, row.key))}
+                        disabled={bulk.isPending}
+                        aria-label={`Select ${row.name ?? "unnamed customer"}`}
+                      />
+                    </TableCell>
                     <TableCell>
                       <GradeBadge grade={row.grade} reason={row.gradeReason} />
                     </TableCell>
@@ -309,10 +368,27 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
           {rows.length > 0 && (
             <p className="mt-3 text-xs text-muted-foreground">
               Showing {rows.length} of {inPeriod.length} customers
+              {selectedKeys.length > 0 && ` · ${selectedKeys.length} selected`}
             </p>
           )}
         </CardContent>
       </Card>
+
+      {selectedKeys.length > 0 && (
+        <BulkActionBar
+          selectedKeys={selectedKeys}
+          visibleCount={rows.length}
+          followupsByKey={followupsByKey}
+          nameByKey={nameByKey}
+          unavailable={followupsUnavailable}
+          bulk={bulk}
+          onClear={() => {
+            setSelected(new Set());
+            headerCheckboxRef.current?.focus();
+          }}
+          onFinished={onBulkFinished}
+        />
+      )}
     </div>
   );
 }
