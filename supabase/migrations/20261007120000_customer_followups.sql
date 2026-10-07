@@ -2,7 +2,8 @@
 -- contacted, plus a free-text note. One row per customer, keyed by the same
 -- customer key the insights function uses (email:…, phone:… or appointment:…),
 -- because most Acuity customers have no portal account.
-CREATE TABLE public.customer_followups (
+-- Safe to re-run: it was first applied by hand in the SQL editor.
+CREATE TABLE IF NOT EXISTS public.customer_followups (
   customer_key TEXT PRIMARY KEY
     CHECK (customer_key ~ '^(email|phone|appointment):.+' AND char_length(customer_key) <= 320),
   contacted BOOLEAN NOT NULL DEFAULT false,
@@ -70,6 +71,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS stamp_customer_followup ON public.customer_followups;
 CREATE TRIGGER stamp_customer_followup
   BEFORE INSERT OR UPDATE ON public.customer_followups
   FOR EACH ROW
@@ -80,18 +82,24 @@ ALTER TABLE public.customer_followups ENABLE ROW LEVEL SECURITY;
 
 -- Admins only. No delete policy: clearing a note or unticking "contacted"
 -- is an update, so rows are never removed from the browser.
+DROP POLICY IF EXISTS "Admins can view customer follow-ups" ON public.customer_followups;
 CREATE POLICY "Admins can view customer follow-ups"
 ON public.customer_followups
 FOR SELECT
 USING (public.has_role('admin'));
 
+DROP POLICY IF EXISTS "Admins can add customer follow-ups" ON public.customer_followups;
 CREATE POLICY "Admins can add customer follow-ups"
 ON public.customer_followups
 FOR INSERT
 WITH CHECK (public.has_role('admin'));
 
+DROP POLICY IF EXISTS "Admins can update customer follow-ups" ON public.customer_followups;
 CREATE POLICY "Admins can update customer follow-ups"
 ON public.customer_followups
 FOR UPDATE
 USING (public.has_role('admin'))
 WITH CHECK (public.has_role('admin'));
+
+-- Make the API see the new table straight away.
+NOTIFY pgrst, 'reload schema';
