@@ -13,7 +13,9 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CalendarX, Search } from "lucide-react";
-import { useCustomerInsights } from "@/hooks/useAdmin";
+import { useCustomerFollowups, useCustomerInsights } from "@/hooks/useAdmin";
+import { indexFollowups, isMissingTableError } from "@/lib/customerFollowups";
+import { FollowupActions } from "./FollowupActions";
 import { daysAgoLabel, formatDate, formatDateTime, matchesSearch } from "@/lib/customerInsights";
 import {
   type ProgressionRow,
@@ -91,6 +93,16 @@ const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 /** "Session N → N+1" progression; `fromSession` = N (1 = first to second). */
 export function SessionProgression({ fromSession }: { fromSession: number }) {
   const { data, error, isLoading, isFetching, refetch } = useCustomerInsights();
+  const followups = useCustomerFollowups();
+  const followupsByKey = useMemo(() => indexFollowups(followups.data ?? []), [followups.data]);
+  // Why the Actions buttons are disabled, if they are.
+  const followupsUnavailable = followups.isPending
+    ? "Loading follow-ups…"
+    : followups.isError
+      ? isMissingTableError(followups.error)
+        ? "Available once the follow-ups database update is deployed"
+        : "Couldn't load follow-ups. Refresh the page to try again."
+      : null;
   const [period, setPeriod] = useState(30);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
@@ -241,6 +253,7 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
                   />
                   <TableHead>{capitalize(next)} session</TableHead>
                   <TableHead>Portal account</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -279,6 +292,14 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
                     </TableCell>
                     <TableCell>
                       <PortalStatusBadge status={row.portalStatus} />
+                    </TableCell>
+                    <TableCell>
+                      <FollowupActions
+                        customerKey={row.key}
+                        customerName={row.name}
+                        followup={followupsByKey.get(row.key)}
+                        unavailable={followupsUnavailable}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
