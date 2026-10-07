@@ -1,5 +1,5 @@
 // Pure logic for the admin-customer-insights edge function: appointment-type
-// classification, customer matching/deduplication, the two admin views and
+// classification, customer matching/deduplication, the admin views and
 // their A–E scores. No Deno or network imports, so the same file runs inside
 // the edge function and under Vitest (logic.test.ts).
 
@@ -255,13 +255,28 @@ export const ADOPTION_LEGEND: GradeDefinition[] = [
   { grade: "E", label: "No email on record — can't be matched or invited" },
 ];
 
-export const PROGRESSION_LEGEND: GradeDefinition[] = [
-  { grade: "A", label: "First session 14+ days ago, no second session" },
-  { grade: "B", label: "First session 7–13 days ago, no second session" },
-  { grade: "C", label: "First session under 7 days ago, no second session" },
-  { grade: "D", label: "Second session booked, not yet happened" },
-  { grade: "E", label: "Second session already completed" },
-];
+const ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth"];
+
+/** "first", "second", … for session numbers; "#N" beyond the list. */
+export function sessionOrdinal(n: number): string {
+  return ORDINALS[n - 1] ?? `#${n}`;
+}
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// Legend for the "session N → N+1" view, e.g. for N = 1: "First session
+// 14+ days ago, no second session".
+export function progressionLegend(fromSession: number): GradeDefinition[] {
+  const from = capitalize(sessionOrdinal(fromSession));
+  const next = sessionOrdinal(fromSession + 1);
+  return [
+    { grade: "A", label: `${from} session 14+ days ago, no ${next} session` },
+    { grade: "B", label: `${from} session 7–13 days ago, no ${next} session` },
+    { grade: "C", label: `${from} session under 7 days ago, no ${next} session` },
+    { grade: "D", label: `${capitalize(next)} session booked, not yet happened` },
+    { grade: "E", label: `${capitalize(next)} session already completed` },
+  ];
+}
 
 function legendLabel(legend: GradeDefinition[], grade: Grade): string {
   return legend.find((d) => d.grade === grade)!.label;
@@ -278,16 +293,16 @@ export function scoreAdoption(input: {
   return recent ? "C" : "D";
 }
 
-export type SecondSessionStatus = "completed" | "booked" | "none";
+export type NextSessionStatus = "completed" | "booked" | "none";
 
 export function scoreProgression(input: {
-  secondSessionStatus: SecondSessionStatus;
-  daysSinceFirstSession: number;
+  nextSessionStatus: NextSessionStatus;
+  daysSinceFromSession: number;
 }): Grade {
-  if (input.secondSessionStatus === "completed") return "E";
-  if (input.secondSessionStatus === "booked") return "D";
-  if (input.daysSinceFirstSession >= 14) return "A";
-  if (input.daysSinceFirstSession >= 7) return "B";
+  if (input.nextSessionStatus === "completed") return "E";
+  if (input.nextSessionStatus === "booked") return "D";
+  if (input.daysSinceFromSession >= 14) return "A";
+  if (input.daysSinceFromSession >= 7) return "B";
   return "C";
 }
 
@@ -377,8 +392,11 @@ export function buildAdoptionView(
 }
 
 // ---------------------------------------------------------------------------
-// View 2: first-to-second-session progression
+// View 2: session-to-session progression (session N → N+1)
 // ---------------------------------------------------------------------------
+
+/** The "from" session of each progression view: 1 = Session 1–2, … 4 = Session 4–5. */
+export const PROGRESSION_RANGES = [1, 2, 3, 4] as const;
 
 export interface ProgressionCandidate {
   customer: Customer;
@@ -387,8 +405,8 @@ export interface ProgressionCandidate {
   firstInWindowAt: number;
 }
 
-// Everyone with a completed session in the last 30 days. Whether that session
-// was their first EVER needs their earlier history (evaluateHistory).
+// Everyone with a completed session in the last 30 days. Which session NUMBER
+// that was needs their earlier history (evaluateHistory).
 export function progressionCandidates(
   customers: Customer[],
   now: number
@@ -409,9 +427,16 @@ export function progressionCandidates(
   return candidates;
 }
 
+// `earlierSessions` = sessions before the first one in the window. Exact when
+// verified; when unverified it's only what we could see (a lower bound), and
+// rows are numbered from it but flagged and left out of the rates.
 export type HistoryCheck =
-  | { status: "verified"; hasEarlierSession: boolean }
-  | { status: "unverified"; reason: "no_email" | "history_truncated" | "lookup_failed" };
+  | { status: "verified"; earlierSessions: number }
+  | {
+      status: "unverified";
+      reason: "no_email" | "history_truncated" | "lookup_failed";
+      earlierSessions: number;
+    };
 
 /** One Acuity history query by the customer's email. */
 export interface HistoryLookup {
@@ -419,26 +444,33 @@ export interface HistoryLookup {
   limit: number;
 }
 
-// Decides whether a customer had any session before `firstInWindowAt`.
-// `lookup` is null when there's no email to search by. Acuity's email search
-// ignores case, so one lookup per customer covers every spelling. An earlier
-// session found is conclusive; otherwise the answer is only trusted when the
-// lookup didn't hit its result limit (a full page may hide older history).
+// Counts the customer's sessions before `firstInWindowAt`. `lookup` is null
+// when there's no email to search by. Acuity's email search ignores case, so
+// one lookup per customer covers every spelling. The count is only exact
+// when the lookup didn't hit its result limit (a full page may hide older
+// history).
 export function evaluateHistory(
   lookup: HistoryLookup | null,
   firstInWindowAt: number
 ): HistoryCheck {
-  if (!lookup) return { status: "unverified", reason: "no_email" };
-  if (lookup.appointments === null) return { status: "unverified", reason: "lookup_failed" };
-
-  const hasEarlierSession = lookup.appointments.some(
-    (appt) => !appt.canceled && isSession(appt) && appointmentTime(appt) < firstInWindowAt
-  );
-  if (hasEarlierSession) return { status: "verified", hasEarlierSession: true };
-  if (lookup.appointments.length >= lookup.limit) {
-    return { status: "unverified", reason: "history_truncated" };
+  if (!lookup) return { status: "unverified", reason: "no_email", earlierSessions: 0 };
+  if (lookup.appointments === null) {
+    return { status: "unverified", reason: "lookup_failed", earlierSessions: 0 };
   }
-  return { status: "verified", hasEarlierSession: false };
+
+  const seen = new Set<number>();
+  let earlierSessions = 0;
+  for (const appt of lookup.appointments) {
+    if (seen.has(appt.id)) continue;
+    seen.add(appt.id);
+    if (!appt.canceled && isSession(appt) && appointmentTime(appt) < firstInWindowAt) {
+      earlierSessions++;
+    }
+  }
+  if (lookup.appointments.length >= lookup.limit) {
+    return { status: "unverified", reason: "history_truncated", earlierSessions };
+  }
+  return { status: "verified", earlierSessions };
 }
 
 export const UNVERIFIED_REASON_LABELS: Record<
@@ -446,7 +478,7 @@ export const UNVERIFIED_REASON_LABELS: Record<
   string
 > = {
   no_email: "No email on record — earlier history can't be looked up",
-  history_truncated: "Too much history to confirm this was the first session",
+  history_truncated: "Too much history to confirm the session number",
   lookup_failed: "Acuity history lookup failed",
 };
 
@@ -455,67 +487,80 @@ export interface ProgressionRow {
   name: string | null;
   email: string | null;
   phone: string | null;
-  firstSessionAt: string;
+  /** The view's "from" session (session N). */
+  fromSessionAt: string;
   /** Acuity appointment type name, e.g. "Introductory Call with …". */
-  firstSessionType: string | null;
-  daysSinceFirstSession: number;
-  secondSessionStatus: SecondSessionStatus;
-  secondSessionAt: string | null;
-  secondSessionType: string | null;
+  fromSessionType: string | null;
+  daysSinceFromSession: number;
+  /** Session N+1. */
+  nextSessionStatus: NextSessionStatus;
+  nextSessionAt: string | null;
+  nextSessionType: string | null;
   portalStatus: PortalStatus;
-  /** "verified" = confirmed first-ever session; otherwise it couldn't be checked. */
+  /** "verified" = session number confirmed from full history. */
   historyStatus: "verified" | "unverified";
   historyNote: string | null;
-  /** Null when the first session couldn't be verified. */
+  /** Null when the session number couldn't be verified. */
   grade: Grade | null;
   gradeReason: string | null;
 }
 
 export interface ProgressionView {
+  /** Session N of "session N → N+1". */
+  fromSession: number;
   rows: ProgressionRow[];
   totals: {
-    candidates: number;
-    firstTimers: number;
-    returningCustomers: number;
+    verified: number;
     unverified: number;
   };
 }
 
+// Customers whose session `fromSession` was completed in the active window,
+// and whether session `fromSession + 1` is completed, booked or not booked.
+// Session numbers count every non-cancelled session ever (earlier history +
+// the window), oldest first.
 export function buildProgressionView(
   candidates: ProgressionCandidate[],
   history: Map<string, HistoryCheck>,
   portalEmails: Set<string>,
-  now: number
+  now: number,
+  fromSession: number
 ): ProgressionView {
+  const legend = progressionLegend(fromSession);
   const rows: ProgressionRow[] = [];
-  const totals = { candidates: candidates.length, firstTimers: 0, returningCustomers: 0, unverified: 0 };
+  const totals = { verified: 0, unverified: 0 };
 
-  for (const { customer, firstInWindow, firstInWindowAt } of candidates) {
-    const check: HistoryCheck =
-      history.get(customer.key) ?? { status: "unverified", reason: "lookup_failed" };
-    if (check.status === "verified" && check.hasEarlierSession) {
-      totals.returningCustomers++;
-      continue;
-    }
-    if (check.status === "verified") totals.firstTimers++;
+  for (const { customer, firstInWindowAt } of candidates) {
+    const check: HistoryCheck = history.get(customer.key) ?? {
+      status: "unverified",
+      reason: "lookup_failed",
+      earlierSessions: 0,
+    };
+
+    // Sessions from the first in-window one onwards; index i is session
+    // number earlierSessions + 1 + i.
+    const sessions = customer.appointments.filter(
+      (appt) => isSession(appt) && !appt.canceled && appointmentTime(appt) >= firstInWindowAt
+    );
+    const index = fromSession - check.earlierSessions - 1;
+    const from = index >= 0 ? sessions[index] : undefined;
+    // Session N was before the window, or hasn't happened yet.
+    if (!from || !isCompleted(from, now)) continue;
+
+    if (check.status === "verified") totals.verified++;
     else totals.unverified++;
 
-    const later = customer.appointments.filter(
-      (appt) => isSession(appt) && !appt.canceled && appointmentTime(appt) > firstInWindowAt
-    );
-    const completedSecond = later.find((appt) => isCompleted(appt, now));
-    const bookedSecond = later.find((appt) => isUpcoming(appt, now));
-    const second = completedSecond ?? bookedSecond ?? null;
-    const secondSessionStatus: SecondSessionStatus = completedSecond
-      ? "completed"
-      : bookedSecond
-        ? "booked"
-        : "none";
+    const next = sessions[index + 1] ?? null;
+    const nextSessionStatus: NextSessionStatus = !next
+      ? "none"
+      : isCompleted(next, now)
+        ? "completed"
+        : "booked";
 
-    const daysSinceFirstSession = daysSince(firstInWindowAt, now);
+    const daysSinceFromSession = daysSince(appointmentTime(from), now);
     const grade =
       check.status === "verified"
-        ? scoreProgression({ secondSessionStatus, daysSinceFirstSession })
+        ? scoreProgression({ nextSessionStatus, daysSinceFromSession })
         : null;
 
     rows.push({
@@ -523,17 +568,17 @@ export function buildProgressionView(
       name: customer.name,
       email: customer.email,
       phone: customer.phone,
-      firstSessionAt: firstInWindow.datetime,
-      firstSessionType: firstInWindow.type?.trim() || null,
-      daysSinceFirstSession,
-      secondSessionStatus,
-      secondSessionAt: second?.datetime ?? null,
-      secondSessionType: second?.type?.trim() || null,
+      fromSessionAt: from.datetime,
+      fromSessionType: from.type?.trim() || null,
+      daysSinceFromSession,
+      nextSessionStatus,
+      nextSessionAt: next?.datetime ?? null,
+      nextSessionType: next?.type?.trim() || null,
       portalStatus: matchPortalAccount(customer, portalEmails),
       historyStatus: check.status,
       historyNote: check.status === "unverified" ? UNVERIFIED_REASON_LABELS[check.reason] : null,
       grade,
-      gradeReason: grade ? legendLabel(PROGRESSION_LEGEND, grade) : null,
+      gradeReason: grade ? legendLabel(legend, grade) : null,
     });
   }
 
@@ -541,9 +586,9 @@ export function buildProgressionView(
   rows.sort((a, b) => {
     const ga = a.grade ? GRADE_ORDER[a.grade] : 99;
     const gb = b.grade ? GRADE_ORDER[b.grade] : 99;
-    return ga - gb || b.daysSinceFirstSession - a.daysSinceFirstSession;
+    return ga - gb || b.daysSinceFromSession - a.daysSinceFromSession;
   });
-  return { rows, totals };
+  return { fromSession, rows, totals };
 }
 
 // ---------------------------------------------------------------------------
