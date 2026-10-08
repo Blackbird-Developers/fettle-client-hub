@@ -3,6 +3,7 @@ import {
   type CustomerFollowup,
   NOTE_MAX_LENGTH,
   applyFollowupPatch,
+  blankFollowup,
   indexFollowups,
   isMissingTableError,
   normalizeNote,
@@ -12,19 +13,7 @@ import {
 } from "./customerFollowups";
 
 function followup(customerKey: string, overrides: Partial<CustomerFollowup> = {}): CustomerFollowup {
-  return {
-    customer_key: customerKey,
-    contacted: false,
-    contacted_at: null,
-    contacted_by: null,
-    contacted_by_email: null,
-    note: null,
-    note_updated_at: null,
-    note_updated_by: null,
-    note_updated_by_email: null,
-    updated_at: "2026-10-07T09:00:00Z",
-    ...overrides,
-  };
+  return { ...blankFollowup(customerKey), updated_at: "2026-10-07T09:00:00Z", ...overrides };
 }
 
 describe("note validation", () => {

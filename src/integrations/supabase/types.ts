@@ -14,41 +14,110 @@ export type Database = {
   }
   public: {
     Tables: {
+      customer_contact_attempts: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          created_by_email: string | null
+          customer_key: string
+          customer_name: string | null
+          id: string
+          outcome: string
+          reason_other: string | null
+          reasons: string[] | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          created_by_email?: string | null
+          customer_key: string
+          customer_name?: string | null
+          id?: string
+          outcome: string
+          reason_other?: string | null
+          reasons?: string[] | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          created_by_email?: string | null
+          customer_key?: string
+          customer_name?: string | null
+          id?: string
+          outcome?: string
+          reason_other?: string | null
+          reasons?: string[] | null
+        }
+        Relationships: []
+      }
       customer_followups: {
         Row: {
+          attempt_count: number
           contacted: boolean
           contacted_at: string | null
           contacted_by: string | null
           contacted_by_email: string | null
           customer_key: string
+          customer_name: string | null
+          follow_up_due: string | null
+          last_attempt_at: string | null
+          last_reached_at: string | null
+          not_continuing_other: string | null
+          not_continuing_reasons: string[] | null
           note: string | null
           note_updated_at: string | null
           note_updated_by: string | null
           note_updated_by_email: string | null
+          outcome: string | null
+          outcome_at: string | null
+          outcome_by: string | null
+          outcome_by_email: string | null
           updated_at: string
         }
         Insert: {
+          attempt_count?: number
           contacted?: boolean
           contacted_at?: string | null
           contacted_by?: string | null
           contacted_by_email?: string | null
           customer_key: string
+          customer_name?: string | null
+          follow_up_due?: string | null
+          last_attempt_at?: string | null
+          last_reached_at?: string | null
+          not_continuing_other?: string | null
+          not_continuing_reasons?: string[] | null
           note?: string | null
           note_updated_at?: string | null
           note_updated_by?: string | null
           note_updated_by_email?: string | null
+          outcome?: string | null
+          outcome_at?: string | null
+          outcome_by?: string | null
+          outcome_by_email?: string | null
           updated_at?: string
         }
         Update: {
+          attempt_count?: number
           contacted?: boolean
           contacted_at?: string | null
           contacted_by?: string | null
           contacted_by_email?: string | null
           customer_key?: string
+          customer_name?: string | null
+          follow_up_due?: string | null
+          last_attempt_at?: string | null
+          last_reached_at?: string | null
+          not_continuing_other?: string | null
+          not_continuing_reasons?: string[] | null
           note?: string | null
           note_updated_at?: string | null
           note_updated_by?: string | null
           note_updated_by_email?: string | null
+          outcome?: string | null
+          outcome_at?: string | null
+          outcome_by?: string | null
+          outcome_by_email?: string | null
           updated_at?: string
         }
         Relationships: []

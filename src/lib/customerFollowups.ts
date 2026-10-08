@@ -29,6 +29,33 @@ export function noteChanged(saved: string | null | undefined, draft: string): bo
   return normalizeNote(saved) !== normalizeNote(draft);
 }
 
+/** A customer with nothing recorded yet. */
+export function blankFollowup(customerKey: string): CustomerFollowup {
+  return {
+    customer_key: customerKey,
+    contacted: false,
+    contacted_at: null,
+    contacted_by: null,
+    contacted_by_email: null,
+    note: null,
+    note_updated_at: null,
+    note_updated_by: null,
+    note_updated_by_email: null,
+    outcome: null,
+    outcome_at: null,
+    outcome_by: null,
+    outcome_by_email: null,
+    not_continuing_reasons: null,
+    not_continuing_other: null,
+    follow_up_due: null,
+    attempt_count: 0,
+    last_attempt_at: null,
+    last_reached_at: null,
+    customer_name: null,
+    updated_at: new Date().toISOString(),
+  };
+}
+
 export function indexFollowups(rows: CustomerFollowup[]): Map<string, CustomerFollowup> {
   return new Map(rows.map((row) => [row.customer_key, row]));
 }
@@ -41,18 +68,7 @@ export function applyFollowupPatch(
   patch: FollowupPatch
 ): CustomerFollowup[] {
   const existing = rows.find((row) => row.customer_key === customerKey);
-  const base: CustomerFollowup = existing ?? {
-    customer_key: customerKey,
-    contacted: false,
-    contacted_at: null,
-    contacted_by: null,
-    contacted_by_email: null,
-    note: null,
-    note_updated_at: null,
-    note_updated_by: null,
-    note_updated_by_email: null,
-    updated_at: new Date().toISOString(),
-  };
+  const base = existing ?? blankFollowup(customerKey);
   const next: CustomerFollowup =
     "note" in patch ? { ...base, note: normalizeNote(patch.note) } : { ...base, ...patch };
   return existing
