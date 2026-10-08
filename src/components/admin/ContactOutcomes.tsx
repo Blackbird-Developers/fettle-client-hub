@@ -92,7 +92,8 @@ export function OutcomeBadge({ followup }: { followup: CustomerFollowup }) {
 
 /** The small print under the badge: attempts, when they were last reached, follow-up date. */
 export function ContactSummary({ followup }: { followup: CustomerFollowup | undefined }) {
-  if (!followup || followup.attempt_count === 0) return null;
+  // attempt_count is missing until the contact-outcomes database update is deployed.
+  if (!followup?.attempt_count) return null;
   const timing = followup.follow_up_due ? followUpTiming(followup.follow_up_due) : null;
   const reasons =
     followup.outcome === "not_continuing"
