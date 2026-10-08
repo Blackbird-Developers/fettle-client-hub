@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
 import type { CustomerInsightsResponse } from "@/hooks/useAdmin";
-import type { CustomerFollowup } from "@/lib/customerFollowups";
+import { type CustomerFollowup, blankFollowup } from "@/lib/customerFollowups";
 import type { ProgressionRow } from "../../../supabase/functions/admin-customer-insights/logic.ts";
 import { SessionProgression } from "./SessionProgression";
 
@@ -26,13 +26,21 @@ const db = vi.hoisted(() => ({
   afterRead: null as ((key: string) => void) | null,
   /** Error for the initial list load (e.g. table not migrated yet). */
   listError: null as { code: string; message: string } | null,
+  /** customer_contact_attempts rows, oldest first. */
+  attempts: [] as Record<string, unknown>[],
+  /** Error for anything on customer_contact_attempts (e.g. not migrated yet). */
+  attemptsError: null as { code: string; message: string } | null,
 }));
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({ user: { id: "staff-1", email: "ben@fettle.ie" } }),
 }));
 
-vi.mock("@/integrations/supabase/client", () => {
+vi.mock("@/integrations/supabase/client", async () => {
+  // The database trigger that turns an attempt into the customer's summary
+  // row is mirrored by applyOutcome, so the mock uses it.
+  const { applyOutcome } = await import("@/lib/contactOutcomes");
+
   const blank = (key: string) => ({
     customer_key: key,
     contacted: false,
@@ -43,6 +51,17 @@ vi.mock("@/integrations/supabase/client", () => {
     note_updated_at: null,
     note_updated_by: null,
     note_updated_by_email: null,
+    outcome: null,
+    outcome_at: null,
+    outcome_by: null,
+    outcome_by_email: null,
+    not_continuing_reasons: null,
+    not_continuing_other: null,
+    follow_up_due: null,
+    attempt_count: 0,
+    last_attempt_at: null,
+    last_reached_at: null,
+    customer_name: null,
     updated_at: "2026-10-07T09:00:00Z",
   });
 
@@ -50,9 +69,21 @@ vi.mock("@/integrations/supabase/client", () => {
     op: "select" | "upsert" | "insert" | "update" | null = null;
     payload: Record<string, unknown> = {};
     filters: [string, unknown][] = [];
+    columns = "*";
 
-    select() {
-      this.op ??= "select";
+    constructor(public table: string) {}
+
+    select(columns = "*") {
+      if (!this.op) {
+        this.op = "select";
+        this.columns = columns;
+      }
+      return this;
+    }
+    order() {
+      return this;
+    }
+    limit() {
       return this;
     }
     upsert(payload: Record<string, unknown>) {
@@ -85,11 +116,56 @@ vi.mock("@/integrations/supabase/client", () => {
       return this.run();
     }
     then(resolve: (value: unknown) => void, reject: (reason: unknown) => void) {
+      if (this.table === "customer_contact_attempts") {
+        return this.attempts().then(resolve, reject);
+      }
       // Awaited without single(): the list load.
       const result = db.listError
         ? { data: null, error: db.listError }
         : { data: [...db.rows.values()], error: null };
       return Promise.resolve(result).then(resolve, reject);
+    }
+
+    // Insert = record an outcome; select = the history or the availability check.
+    async attempts() {
+      if (db.attemptsError) return { data: null, error: db.attemptsError };
+      const key = this.filters.find(([c]) => c === "customer_key")?.[1];
+      if (this.op === "select") {
+        const rows = db.attempts.filter((a) => !key || a.customer_key === key).reverse();
+        return { data: rows, error: null };
+      }
+
+      if (db.gate) await db.gate;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const { customer_key, customer_name, outcome, reasons, reason_other } = this.payload as {
+        customer_key: string;
+        customer_name: string | null;
+        outcome: string;
+        reasons: string[] | null;
+        reason_other: string | null;
+      };
+      if (db.failKeys.has(customer_key)) {
+        return { data: null, error: { code: "42501", message: "permission denied" } };
+      }
+      db.attempts.push({
+        ...this.payload,
+        id: `attempt-${db.attempts.length + 1}`,
+        created_at: new Date().toISOString(),
+        created_by_email: "ben@fettle.ie",
+      });
+      const existing = db.rows.get(customer_key);
+      const input = (
+        outcome === "not_continuing" ? { outcome, reasons, reasonOther: reason_other } : { outcome }
+      ) as Parameters<typeof applyOutcome>[3];
+      const [next] = applyOutcome(
+        existing ? [existing as never] : [],
+        customer_key,
+        customer_name,
+        input,
+        "ben@fettle.ie"
+      );
+      db.rows.set(customer_key, next);
+      return { data: null, error: null };
     }
 
     async run() {
@@ -98,7 +174,7 @@ vi.mock("@/integrations/supabase/client", () => {
       const existing = db.rows.get(key);
 
       if (this.op === "select") {
-        const data = existing ? { note: existing.note } : null;
+        const data = existing ? (this.columns === "*" ? existing : { note: existing.note }) : null;
         db.afterRead?.(key);
         return { data, error: null };
       }
@@ -134,7 +210,7 @@ vi.mock("@/integrations/supabase/client", () => {
   return {
     supabase: {
       rpc: async () => ({ data: true, error: null }),
-      from: () => new Query(),
+      from: (table: string) => new Query(table),
       auth: { getSession: async () => ({ data: { session: null } }) },
     },
   };
@@ -186,15 +262,7 @@ function insights(names = NAMES): CustomerInsightsResponse {
 
 function followup(name: string, overrides: Partial<CustomerFollowup> = {}) {
   db.rows.set(keyOf(name), {
-    customer_key: keyOf(name),
-    contacted: false,
-    contacted_at: null,
-    contacted_by: null,
-    contacted_by_email: null,
-    note: null,
-    note_updated_at: null,
-    note_updated_by: null,
-    note_updated_by_email: null,
+    ...blankFollowup(keyOf(name)),
     updated_at: "2026-10-07T09:00:00Z",
     ...overrides,
   });
@@ -231,7 +299,15 @@ beforeEach(() => {
   db.gate = null;
   db.afterRead = null;
   db.listError = null;
+  db.attempts = [];
+  db.attemptsError = null;
 });
+
+/** Opens the bulk bar's `…` menu and picks an item. */
+async function bulkMenu(user: ReturnType<typeof userEvent.setup>, item: RegExp) {
+  await user.click(within(bar()!).getByRole("button", { name: "More bulk actions" }));
+  await user.click(await screen.findByRole("menuitem", { name: item }));
+}
 
 // ---------------------------------------------------------------------------
 describe("row selection", () => {
@@ -342,11 +418,20 @@ describe("row selection", () => {
     expect(bar()).toBeNull();
   });
 
-  it("offers an overflow menu for the secondary actions on narrow screens", async () => {
+  it("shows the four outcomes in the bar and the rest in its menu", async () => {
     const { user } = renderPage();
     await user.click(rowCheckbox("Ann Archer"));
+    for (const label of [
+      "No answer",
+      "Doesn't want to continue",
+      "Interested, but will continue later",
+      "Successfully booked",
+    ]) {
+      expect(within(bar()!).getByRole("button", { name: `${label} — 1 customer` })).toBeEnabled();
+    }
     await user.click(within(bar()!).getByRole("button", { name: "More bulk actions" }));
-    expect(await screen.findByRole("menuitem", { name: /Mark not contacted/ })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: /Mark contacted/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Mark not contacted/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /Add note/ })).toBeInTheDocument();
   });
 });
@@ -359,7 +444,7 @@ describe("bulk contacted status", () => {
     await user.click(rowCheckbox("Ann Archer"));
     await user.click(rowCheckbox("Bo Byrne"));
     await user.click(rowCheckbox("Cy Cole"));
-    await user.click(within(bar()!).getByRole("button", { name: /Mark contacted/ }));
+    await bulkMenu(user, /Mark contacted/);
 
     expect(await screen.findByText("Marked as contacted: 2 customers")).toBeInTheDocument();
     expect(bar()).toBeNull();
@@ -378,7 +463,7 @@ describe("bulk contacted status", () => {
     await user.click(rowCheckbox("Ann Archer"));
     await user.click(rowCheckbox("Bo Byrne"));
     await user.click(rowCheckbox("Cy Cole"));
-    await user.click(within(bar()!).getByRole("button", { name: /Mark not contacted/ }));
+    await bulkMenu(user, /Mark not contacted/);
 
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText("Mark 2 customers as not contacted?")).toBeInTheDocument();
@@ -388,7 +473,7 @@ describe("bulk contacted status", () => {
     expect(db.rows.get(keyOf("Ann Archer"))?.contacted).toBe(true);
     expect(within(bar()!).getByText(/3 selected/)).toBeInTheDocument();
 
-    await user.click(within(bar()!).getByRole("button", { name: /Mark not contacted/ }));
+    await bulkMenu(user, /Mark not contacted/);
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Mark 2 customers as not contacted",
@@ -405,10 +490,11 @@ describe("bulk contacted status", () => {
     const { user } = renderPage();
     await user.click(rowCheckbox("Ann Archer"));
     await user.click(rowCheckbox("Bo Byrne"));
-    await user.click(within(bar()!).getByRole("button", { name: /Mark contacted/ }));
+    await bulkMenu(user, /Mark contacted/);
 
     expect(await within(bar()!).findByText(/Saving 0 of 2/)).toBeInTheDocument();
-    expect(within(bar()!).getByRole("button", { name: /Mark contacted/ })).toBeDisabled();
+    expect(within(bar()!).getByRole("button", { name: "More bulk actions" })).toBeDisabled();
+    expect(within(bar()!).getByRole("button", { name: "No answer — 2 customers" })).toBeDisabled();
     expect(within(bar()!).getByRole("button", { name: "Clear selection" })).toBeDisabled();
     expect(rowCheckbox("Cy Cole")).toBeDisabled();
 
@@ -423,7 +509,7 @@ describe("bulk contacted status", () => {
     await user.click(rowCheckbox("Ann Archer"));
     await user.click(rowCheckbox("Bo Byrne"));
     await user.click(rowCheckbox("Cy Cole"));
-    await user.click(within(bar()!).getByRole("button", { name: /Mark contacted/ }));
+    await bulkMenu(user, /Mark contacted/);
 
     expect(await screen.findByText("Updated 2 of 3 customers")).toBeInTheDocument();
     expect(screen.getByText(/Not saved: Bo Byrne\. permission denied/)).toBeInTheDocument();
@@ -440,7 +526,7 @@ describe("bulk contacted status", () => {
     const { user } = renderPage();
     await user.click(rowCheckbox("Ann Archer"));
     await user.click(rowCheckbox("Bo Byrne"));
-    await user.click(within(bar()!).getByRole("button", { name: /Mark contacted/ }));
+    await bulkMenu(user, /Mark contacted/);
 
     expect(await screen.findByText("Couldn't update 2 customers")).toBeInTheDocument();
     expect(within(bar()!).getByText(/2 selected/)).toBeInTheDocument();
@@ -454,7 +540,7 @@ describe("bulk contacted status", () => {
     expect(
       await within(bar()!).findByText(/Available once the follow-ups database update is deployed/)
     ).toBeInTheDocument();
-    expect(within(bar()!).queryByRole("button", { name: /Mark contacted/ })).toBeNull();
+    expect(within(bar()!).queryByRole("button", { name: /No answer/ })).toBeNull();
   });
 });
 
@@ -465,7 +551,7 @@ describe("bulk notes", () => {
   async function openBulkNote(names: string[]) {
     const page = renderPage();
     for (const name of names) await page.user.click(rowCheckbox(name));
-    await page.user.click(within(bar()!).getByRole("button", { name: /Add note/ }));
+    await bulkMenu(page.user, /Add note/);
     return { ...page, dialog: await screen.findByRole("dialog") };
   }
 
@@ -588,5 +674,163 @@ describe("single-customer actions", () => {
     await user.click(screen.getByRole("button", { name: "More actions for Ann Archer" }));
     await user.click(await screen.findByRole("menuitem", { name: "Add note" }));
     expect(await screen.findByRole("dialog", { name: "Note for Ann Archer" })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("contact outcomes", () => {
+  const outcomeButton = (label: string, name: string) =>
+    within(tableRow(name)).getByRole("button", { name: `${label} — ${name}` });
+
+  it("logs No answer as an attempt without marking them contacted", async () => {
+    const { user } = renderPage();
+    await user.click(outcomeButton("No answer", "Ann Archer"));
+
+    expect(await screen.findByText("Recorded: No answer")).toBeInTheDocument();
+    const row = within(tableRow("Ann Archer"));
+    expect(row.getByText("1 attempt · not reached yet")).toBeInTheDocument();
+    expect(outcomeButton("No answer", "Ann Archer")).toHaveAttribute("aria-pressed", "true");
+    expect(db.rows.get(keyOf("Ann Archer"))?.contacted).toBe(false);
+
+    // Clicking again logs another attempt.
+    await user.click(outcomeButton("No answer", "Ann Archer"));
+    expect(await row.findByText("2 attempts · not reached yet")).toBeInTheDocument();
+    expect(db.attempts).toHaveLength(2);
+  });
+
+  it("asks for the reasons when a customer doesn't want to continue", async () => {
+    const { user } = renderPage();
+    await user.click(outcomeButton("Doesn't want to continue", "Bo Byrne"));
+
+    const dialog = await screen.findByRole("dialog", { name: "What is the reason for not continuing?" });
+    for (const reason of ["Price", "Timing", "No longer interested", "Other"]) {
+      expect(within(dialog).getByRole("checkbox", { name: reason })).toBeInTheDocument();
+    }
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(within(dialog).getByText("Choose at least one reason.")).toBeInTheDocument();
+    expect(db.attempts).toHaveLength(0);
+
+    // The text field only appears with Other, and is then required.
+    expect(within(dialog).queryByRole("textbox", { name: "Other reason" })).toBeNull();
+    await user.click(within(dialog).getByRole("checkbox", { name: "Price" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: "Other" }));
+    const other = within(dialog).getByRole("textbox", { name: "Other reason" });
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(within(dialog).getByText("Enter the reason.")).toBeInTheDocument();
+
+    await user.type(other, "Moving abroad");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Recorded: Doesn't want to continue")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(db.attempts[0]).toMatchObject({
+      outcome: "not_continuing",
+      reasons: ["price", "other"],
+      reason_other: "Moving abroad",
+      customer_name: "Bo Byrne",
+    });
+    expect(within(tableRow("Bo Byrne")).getByText("Price, Other: Moving abroad")).toBeInTheDocument();
+    expect(outcomeButton("Doesn't want to continue", "Bo Byrne")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("keeps the reasons popup open with the error when saving fails", async () => {
+    db.failKeys.add(keyOf("Bo Byrne"));
+    const { user } = renderPage();
+    await user.click(outcomeButton("Doesn't want to continue", "Bo Byrne"));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("checkbox", { name: "Timing" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect(await within(dialog).findByText("Couldn't save: permission denied")).toBeInTheDocument();
+    expect(within(dialog).getByRole("checkbox", { name: "Timing" })).toBeChecked();
+  });
+
+  it("sets a follow-up date 30 days out for Continue later", async () => {
+    const { user } = renderPage();
+    await user.click(outcomeButton("Interested, but will continue later", "Cy Cole"));
+
+    const due = format(new Date(Date.now() + 30 * 86_400_000), "d MMM yyyy");
+    expect(await screen.findByText(`Cy Cole · Follow up on ${due}`)).toBeInTheDocument();
+    expect(
+      within(tableRow("Cy Cole")).getByText(`Follow up ${due} · Due in 30 days`)
+    ).toBeInTheDocument();
+    expect(db.rows.get(keyOf("Cy Cole"))?.contacted).toBe(true);
+  });
+
+  it("clears a mistaken outcome from the row menu and keeps the history", async () => {
+    const { user } = renderPage();
+    await user.click(outcomeButton("Successfully booked", "Di Doyle"));
+    expect(await screen.findByText("Recorded: Successfully booked")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "More actions for Di Doyle" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Clear outcome" }));
+    expect(await screen.findByText("Outcome cleared")).toBeInTheDocument();
+    expect(outcomeButton("Successfully booked", "Di Doyle")).toHaveAttribute("aria-pressed", "false");
+    expect(within(tableRow("Di Doyle")).getByText("Contacted")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "More actions for Di Doyle" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Contact history" }));
+    const dialog = await screen.findByRole("dialog", { name: "Contact history · Di Doyle" });
+    expect(await within(dialog).findByText("Outcome cleared")).toBeInTheDocument();
+    expect(within(dialog).getByText("Successfully booked")).toBeInTheDocument();
+  });
+
+  it("records an outcome for every selected customer from the bar", async () => {
+    const { user } = renderPage();
+    await user.click(rowCheckbox("Ann Archer"));
+    await user.click(rowCheckbox("Bo Byrne"));
+    await user.click(
+      within(bar()!).getByRole("button", { name: "Interested, but will continue later — 2 customers" })
+    );
+
+    expect(await screen.findByText("Continue later: 2 customers")).toBeInTheDocument();
+    expect(bar()).toBeNull();
+    expect(db.rows.get(keyOf("Ann Archer"))?.outcome).toBe("follow_up_later");
+    expect(db.rows.get(keyOf("Bo Byrne"))?.customer_name).toBe("Bo Byrne");
+  });
+
+  it("asks for reasons once for a bulk Not continuing", async () => {
+    const { user } = renderPage();
+    await user.click(rowCheckbox("Ann Archer"));
+    await user.click(rowCheckbox("Cy Cole"));
+    await user.click(within(bar()!).getByRole("button", { name: "Doesn't want to continue — 2 customers" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Marks 2 customers as not wanting to continue/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("checkbox", { name: "No longer interested" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Not continuing: 2 customers")).toBeInTheDocument();
+    expect(db.rows.get(keyOf("Cy Cole"))?.not_continuing_reasons).toEqual(["not_interested"]);
+  });
+
+  it("filters the table by outcome", async () => {
+    followup("Bo Byrne", { outcome: "booked", attempt_count: 1 });
+    followup("Cy Cole", { outcome: "no_answer", attempt_count: 1 });
+    const { user } = renderPage();
+
+    await user.click(screen.getByRole("combobox", { name: "Filter by outcome" }));
+    await user.click(await screen.findByRole("option", { name: "Booked" }));
+    expect(screen.queryByText("Ann Archer")).toBeNull();
+    expect(rowCheckbox("Bo Byrne")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: "Filter by outcome" }));
+    await user.click(await screen.findByRole("option", { name: "No outcome yet" }));
+    expect(rowCheckbox("Ann Archer")).toBeInTheDocument();
+    expect(rowCheckbox("Di Doyle")).toBeInTheDocument();
+    expect(screen.queryByText("Bo Byrne")).toBeNull();
+    expect(screen.queryByText("Cy Cole")).toBeNull();
+  });
+
+  it("disables the outcome buttons with the reason before the database update", async () => {
+    db.attemptsError = { code: "PGRST205", message: "not found" };
+    renderPage();
+    expect(
+      (await screen.findAllByText(/Outcomes are available once the contact-outcomes database update/))
+        .length
+    ).toBeGreaterThan(0);
+    expect(outcomeButton("No answer", "Ann Archer")).toBeDisabled();
+    // Contacted and notes still work.
+    expect(screen.getByRole("button", { name: "Add note for Ann Archer" })).toBeEnabled();
   });
 });

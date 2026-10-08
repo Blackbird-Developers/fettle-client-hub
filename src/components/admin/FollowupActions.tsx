@@ -20,10 +20,26 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AlertCircle, Check, Loader2, MoreHorizontal, Phone, PhoneOff, StickyNote } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  History,
+  Loader2,
+  MoreHorizontal,
+  Phone,
+  PhoneOff,
+  RotateCcw,
+  StickyNote,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useUpdateFollowup } from "@/hooks/useAdmin";
-import { formatDateTime } from "@/lib/customerInsights";
+import { useRecordOutcome, useUpdateFollowup } from "@/hooks/useAdmin";
+import {
+  type ContactOutcome,
+  type OutcomeInput,
+  OUTCOME_LABELS,
+  isContactOutcome,
+} from "@/lib/contactOutcomes";
+import { formatDate, formatDateTime } from "@/lib/customerInsights";
 import {
   type CustomerFollowup,
   NOTE_MAX_LENGTH,
@@ -32,29 +48,46 @@ import {
   noteChanged,
   validateNote,
 } from "@/lib/customerFollowups";
+import {
+  ContactHistoryDialog,
+  ContactSummary,
+  NotContinuingDialog,
+  OutcomeBadge,
+  OutcomeButtons,
+} from "./ContactOutcomes";
 
 const byLine = (email: string | null, at: string | null) =>
   [email && `by ${email}`, at && `on ${formatDateTime(at)}`].filter(Boolean).join(" ");
 
 /**
- * Follow-up cell on the Progression pages: contacted status, note icon and a
- * `…` menu for this customer. Bulk changes go through the selection bar.
- * `unavailable` (follow-ups failed to load) disables the actions with the reason.
+ * Follow-up cell on the Progression pages and the Follow-ups report: the
+ * customer's outcome (or contacted status), the four outcome buttons, a note
+ * icon and a `…` menu with the rest. Bulk changes go through the selection
+ * bar. `unavailable` (follow-ups failed to load) disables everything with
+ * the reason; `outcomesUnavailable` disables only the outcome actions.
  */
 export function FollowupActions({
   customerKey,
   customerName,
   followup,
   unavailable,
+  outcomesUnavailable,
+  acuityBooked,
 }: {
   customerKey: string;
   customerName: string | null;
   followup: CustomerFollowup | undefined;
   unavailable: string | null;
+  outcomesUnavailable: string | null;
+  /** Acuity already shows their next session (hint on the Booked button). */
+  acuityBooked?: boolean;
 }) {
   const { toast } = useToast();
   const contactMutation = useUpdateFollowup();
+  const outcomeMutation = useRecordOutcome();
   const [noteOpen, setNoteOpen] = useState(false);
+  const [reasonsOpen, setReasonsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const noteButtonRef = useRef<HTMLButtonElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   // Where focus goes back to when the note dialog closes.
@@ -84,6 +117,50 @@ export function FollowupActions({
     );
   };
 
+  const outcomeBlocked = unavailable ?? outcomesUnavailable;
+  const hasOutcome = isContactOutcome(followup?.outcome);
+  const pendingOutcome =
+    outcomeMutation.isPending && outcomeMutation.variables.input.outcome !== "cleared"
+      ? outcomeMutation.variables.input.outcome
+      : null;
+
+  // Resolves to an error message, or null once saved (the reasons popup
+  // stays open on failure).
+  const record = (input: OutcomeInput) =>
+    new Promise<string | null>((resolve) => {
+      outcomeMutation.mutate(
+        { customerKey, customerName, input },
+        {
+          onSuccess: (saved) => {
+            resolve(null);
+            toast({
+              title:
+                input.outcome === "cleared"
+                  ? "Outcome cleared"
+                  : `Recorded: ${OUTCOME_LABELS[input.outcome].label}`,
+              description:
+                [customerName, saved.follow_up_due && `Follow up on ${formatDate(saved.follow_up_due)}`]
+                  .filter(Boolean)
+                  .join(" · ") || undefined,
+            });
+          },
+          onError: (error) => {
+            const message = followupErrorMessage(error);
+            resolve(message);
+            if (input.outcome !== "not_continuing") {
+              toast({ title: "Couldn't save the outcome", description: message, variant: "destructive" });
+            }
+          },
+        }
+      );
+    });
+
+  const selectOutcome = (outcome: ContactOutcome) => {
+    if (outcomeMutation.isPending || outcomeBlocked) return;
+    if (outcome === "not_continuing") setReasonsOpen(true);
+    else void record({ outcome });
+  };
+
   const openNote = (from: RefObject<HTMLButtonElement>) => {
     setNoteOpenedFrom(from);
     setNoteOpen(true);
@@ -92,103 +169,135 @@ export function FollowupActions({
   const contactedBy = byLine(followup?.contacted_by_email ?? null, followup?.contacted_at ?? null);
 
   return (
-    <div className="flex items-center gap-1.5">
-      <Tooltip>
-        {/* Badge doesn't forward refs, so the span is the tooltip anchor. */}
-        <TooltipTrigger asChild>
-          <span
-            tabIndex={0}
-            className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Badge
-              variant="outline"
-              className={`cursor-default whitespace-nowrap gap-1 ${
-                contacted
-                  ? "bg-green-50 text-green-700 border-green-200"
-                  : "text-muted-foreground"
-              }`}
-            >
-              {contactMutation.isPending ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : contacted ? (
-                <Check className="h-3 w-3" />
-              ) : null}
-              {contacted ? "Contacted" : "Not contacted"}
-            </Badge>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs">
-          {unavailable ??
-            (contacted
-              ? `Contacted${contactedBy ? ` ${contactedBy}` : ""}`
-              : "Not contacted yet")}
-        </TooltipContent>
-      </Tooltip>
+    <div className="min-w-[220px] space-y-2">
+      <div className="flex items-center gap-1.5">
+        {hasOutcome && followup ? (
+          <OutcomeBadge followup={followup} />
+        ) : (
+          <ContactedBadge
+            contacted={contacted}
+            saving={contactMutation.isPending}
+            tooltip={
+              unavailable ??
+              (contacted ? `Contacted${contactedBy ? ` ${contactedBy}` : ""}` : "Not contacted yet")
+            }
+          />
+        )}
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          {/* span keeps the tooltip working while the button is disabled */}
-          <span tabIndex={unavailable ? 0 : -1}>
+        <span className="flex-1" />
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {/* span keeps the tooltip working while the button is disabled */}
+            <span tabIndex={unavailable ? 0 : -1}>
+              <Button
+                ref={noteButtonRef}
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={`h-8 w-8 ${hasNote ? "text-amber-700 hover:text-amber-800" : "text-muted-foreground"}`}
+                aria-label={hasNote ? `Edit note for ${name}` : `Add note for ${name}`}
+                disabled={Boolean(unavailable)}
+                onClick={() => openNote(noteButtonRef)}
+              >
+                <StickyNote className="h-4 w-4" fill={hasNote ? "currentColor" : "none"} fillOpacity={0.2} />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs whitespace-pre-line">
+            {unavailable ?? (hasNote ? followup?.note : "Add a note")}
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Non-modal so the note dialog can open straight from a menu item. */}
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
             <Button
-              ref={noteButtonRef}
+              ref={menuButtonRef}
               type="button"
               variant="ghost"
               size="icon"
-              className={`h-8 w-8 ${hasNote ? "text-amber-700 hover:text-amber-800" : "text-muted-foreground"}`}
-              aria-label={hasNote ? `Edit note for ${name}` : `Add note for ${name}`}
-              disabled={Boolean(unavailable)}
-              onClick={() => openNote(noteButtonRef)}
+              className="h-8 w-8 text-muted-foreground"
+              aria-label={`More actions for ${name}`}
             >
-              <StickyNote className="h-4 w-4" fill={hasNote ? "currentColor" : "none"} fillOpacity={0.2} />
+              <MoreHorizontal className="h-4 w-4" />
             </Button>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs whitespace-pre-line">
-          {unavailable ?? (hasNote ? followup?.note : "Add a note")}
-        </TooltipContent>
-      </Tooltip>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            {unavailable && (
+              <>
+                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                  {unavailable}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+              </>
+            )}
+            <DropdownMenuItem
+              className="gap-2"
+              disabled={Boolean(outcomeBlocked)}
+              onSelect={() => setHistoryOpen(true)}
+            >
+              <History className="h-4 w-4" />
+              Contact history
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="gap-2"
+              disabled={Boolean(unavailable) || contactMutation.isPending}
+              onSelect={toggleContacted}
+            >
+              {contacted ? <PhoneOff className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
+              {contacted ? "Mark as not contacted" : "Mark as contacted"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="gap-2"
+              disabled={Boolean(unavailable)}
+              onSelect={() => openNote(menuButtonRef)}
+            >
+              <StickyNote className="h-4 w-4" />
+              {hasNote ? "Edit note" : "Add note"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="gap-2"
+              disabled={!hasOutcome || Boolean(outcomeBlocked) || outcomeMutation.isPending}
+              onSelect={() => void record({ outcome: "cleared" })}
+            >
+              <RotateCcw className="h-4 w-4" />
+              Clear outcome
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
-      {/* Non-modal so the note dialog can open straight from a menu item. */}
-      <DropdownMenu modal={false}>
-        <DropdownMenuTrigger asChild>
-          <Button
-            ref={menuButtonRef}
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground"
-            aria-label={`More actions for ${name}`}
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
-          {unavailable && (
-            <>
-              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                {unavailable}
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-            </>
-          )}
-          <DropdownMenuItem
-            className="gap-2"
-            disabled={Boolean(unavailable) || contactMutation.isPending}
-            onSelect={toggleContacted}
-          >
-            {contacted ? <PhoneOff className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
-            {contacted ? "Mark as not contacted" : "Mark as contacted"}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className="gap-2"
-            disabled={Boolean(unavailable)}
-            onSelect={() => openNote(menuButtonRef)}
-          >
-            <StickyNote className="h-4 w-4" />
-            {hasNote ? "Edit note" : "Add note"}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <ContactSummary followup={followup} />
+
+      {outcomeBlocked && <p className="text-xs text-muted-foreground">{outcomeBlocked}</p>}
+      <OutcomeButtons
+        current={followup?.outcome}
+        customerName={customerName}
+        disabled={Boolean(outcomeBlocked) || outcomeMutation.isPending}
+        pending={pendingOutcome}
+        acuityBooked={acuityBooked}
+        onSelect={selectOutcome}
+      />
+
+      <NotContinuingDialog
+        open={reasonsOpen}
+        onOpenChange={setReasonsOpen}
+        subject={customerName ?? "this customer"}
+        initialReasons={followup?.not_continuing_reasons ?? []}
+        initialOther={followup?.not_continuing_other}
+        saving={outcomeMutation.isPending}
+        onSubmit={(reasons, reasonOther) => record({ outcome: "not_continuing", reasons, reasonOther })}
+      />
+
+      <ContactHistoryDialog
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        customerKey={customerKey}
+        customerName={customerName}
+        followup={followup}
+      />
 
       <NoteDialog
         open={noteOpen}
@@ -199,6 +308,44 @@ export function FollowupActions({
         followup={followup}
       />
     </div>
+  );
+}
+
+/** Contacted / Not contacted, for customers with no outcome recorded. */
+function ContactedBadge({
+  contacted,
+  saving,
+  tooltip,
+}: {
+  contacted: boolean;
+  saving: boolean;
+  tooltip: string;
+}) {
+  return (
+    <Tooltip>
+      {/* Badge doesn't forward refs, so the span is the tooltip anchor. */}
+      <TooltipTrigger asChild>
+        <span
+          tabIndex={0}
+          className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Badge
+            variant="outline"
+            className={`cursor-default whitespace-nowrap gap-1 ${
+              contacted ? "bg-green-50 text-green-700 border-green-200" : "text-muted-foreground"
+            }`}
+          >
+            {saving ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : contacted ? (
+              <Check className="h-3 w-3" />
+            ) : null}
+            {contacted ? "Contacted" : "Not contacted"}
+          </Badge>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }
 

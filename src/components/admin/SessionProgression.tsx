@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -14,7 +15,18 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CalendarX, Search } from "lucide-react";
-import { useBulkUpdateFollowups, useCustomerFollowups, useCustomerInsights } from "@/hooks/useAdmin";
+import {
+  useBulkUpdateFollowups,
+  useContactOutcomesAvailable,
+  useCustomerFollowups,
+  useCustomerInsights,
+} from "@/hooks/useAdmin";
+import {
+  type OutcomeFilter,
+  CONTACT_OUTCOMES,
+  OUTCOME_LABELS,
+  matchesOutcomeFilter,
+} from "@/lib/contactOutcomes";
 import { headerCheckboxState, pruneSelection, toggleAllVisible, toggleSelected } from "@/lib/bulkFollowups";
 import { indexFollowups, isMissingTableError } from "@/lib/customerFollowups";
 import { BulkActionBar } from "./BulkActionBar";
@@ -106,6 +118,15 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
         ? "Available once the follow-ups database update is deployed"
         : "Couldn't load follow-ups. Refresh the page to try again."
       : null;
+  const outcomesCheck = useContactOutcomesAvailable();
+  const outcomesUnavailable = outcomesCheck.isPending
+    ? "Loading…"
+    : outcomesCheck.isError
+      ? isMissingTableError(outcomesCheck.error)
+        ? "Outcomes are available once the contact-outcomes database update is deployed"
+        : "Couldn't load contact outcomes. Refresh the page to try again."
+      : null;
+  const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("all");
   const [period, setPeriod] = useState(30);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
@@ -130,8 +151,9 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
     const compare = COMPARATORS[sort.key];
     return inPeriod
       .filter((row) => matchesSearch(row, search))
+      .filter((row) => matchesOutcomeFilter(followupsByKey.get(row.key), outcomeFilter))
       .sort((a, b) => (sort.direction === "asc" ? compare(a, b) : compare(b, a)));
-  }, [inPeriod, search, sort]);
+  }, [inPeriod, search, sort, followupsByKey, outcomeFilter]);
 
   // Selected customer keys. Only ever rows currently shown: anything a search,
   // period change or refresh hides is dropped. Sorting keeps the selection.
@@ -250,15 +272,31 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
             </CardDescription>
           </div>
           <GradeLegend legend={view?.legend ?? []} />
-          <div className="relative max-w-sm">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, email or phone"
-              className="pl-8"
-              aria-label="Search customers"
-            />
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative w-full max-w-sm">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name, email or phone"
+                className="pl-8"
+                aria-label="Search customers"
+              />
+            </div>
+            <Select value={outcomeFilter} onValueChange={(value) => setOutcomeFilter(value as OutcomeFilter)}>
+              <SelectTrigger className="w-[220px]" aria-label="Filter by outcome">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All outcomes</SelectItem>
+                <SelectItem value="none">No outcome yet</SelectItem>
+                {CONTACT_OUTCOMES.map((outcome) => (
+                  <SelectItem key={outcome} value={outcome}>
+                    {OUTCOME_LABELS[outcome].short}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </CardHeader>
         <CardContent>
@@ -266,8 +304,8 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
             <div className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
               <CalendarX className="h-8 w-8" />
               <p className="text-sm">
-                {search
-                  ? "No customers match your search."
+                {search || outcomeFilter !== "all"
+                  ? "No customers match your search or filter."
                   : fromSession === 1
                     ? `No first-time customers in the last ${period} days.`
                     : `No customers had their ${from} session in the last ${period} days.`}
@@ -358,6 +396,8 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
                         customerName={row.name}
                         followup={followupsByKey.get(row.key)}
                         unavailable={followupsUnavailable}
+                        outcomesUnavailable={outcomesUnavailable}
+                        acuityBooked={row.nextSessionStatus !== "none"}
                       />
                     </TableCell>
                   </TableRow>
@@ -381,6 +421,7 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
           followupsByKey={followupsByKey}
           nameByKey={nameByKey}
           unavailable={followupsUnavailable}
+          outcomesUnavailable={outcomesUnavailable}
           bulk={bulk}
           onClear={() => {
             setSelected(new Set());

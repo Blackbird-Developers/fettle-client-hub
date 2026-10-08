@@ -13,8 +13,15 @@ import {
   replaceFollowup,
 } from "@/lib/customerFollowups";
 import { appendNote, runWithConcurrency } from "@/lib/bulkFollowups";
+import {
+  type ContactAttempt,
+  type OutcomeInput,
+  applyOutcome,
+  attemptInsert,
+} from "@/lib/contactOutcomes";
 
 const FOLLOWUPS_QUERY_KEY = ["customer-followups"];
+const CONTACT_HISTORY_QUERY_KEY = ["customer-contact-history"];
 import type {
   AdoptionView,
   GradeDefinition,
@@ -537,9 +544,27 @@ async function appendFollowupNote(customerKey: string, text: string, author: str
   return data;
 }
 
+// Records an outcome as a new contact attempt; the database updates the
+// customer's summary row, which is read back for the page.
+async function recordOutcome(customerKey: string, customerName: string | null, input: OutcomeInput) {
+  const { error } = await supabase
+    .from("customer_contact_attempts")
+    .insert(attemptInsert(customerKey, customerName, input));
+  if (error) throw error;
+
+  const { data, error: readError } = await supabase
+    .from("customer_followups")
+    .select("*")
+    .eq("customer_key", customerKey)
+    .single();
+  if (readError) throw readError;
+  return data;
+}
+
 export type BulkFollowupAction =
   | { kind: "contacted"; contacted: boolean }
-  | { kind: "appendNote"; text: string };
+  | { kind: "appendNote"; text: string }
+  | { kind: "outcome"; input: OutcomeInput };
 
 /** Customers saved at once by a bulk action. */
 export const BULK_CONCURRENCY = 4;
@@ -553,12 +578,23 @@ export function useBulkUpdateFollowups() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   const mutation = useMutation({
-    mutationFn: async ({ keys, action }: { keys: string[]; action: BulkFollowupAction }) => {
+    mutationFn: async ({
+      keys,
+      action,
+      nameOf,
+    }: {
+      keys: string[];
+      action: BulkFollowupAction;
+      /** Customer names, stored with outcomes for the Follow-ups report. */
+      nameOf?: (key: string) => string | null;
+    }) => {
       setProgress({ done: 0, total: keys.length });
       const save =
         action.kind === "contacted"
           ? (key: string) => saveFollowup(key, { contacted: action.contacted })
-          : (key: string) => appendFollowupNote(key, action.text, user?.email ?? null);
+          : action.kind === "outcome"
+            ? (key: string) => recordOutcome(key, nameOf?.(key) ?? null, action.input)
+            : (key: string) => appendFollowupNote(key, action.text, user?.email ?? null);
       return runWithConcurrency(
         keys,
         BULK_CONCURRENCY,
@@ -572,7 +608,10 @@ export function useBulkUpdateFollowups() {
         (done, total) => setProgress({ done, total })
       );
     },
-    onSettled: () => setProgress(null),
+    onSettled: () => {
+      setProgress(null);
+      void queryClient.invalidateQueries({ queryKey: CONTACT_HISTORY_QUERY_KEY });
+    },
   });
 
   return { run: mutation.mutateAsync, isPending: mutation.isPending, progress };
@@ -602,5 +641,79 @@ export function useUpdateFollowup() {
         replaceFollowup(rows ?? [], saved)
       );
     },
+  });
+}
+
+// Records one customer's contact outcome. The table updates straight away
+// and rolls back if the save fails.
+export function useRecordOutcome() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: ({
+      customerKey,
+      customerName,
+      input,
+    }: {
+      customerKey: string;
+      customerName: string | null;
+      input: OutcomeInput;
+    }) => recordOutcome(customerKey, customerName, input),
+    onMutate: async ({ customerKey, customerName, input }) => {
+      await queryClient.cancelQueries({ queryKey: FOLLOWUPS_QUERY_KEY });
+      const previous = queryClient.getQueryData<CustomerFollowup[]>(FOLLOWUPS_QUERY_KEY);
+      queryClient.setQueryData<CustomerFollowup[]>(FOLLOWUPS_QUERY_KEY, (rows) =>
+        applyOutcome(rows ?? [], customerKey, customerName, input, user?.email ?? null)
+      );
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      queryClient.setQueryData(FOLLOWUPS_QUERY_KEY, context?.previous);
+    },
+    onSuccess: (saved) => {
+      queryClient.setQueryData<CustomerFollowup[]>(FOLLOWUPS_QUERY_KEY, (rows) =>
+        replaceFollowup(rows ?? [], saved)
+      );
+    },
+    onSettled: (_data, _error, { customerKey }) => {
+      void queryClient.invalidateQueries({ queryKey: [...CONTACT_HISTORY_QUERY_KEY, customerKey] });
+    },
+  });
+}
+
+// Whether the contact-outcomes database update has been applied. Until it
+// is, the outcome buttons are disabled with the reason.
+export function useContactOutcomesAvailable() {
+  const { data: isAdmin } = useIsAdmin();
+
+  return useQuery<boolean, { code?: string; message: string }>({
+    queryKey: [...CONTACT_HISTORY_QUERY_KEY, "available"],
+    queryFn: async () => {
+      const { error } = await supabase.from("customer_contact_attempts").select("id").limit(1);
+      if (error) throw error;
+      return true;
+    },
+    enabled: isAdmin === true,
+    staleTime: Infinity,
+    retry: (failureCount, error) => !isMissingTableError(error) && failureCount < 2,
+  });
+}
+
+/** Everything recorded for one customer, newest first. */
+export function useContactHistory(customerKey: string, enabled: boolean) {
+  return useQuery<ContactAttempt[], { code?: string; message: string }>({
+    queryKey: [...CONTACT_HISTORY_QUERY_KEY, customerKey],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("customer_contact_attempts")
+        .select("*")
+        .eq("customer_key", customerKey)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      return data;
+    },
+    enabled,
   });
 }

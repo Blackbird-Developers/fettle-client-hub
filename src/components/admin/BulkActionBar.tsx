@@ -27,6 +27,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { AlertCircle, Loader2, MoreHorizontal, Phone, PhoneOff, StickyNote, X } from "lucide-react";
+import {
+  type ContactOutcome,
+  type OutcomeInput,
+  CONTACT_OUTCOMES,
+  OUTCOME_LABELS,
+} from "@/lib/contactOutcomes";
+import { NotContinuingDialog } from "./ContactOutcomes";
+import { OUTCOME_ICONS } from "./outcomeIcons";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import type { BulkFollowupAction, useBulkUpdateFollowups } from "@/hooks/useAdmin";
@@ -60,6 +68,7 @@ export function BulkActionBar({
   followupsByKey,
   nameByKey,
   unavailable,
+  outcomesUnavailable,
   bulk,
   onClear,
   onFinished,
@@ -69,6 +78,7 @@ export function BulkActionBar({
   followupsByKey: Map<string, CustomerFollowup>;
   nameByKey: Map<string, string | null>;
   unavailable: string | null;
+  outcomesUnavailable: string | null;
   bulk: BulkUpdater;
   onClear: () => void;
   onFinished: (failedKeys: string[]) => void;
@@ -76,7 +86,8 @@ export function BulkActionBar({
   const { toast } = useToast();
   const [confirmUncontact, setConfirmUncontact] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
-  const noteButtonRef = useRef<HTMLButtonElement>(null);
+  const [reasonsOpen, setReasonsOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   const count = selectedKeys.length;
   const saving = bulk.isPending;
@@ -86,7 +97,7 @@ export function BulkActionBar({
 
   /** Runs the action and reports it; resolves to the keys that failed. */
   const runBulk = async (keys: string[], action: BulkFollowupAction, done: string) => {
-    const results = await bulk.run({ keys, action });
+    const results = await bulk.run({ keys, action, nameOf: (key) => nameByKey.get(key) ?? null });
     const { succeeded, failed } = splitResults(results);
     const failedKeys = failed.map((r) => r.key);
     onFinished(failedKeys);
@@ -127,7 +138,21 @@ export function BulkActionBar({
     setConfirmUncontact(true);
   };
 
+  const recordOutcome = (input: OutcomeInput) =>
+    runBulk(
+      selectedKeys,
+      { kind: "outcome", input },
+      input.outcome === "cleared" ? "Outcome cleared for" : `${OUTCOME_LABELS[input.outcome].short}:`
+    );
+
+  const selectOutcome = (outcome: ContactOutcome) => {
+    if (saving) return;
+    if (outcome === "not_continuing") setReasonsOpen(true);
+    else void recordOutcome({ outcome });
+  };
+
   const actionsDisabled = Boolean(unavailable) || saving;
+  const outcomesDisabled = actionsDisabled || Boolean(outcomesUnavailable);
 
   return (
     <>
@@ -161,49 +186,35 @@ export function BulkActionBar({
             <p className="px-2 text-xs text-background/70">{unavailable}</p>
           ) : (
             <>
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 rounded-full"
-                disabled={actionsDisabled}
-                onClick={markContacted}
-              >
-                <Phone className="h-4 w-4" aria-hidden />
-                <span className="hidden sm:inline">Mark contacted</span>
-                <span className="sm:hidden">Contacted</span>
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className={`hidden md:inline-flex ${BAR_BUTTON}`}
-                disabled={actionsDisabled}
-                onClick={markNotContacted}
-              >
-                <PhoneOff className="h-4 w-4" aria-hidden />
-                Mark not contacted
-              </Button>
-              <Button
-                ref={noteButtonRef}
-                type="button"
-                size="sm"
-                variant="ghost"
-                className={`hidden md:inline-flex ${BAR_BUTTON}`}
-                disabled={actionsDisabled}
-                onClick={() => setNoteOpen(true)}
-              >
-                <StickyNote className="h-4 w-4" aria-hidden />
-                Add note
-              </Button>
+              {CONTACT_OUTCOMES.map((outcome) => {
+                const Icon = OUTCOME_ICONS[outcome];
+                return (
+                  <Button
+                    key={outcome}
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className={`px-2 lg:px-3 ${BAR_BUTTON}`}
+                    disabled={outcomesDisabled}
+                    title={outcomesUnavailable ?? OUTCOME_LABELS[outcome].label}
+                    aria-label={`${OUTCOME_LABELS[outcome].label} — ${customersLabel(count)}`}
+                    onClick={() => selectOutcome(outcome)}
+                  >
+                    <Icon className="h-4 w-4" aria-hidden />
+                    <span className="hidden lg:inline">{OUTCOME_LABELS[outcome].short}</span>
+                  </Button>
+                );
+              })}
 
-              {/* Narrow screens: the secondary actions fold into a menu. */}
+              {/* Non-modal so the note dialog can open straight from a menu item. */}
               <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
                   <Button
+                    ref={menuButtonRef}
                     type="button"
                     size="icon"
                     variant="ghost"
-                    className={`w-8 md:hidden ${BAR_BUTTON}`}
+                    className={`w-8 ${BAR_BUTTON}`}
                     disabled={actionsDisabled}
                     aria-label="More bulk actions"
                   >
@@ -211,6 +222,10 @@ export function BulkActionBar({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" side="top">
+                  <DropdownMenuItem className="gap-2" onSelect={markContacted}>
+                    <Phone className="h-4 w-4" />
+                    Mark contacted
+                  </DropdownMenuItem>
                   <DropdownMenuItem className="gap-2" onSelect={markNotContacted}>
                     <PhoneOff className="h-4 w-4" />
                     Mark not contacted
@@ -270,10 +285,26 @@ export function BulkActionBar({
         </AlertDialogContent>
       </AlertDialog>
 
+      <NotContinuingDialog
+        open={reasonsOpen}
+        onOpenChange={setReasonsOpen}
+        subject={customersLabel(count)}
+        saving={saving}
+        onSubmit={async (reasons, reasonOther) => {
+          const { succeeded, firstError } = await recordOutcome({
+            outcome: "not_continuing",
+            reasons,
+            reasonOther,
+          });
+          // Nothing saved: stay open so the reasons aren't lost.
+          return succeeded === 0 ? followupErrorMessage(firstError) : null;
+        }}
+      />
+
       <BulkNoteDialog
         open={noteOpen}
         onOpenChange={setNoteOpen}
-        returnFocusTo={noteButtonRef}
+        returnFocusTo={menuButtonRef}
         selectedKeys={selectedKeys}
         followupsByKey={followupsByKey}
         nameOf={nameOf}
