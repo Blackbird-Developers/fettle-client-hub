@@ -52,7 +52,7 @@ export default function Admin() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 max-w-6xl">
+      <div className="space-y-6 w-full">
         <div>
           <h1 className="text-2xl font-heading font-bold">
             {section.name}

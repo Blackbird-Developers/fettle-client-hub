@@ -22,7 +22,6 @@ import { type CustomerFollowup, followupErrorMessage } from "@/lib/customerFollo
 import {
   type ContactOutcome,
   type NotContinuingReason,
-  CONTACT_OUTCOMES,
   NOT_CONTINUING_REASONS,
   OUTCOME_LABELS,
   REASON_OTHER_MAX_LENGTH,
@@ -35,8 +34,8 @@ import {
 } from "@/lib/contactOutcomes";
 import { OUTCOME_ICONS } from "./outcomeIcons";
 
-// Shared pieces for contact outcomes: the badge, the four primary buttons,
-// the "not continuing" reasons popup and the contact history. Used on the
+// Shared pieces for contact outcomes: the badge, the summary line, the
+// "not continuing" reasons popup and the contact history. Used on the
 // Progression pages, in the bulk bar and on the Follow-ups report.
 
 const OUTCOME_STYLES: Record<ContactOutcome, string> = {
@@ -101,14 +100,14 @@ export function ContactSummary({ followup }: { followup: CustomerFollowup | unde
       : "";
 
   return (
-    <div className="space-y-0.5 text-xs text-muted-foreground">
+    <div className="space-y-0.5 text-xs leading-snug text-muted-foreground">
       {timing && followup.outcome === "follow_up_later" && (
         <p className={`font-medium ${TIMING_STYLES[timing.kind]}`}>
           Follow up {formatDate(followup.follow_up_due)} · {followUpTimingLabel(timing)}
         </p>
       )}
       {reasons && (
-        <p className="max-w-[240px] truncate" title={reasons}>
+        <p className="max-w-[260px] break-words">
           {reasons}
         </p>
       )}
@@ -118,76 +117,6 @@ export function ContactSummary({ followup }: { followup: CustomerFollowup | unde
           ? ` · last spoke ${formatDate(followup.last_reached_at)}`
           : " · not reached yet"}
       </p>
-    </div>
-  );
-}
-
-/**
- * The four primary actions. The current outcome is shown pressed; clicking
- * it again records another attempt (e.g. a second No answer).
- * `acuityBooked` flags that Acuity already shows the next session.
- */
-export function OutcomeButtons({
-  current,
-  customerName,
-  disabled,
-  pending,
-  acuityBooked,
-  onSelect,
-}: {
-  current: string | null | undefined;
-  customerName: string | null;
-  disabled: boolean;
-  pending: ContactOutcome | null;
-  acuityBooked?: boolean;
-  onSelect: (outcome: ContactOutcome) => void;
-}) {
-  const name = customerName ?? "customer";
-  return (
-    <div role="group" aria-label={`Contact outcome for ${name}`} className="grid grid-cols-2 gap-1">
-      {CONTACT_OUTCOMES.map((outcome) => {
-        const Icon = pending === outcome ? Loader2 : OUTCOME_ICONS[outcome];
-        const active = current === outcome;
-        const hint = outcome === "booked" && acuityBooked && !active;
-        return (
-          <Tooltip key={outcome}>
-            <TooltipTrigger asChild>
-              {/* span keeps the tooltip working while the button is disabled */}
-              <span tabIndex={disabled ? 0 : -1} className="flex">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  aria-pressed={active}
-                  aria-label={`${OUTCOME_LABELS[outcome].label} — ${name}`}
-                  disabled={disabled}
-                  onClick={() => onSelect(outcome)}
-                  className={`relative h-7 w-full justify-start gap-1.5 px-2 text-xs font-normal ${
-                    active ? `${OUTCOME_STYLES[outcome]} font-medium hover:opacity-90` : ""
-                  }`}
-                >
-                  <Icon
-                    className={`h-3.5 w-3.5 ${pending === outcome ? "animate-spin" : ""}`}
-                    aria-hidden
-                  />
-                  {OUTCOME_LABELS[outcome].short}
-                  {hint && (
-                    <span
-                      className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-green-500"
-                      aria-hidden
-                    />
-                  )}
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-xs">
-              {OUTCOME_LABELS[outcome].label}
-              {hint && " — Acuity already shows their next session"}
-              {active && outcome === "no_answer" && " — click again to log another attempt"}
-            </TooltipContent>
-          </Tooltip>
-        );
-      })}
     </div>
   );
 }

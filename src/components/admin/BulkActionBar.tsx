@@ -23,10 +23,20 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertCircle, Loader2, MoreHorizontal, Phone, PhoneOff, StickyNote, X } from "lucide-react";
+import {
+  AlertCircle,
+  ChevronDown,
+  Loader2,
+  MoreHorizontal,
+  Phone,
+  PhoneOff,
+  StickyNote,
+  X,
+} from "lucide-react";
 import {
   type ContactOutcome,
   type OutcomeInput,
@@ -162,7 +172,9 @@ export function BulkActionBar({
           role="region"
           aria-label="Bulk actions for selected customers"
           onKeyDown={(e) => {
-            if (e.key === "Escape" && !saving) onClear();
+            // Menus opened from the bar render elsewhere in the page but their
+            // key presses still bubble here; Escape there only closes the menu.
+            if (e.key === "Escape" && !saving && e.currentTarget.contains(e.target as Node)) onClear();
           }}
           className="pointer-events-auto flex max-w-full items-center gap-1 rounded-full bg-foreground py-1.5 pl-4 pr-1.5 text-background shadow-[var(--shadow-elevated)] animate-in fade-in slide-in-from-bottom-4"
         >
@@ -186,25 +198,38 @@ export function BulkActionBar({
             <p className="px-2 text-xs text-background/70">{unavailable}</p>
           ) : (
             <>
-              {CONTACT_OUTCOMES.map((outcome) => {
-                const Icon = OUTCOME_ICONS[outcome];
-                return (
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
                   <Button
-                    key={outcome}
                     type="button"
                     size="sm"
-                    variant="ghost"
-                    className={`px-2 lg:px-3 ${BAR_BUTTON}`}
+                    className="h-8 gap-1 rounded-full"
                     disabled={outcomesDisabled}
-                    title={outcomesUnavailable ?? OUTCOME_LABELS[outcome].label}
-                    aria-label={`${OUTCOME_LABELS[outcome].label} — ${customersLabel(count)}`}
-                    onClick={() => selectOutcome(outcome)}
+                    title={outcomesUnavailable ?? undefined}
                   >
-                    <Icon className="h-4 w-4" aria-hidden />
-                    <span className="hidden lg:inline">{OUTCOME_LABELS[outcome].short}</span>
+                    Record outcome
+                    <ChevronDown className="h-4 w-4" aria-hidden />
                   </Button>
-                );
-              })}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" side="top" className="w-64">
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    For {customersLabel(count)}
+                  </DropdownMenuLabel>
+                  {CONTACT_OUTCOMES.map((outcome) => {
+                    const Icon = OUTCOME_ICONS[outcome];
+                    return (
+                      <DropdownMenuItem
+                        key={outcome}
+                        className="gap-2"
+                        onSelect={() => selectOutcome(outcome)}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {OUTCOME_LABELS[outcome].label}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
 
               {/* Non-modal so the note dialog can open straight from a menu item. */}
               <DropdownMenu modal={false}>

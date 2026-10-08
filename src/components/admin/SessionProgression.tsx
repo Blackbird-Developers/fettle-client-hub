@@ -62,11 +62,11 @@ const COMPARATORS: Record<SortKey, (a: ProgressionRow, b: ProgressionRow) => num
   fromSession: (a, b) => a.daysSinceFromSession - b.daysSinceFromSession,
 };
 
-/** Acuity appointment type, truncated so long names don't stretch the table. */
+/** Acuity appointment type; long names wrap rather than stretch the table. */
 function SessionTypeLabel({ type }: { type: string | null }) {
   if (!type) return null;
   return (
-    <p className="max-w-[220px] truncate text-xs text-muted-foreground" title={type}>
+    <p className="max-w-[220px] whitespace-normal break-words text-xs leading-snug text-muted-foreground">
       {type}
     </p>
   );

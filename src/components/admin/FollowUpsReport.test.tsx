@@ -167,9 +167,8 @@ describe("Follow-ups report", () => {
 
   it("takes a customer off the list once another outcome is recorded", async () => {
     const { user } = renderWith(<FollowUpsReport />);
-    await user.click(
-      within(rowOf("Ann Archer")).getByRole("button", { name: "Successfully booked — Ann Archer" })
-    );
+    await user.click(within(rowOf("Ann Archer")).getByRole("button", { name: "More actions for Ann Archer" }));
+    await user.click(await screen.findByRole("menuitem", { name: /^Successfully booked/ }));
     expect(await screen.findByText("Recorded: Successfully booked")).toBeInTheDocument();
     // Still named in the toast, but no longer in the table.
     expect(within(screen.getByRole("table")).queryByText("Ann Archer")).toBeNull();

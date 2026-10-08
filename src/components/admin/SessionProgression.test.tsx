@@ -303,6 +303,12 @@ beforeEach(() => {
   db.attemptsError = null;
 });
 
+/** Picks an outcome from the bulk bar's Record outcome menu. */
+async function bulkOutcome(user: ReturnType<typeof userEvent.setup>, label: string) {
+  await user.click(within(bar()!).getByRole("button", { name: /Record outcome/ }));
+  await user.click(await screen.findByRole("menuitem", { name: label }));
+}
+
 /** Opens the bulk bar's `…` menu and picks an item. */
 async function bulkMenu(user: ReturnType<typeof userEvent.setup>, item: RegExp) {
   await user.click(within(bar()!).getByRole("button", { name: "More bulk actions" }));
@@ -418,17 +424,19 @@ describe("row selection", () => {
     expect(bar()).toBeNull();
   });
 
-  it("shows the four outcomes in the bar and the rest in its menu", async () => {
+  it("offers the four outcomes in one menu and the rest in the `…` menu", async () => {
     const { user } = renderPage();
     await user.click(rowCheckbox("Ann Archer"));
+    await user.click(within(bar()!).getByRole("button", { name: /Record outcome/ }));
     for (const label of [
       "No answer",
       "Doesn't want to continue",
       "Interested, but will continue later",
       "Successfully booked",
     ]) {
-      expect(within(bar()!).getByRole("button", { name: `${label} — 1 customer` })).toBeEnabled();
+      expect(await screen.findByRole("menuitem", { name: label })).toBeInTheDocument();
     }
+    await user.keyboard("{Escape}");
     await user.click(within(bar()!).getByRole("button", { name: "More bulk actions" }));
     expect(await screen.findByRole("menuitem", { name: /Mark contacted/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /Mark not contacted/ })).toBeInTheDocument();
@@ -494,7 +502,7 @@ describe("bulk contacted status", () => {
 
     expect(await within(bar()!).findByText(/Saving 0 of 2/)).toBeInTheDocument();
     expect(within(bar()!).getByRole("button", { name: "More bulk actions" })).toBeDisabled();
-    expect(within(bar()!).getByRole("button", { name: "No answer — 2 customers" })).toBeDisabled();
+    expect(within(bar()!).getByRole("button", { name: /Record outcome/ })).toBeDisabled();
     expect(within(bar()!).getByRole("button", { name: "Clear selection" })).toBeDisabled();
     expect(rowCheckbox("Cy Cole")).toBeDisabled();
 
@@ -540,7 +548,7 @@ describe("bulk contacted status", () => {
     expect(
       await within(bar()!).findByText(/Available once the follow-ups database update is deployed/)
     ).toBeInTheDocument();
-    expect(within(bar()!).queryByRole("button", { name: /No answer/ })).toBeNull();
+    expect(within(bar()!).queryByRole("button", { name: /Record outcome/ })).toBeNull();
   });
 });
 
@@ -679,28 +687,46 @@ describe("single-customer actions", () => {
 
 // ---------------------------------------------------------------------------
 describe("contact outcomes", () => {
-  const outcomeButton = (label: string, name: string) =>
-    within(tableRow(name)).getByRole("button", { name: `${label} — ${name}` });
+  const openMenu = async (user: ReturnType<typeof userEvent.setup>, name: string) =>
+    user.click(screen.getByRole("button", { name: `More actions for ${name}` }));
+  // Item names can carry a hidden "(Current)" / "(In Acuity)" suffix.
+  const menuItem = (label: string) =>
+    screen.getByRole("menuitem", { name: new RegExp(`^${label}`) });
+  async function pick(user: ReturnType<typeof userEvent.setup>, name: string, label: string) {
+    await openMenu(user, name);
+    await user.click(await screen.findByRole("menuitem", { name: new RegExp(`^${label}`) }));
+  }
 
   it("logs No answer as an attempt without marking them contacted", async () => {
     const { user } = renderPage();
-    await user.click(outcomeButton("No answer", "Ann Archer"));
+    await pick(user, "Ann Archer", "No answer");
 
     expect(await screen.findByText("Recorded: No answer")).toBeInTheDocument();
     const row = within(tableRow("Ann Archer"));
     expect(row.getByText("1 attempt · not reached yet")).toBeInTheDocument();
-    expect(outcomeButton("No answer", "Ann Archer")).toHaveAttribute("aria-pressed", "true");
+    expect(row.getByText("No answer")).toBeInTheDocument();
     expect(db.rows.get(keyOf("Ann Archer"))?.contacted).toBe(false);
 
     // Clicking again logs another attempt.
-    await user.click(outcomeButton("No answer", "Ann Archer"));
+    await pick(user, "Ann Archer", "No answer");
     expect(await row.findByText("2 attempts · not reached yet")).toBeInTheDocument();
     expect(db.attempts).toHaveLength(2);
   });
 
+  it("keeps the row compact and marks the current outcome in the menu", async () => {
+    followup("Ann Archer", { outcome: "no_answer", attempt_count: 1 });
+    const { user } = renderPage();
+    // No outcome buttons in the row itself.
+    expect(within(tableRow("Ann Archer")).queryByRole("button", { name: /No answer/ })).toBeNull();
+
+    await openMenu(user, "Ann Archer");
+    expect(menuItem("No answer")).toHaveAccessibleName("No answer (Log again)");
+    expect(menuItem("Successfully booked")).toHaveAccessibleName("Successfully booked");
+  });
+
   it("asks for the reasons when a customer doesn't want to continue", async () => {
     const { user } = renderPage();
-    await user.click(outcomeButton("Doesn't want to continue", "Bo Byrne"));
+    await pick(user, "Bo Byrne", "Doesn't want to continue");
 
     const dialog = await screen.findByRole("dialog", { name: "What is the reason for not continuing?" });
     for (const reason of ["Price", "Timing", "No longer interested", "Other"]) {
@@ -730,13 +756,13 @@ describe("contact outcomes", () => {
       customer_name: "Bo Byrne",
     });
     expect(within(tableRow("Bo Byrne")).getByText("Price, Other: Moving abroad")).toBeInTheDocument();
-    expect(outcomeButton("Doesn't want to continue", "Bo Byrne")).toHaveAttribute("aria-pressed", "true");
+    expect(within(tableRow("Bo Byrne")).getByText("Not continuing")).toBeInTheDocument();
   });
 
   it("keeps the reasons popup open with the error when saving fails", async () => {
     db.failKeys.add(keyOf("Bo Byrne"));
     const { user } = renderPage();
-    await user.click(outcomeButton("Doesn't want to continue", "Bo Byrne"));
+    await pick(user, "Bo Byrne", "Doesn't want to continue");
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("checkbox", { name: "Timing" }));
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
@@ -747,7 +773,7 @@ describe("contact outcomes", () => {
 
   it("sets a follow-up date 30 days out for Continue later", async () => {
     const { user } = renderPage();
-    await user.click(outcomeButton("Interested, but will continue later", "Cy Cole"));
+    await pick(user, "Cy Cole", "Interested, but will continue later");
 
     const due = format(new Date(Date.now() + 30 * 86_400_000), "d MMM yyyy");
     expect(await screen.findByText(`Cy Cole · Follow up on ${due}`)).toBeInTheDocument();
@@ -759,13 +785,13 @@ describe("contact outcomes", () => {
 
   it("clears a mistaken outcome from the row menu and keeps the history", async () => {
     const { user } = renderPage();
-    await user.click(outcomeButton("Successfully booked", "Di Doyle"));
+    await pick(user, "Di Doyle", "Successfully booked");
     expect(await screen.findByText("Recorded: Successfully booked")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "More actions for Di Doyle" }));
     await user.click(await screen.findByRole("menuitem", { name: "Clear outcome" }));
     expect(await screen.findByText("Outcome cleared")).toBeInTheDocument();
-    expect(outcomeButton("Successfully booked", "Di Doyle")).toHaveAttribute("aria-pressed", "false");
+    expect(within(tableRow("Di Doyle")).queryByText("Booked")).toBeNull();
     expect(within(tableRow("Di Doyle")).getByText("Contacted")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "More actions for Di Doyle" }));
@@ -779,9 +805,7 @@ describe("contact outcomes", () => {
     const { user } = renderPage();
     await user.click(rowCheckbox("Ann Archer"));
     await user.click(rowCheckbox("Bo Byrne"));
-    await user.click(
-      within(bar()!).getByRole("button", { name: "Interested, but will continue later — 2 customers" })
-    );
+    await bulkOutcome(user, "Interested, but will continue later");
 
     expect(await screen.findByText("Continue later: 2 customers")).toBeInTheDocument();
     expect(bar()).toBeNull();
@@ -793,7 +817,7 @@ describe("contact outcomes", () => {
     const { user } = renderPage();
     await user.click(rowCheckbox("Ann Archer"));
     await user.click(rowCheckbox("Cy Cole"));
-    await user.click(within(bar()!).getByRole("button", { name: "Doesn't want to continue — 2 customers" }));
+    await bulkOutcome(user, "Doesn't want to continue");
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/Marks 2 customers as not wanting to continue/)).toBeInTheDocument();
@@ -824,12 +848,13 @@ describe("contact outcomes", () => {
 
   it("disables the outcome buttons with the reason before the database update", async () => {
     db.attemptsError = { code: "PGRST205", message: "not found" };
-    renderPage();
+    const { user } = renderPage();
+    await openMenu(user, "Ann Archer");
     expect(
-      (await screen.findAllByText(/Outcomes are available once the contact-outcomes database update/))
-        .length
-    ).toBeGreaterThan(0);
-    expect(outcomeButton("No answer", "Ann Archer")).toBeDisabled();
+      await screen.findByText(/Outcomes are available once the contact-outcomes database update/)
+    ).toBeInTheDocument();
+    expect(menuItem("No answer")).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Escape}");
     // Contacted and notes still work.
     expect(screen.getByRole("button", { name: "Add note for Ann Archer" })).toBeEnabled();
   });

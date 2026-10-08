@@ -36,6 +36,7 @@ import { useRecordOutcome, useUpdateFollowup } from "@/hooks/useAdmin";
 import {
   type ContactOutcome,
   type OutcomeInput,
+  CONTACT_OUTCOMES,
   OUTCOME_LABELS,
   isContactOutcome,
 } from "@/lib/contactOutcomes";
@@ -53,16 +54,16 @@ import {
   ContactSummary,
   NotContinuingDialog,
   OutcomeBadge,
-  OutcomeButtons,
 } from "./ContactOutcomes";
+import { OUTCOME_ICONS } from "./outcomeIcons";
 
 const byLine = (email: string | null, at: string | null) =>
   [email && `by ${email}`, at && `on ${formatDateTime(at)}`].filter(Boolean).join(" ");
 
 /**
  * Follow-up cell on the Progression pages and the Follow-ups report: the
- * customer's outcome (or contacted status), the four outcome buttons, a note
- * icon and a `…` menu with the rest. Bulk changes go through the selection
+ * customer's outcome (or contacted status) with a short summary, a note icon
+ * and a `…` menu with the four outcomes and the rest. Bulk changes go through the selection
  * bar. `unavailable` (follow-ups failed to load) disables everything with
  * the reason; `outcomesUnavailable` disables only the outcome actions.
  */
@@ -119,10 +120,6 @@ export function FollowupActions({
 
   const outcomeBlocked = unavailable ?? outcomesUnavailable;
   const hasOutcome = isContactOutcome(followup?.outcome);
-  const pendingOutcome =
-    outcomeMutation.isPending && outcomeMutation.variables.input.outcome !== "cleared"
-      ? outcomeMutation.variables.input.outcome
-      : null;
 
   // Resolves to an error message, or null once saved (the reasons popup
   // stays open on failure).
@@ -169,23 +166,29 @@ export function FollowupActions({
   const contactedBy = byLine(followup?.contacted_by_email ?? null, followup?.contacted_at ?? null);
 
   return (
-    <div className="min-w-[220px] space-y-2">
-      <div className="flex items-center gap-1.5">
-        {hasOutcome && followup ? (
-          <OutcomeBadge followup={followup} />
-        ) : (
-          <ContactedBadge
-            contacted={contacted}
-            saving={contactMutation.isPending}
-            tooltip={
-              unavailable ??
-              (contacted ? `Contacted${contactedBy ? ` ${contactedBy}` : ""}` : "Not contacted yet")
-            }
-          />
-        )}
+    <div className="flex min-w-[200px] items-start justify-between gap-2">
+      <div className="min-w-0 space-y-1 pt-1">
+        <div className="flex items-center gap-1.5">
+          {hasOutcome && followup ? (
+            <OutcomeBadge followup={followup} />
+          ) : (
+            <ContactedBadge
+              contacted={contacted}
+              saving={contactMutation.isPending}
+              tooltip={
+                unavailable ??
+                (contacted ? `Contacted${contactedBy ? ` ${contactedBy}` : ""}` : "Not contacted yet")
+              }
+            />
+          )}
+          {outcomeMutation.isPending && (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-label="Saving" />
+          )}
+        </div>
+        <ContactSummary followup={followup} />
+      </div>
 
-        <span className="flex-1" />
-
+      <div className="flex shrink-0 items-center">
         <Tooltip>
           <TooltipTrigger asChild>
             {/* span keeps the tooltip working while the button is disabled */}
@@ -209,7 +212,7 @@ export function FollowupActions({
           </TooltipContent>
         </Tooltip>
 
-        {/* Non-modal so the note dialog can open straight from a menu item. */}
+        {/* Non-modal so the note and reasons dialogs can open straight from a menu item. */}
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <Button
@@ -223,7 +226,7 @@ export function FollowupActions({
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuContent align="end" className="w-64">
             {unavailable && (
               <>
                 <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
@@ -232,6 +235,41 @@ export function FollowupActions({
                 <DropdownMenuSeparator />
               </>
             )}
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Record outcome</DropdownMenuLabel>
+            {outcomesUnavailable && !unavailable && (
+              <p className="px-2 pb-1.5 text-xs text-muted-foreground">{outcomesUnavailable}</p>
+            )}
+            {CONTACT_OUTCOMES.map((outcome) => {
+              const Icon = OUTCOME_ICONS[outcome];
+              const current = followup?.outcome === outcome;
+              const hint =
+                current && outcome === "no_answer"
+                  ? "Log again"
+                  : current
+                    ? "Current"
+                    : outcome === "booked" && acuityBooked
+                      ? "In Acuity"
+                      : null;
+              return (
+                <DropdownMenuItem
+                  key={outcome}
+                  className="gap-2"
+                  disabled={Boolean(outcomeBlocked) || outcomeMutation.isPending}
+                  onSelect={() => selectOutcome(outcome)}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="flex-1">{OUTCOME_LABELS[outcome].label}</span>
+                  {current && <Check className="h-3.5 w-3.5 text-primary" aria-hidden />}
+                  {hint && <span className="sr-only">({hint})</span>}
+                  {hint && !current && (
+                    <span className="text-xs text-green-700" aria-hidden>
+                      {hint}
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              );
+            })}
+            <DropdownMenuSeparator />
             <DropdownMenuItem
               className="gap-2"
               disabled={Boolean(outcomeBlocked)}
@@ -268,18 +306,6 @@ export function FollowupActions({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
-      <ContactSummary followup={followup} />
-
-      {outcomeBlocked && <p className="text-xs text-muted-foreground">{outcomeBlocked}</p>}
-      <OutcomeButtons
-        current={followup?.outcome}
-        customerName={customerName}
-        disabled={Boolean(outcomeBlocked) || outcomeMutation.isPending}
-        pending={pendingOutcome}
-        acuityBooked={acuityBooked}
-        onSelect={selectOutcome}
-      />
 
       <NotContinuingDialog
         open={reasonsOpen}
