@@ -18,6 +18,7 @@ import {
   type OutcomeInput,
   applyOutcome,
   attemptInsert,
+  countFollowUpsDue,
 } from "@/lib/contactOutcomes";
 
 const FOLLOWUPS_QUERY_KEY = ["customer-followups"];
@@ -680,6 +681,12 @@ export function useRecordOutcome() {
       void queryClient.invalidateQueries({ queryKey: [...CONTACT_HISTORY_QUERY_KEY, customerKey] });
     },
   });
+}
+
+/** "Continue later" customers due a call today or earlier (0 until loaded). */
+export function useFollowUpsDueCount(): number {
+  const { data } = useCustomerFollowups();
+  return data ? countFollowUpsDue(data) : 0;
 }
 
 // Whether the contact-outcomes database update has been applied. Until it

@@ -1,6 +1,7 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { AdminDashboard } from "@/components/admin/AdminDashboard";
 import { AdminInvite } from "@/components/admin/AdminInvite";
+import { FollowUpsReport } from "@/components/admin/FollowUpsReport";
 import { PortalAdoption } from "@/components/admin/PortalAdoption";
 import { SessionProgression } from "@/components/admin/SessionProgression";
 import { useIsAdmin } from "@/hooks/useAdmin";
@@ -20,6 +21,7 @@ const SECTION_CONTENT: Record<AdminSectionId, (props: { subsectionId?: string })
   progression: ({ subsectionId }) => (
     <SessionProgression fromSession={parseProgressionRange(subsectionId)!} />
   ),
+  followups: FollowUpsReport,
   team: AdminInvite,
 };
 

@@ -1,9 +1,16 @@
-import { LayoutDashboard, MonitorSmartphone, Repeat, UserPlus, type LucideIcon } from "lucide-react";
+import {
+  LayoutDashboard,
+  MonitorSmartphone,
+  PhoneCall,
+  Repeat,
+  UserPlus,
+  type LucideIcon,
+} from "lucide-react";
 import { PROGRESSION_RANGES } from "../../supabase/functions/admin-customer-insights/logic.ts";
 
 // Sections of the admin area. Drives both the admin sidebar and the /admin
 // page; add new admin features here.
-export type AdminSectionId = "overview" | "adoption" | "progression" | "team";
+export type AdminSectionId = "overview" | "adoption" | "progression" | "followups" | "team";
 
 /** A page under a section, e.g. Progression → Session 2–3. */
 export interface AdminSubsection {
@@ -63,6 +70,14 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     icon: Repeat,
     description: "How customers progress from one session to the next.",
     children: PROGRESSION_SUBSECTIONS,
+  },
+  {
+    id: "followups",
+    name: "Follow-ups",
+    href: "/admin/followups",
+    icon: PhoneCall,
+    description:
+      "Customers who'll continue later, due a call 30 days on, and why others aren't continuing.",
   },
   {
     id: "team",

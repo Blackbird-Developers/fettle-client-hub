@@ -42,6 +42,7 @@ describe("resolveAdminRoute", () => {
 
   it("opens plain sections and drops stray sub-paths", () => {
     expect(resolveAdminRoute("adoption", undefined)).toMatchObject({ section: { id: "adoption" } });
+    expect(resolveAdminRoute("followups", undefined)).toMatchObject({ section: { id: "followups" } });
     expect(resolveAdminRoute("team", "extra")).toEqual({ redirect: "/admin/team" });
   });
 

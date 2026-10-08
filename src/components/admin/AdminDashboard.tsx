@@ -28,6 +28,7 @@ import {
   useEngagementStats,
 } from "@/hooks/useAdmin";
 import { ApiError, ApiErrorType } from "@/lib/api-errors";
+import { FollowUpsSummaryCard } from "./FollowUpsSummaryCard";
 
 function StatCard({
   title,
@@ -267,6 +268,8 @@ export function AdminDashboard() {
           onRetry={() => window.location.reload()}
         />
       )}
+
+      <FollowUpsSummaryCard />
 
       {/* Revenue Metrics */}
       <div>
