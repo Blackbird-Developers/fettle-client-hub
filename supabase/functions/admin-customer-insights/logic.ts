@@ -14,6 +14,8 @@ export interface AcuityAppointment {
   appointmentTypeID?: number | null;
   calendar?: string | null;
   canceled?: boolean | null;
+  /** Staff labels such as "Quoted " (Acuity names can carry trailing spaces). */
+  labels?: { id: number; name?: string | null }[] | null;
 }
 
 export const DAY_MS = 86_400_000;

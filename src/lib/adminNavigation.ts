@@ -1,4 +1,5 @@
 import {
+  Flame,
   LayoutDashboard,
   MonitorSmartphone,
   PhoneCall,
@@ -10,7 +11,13 @@ import { PROGRESSION_RANGES } from "../../supabase/functions/admin-customer-insi
 
 // Sections of the admin area. Drives both the admin sidebar and the /admin
 // page; add new admin features here.
-export type AdminSectionId = "overview" | "adoption" | "progression" | "followups" | "team";
+export type AdminSectionId =
+  | "overview"
+  | "leads"
+  | "adoption"
+  | "progression"
+  | "followups"
+  | "team";
 
 /** A page under a section, e.g. Progression → Session 2–3. */
 export interface AdminSubsection {
@@ -55,6 +62,13 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     href: "/admin",
     icon: LayoutDashboard,
     description: "Business metrics across sessions, packages and retention.",
+  },
+  {
+    id: "leads",
+    name: "Hot leads",
+    href: "/admin/leads",
+    icon: Flame,
+    description: "People who missed a free Let's Talk call or were quoted, and haven't booked yet.",
   },
   {
     id: "adoption",

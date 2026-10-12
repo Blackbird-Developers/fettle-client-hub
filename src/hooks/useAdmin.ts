@@ -28,6 +28,8 @@ import type {
   GradeDefinition,
   ProgressionView,
 } from "../../supabase/functions/admin-customer-insights/logic.ts";
+import type { LeadsView } from "../../supabase/functions/admin-leads/logic.ts";
+import type { RecentAttempt } from "@/lib/hotLeads";
 
 // Types for admin metrics response
 interface AdminMetricsResponse {
@@ -408,6 +410,61 @@ export interface CustomerInsightsResponse {
   };
 }
 
+// GETs one of the admin Acuity edge functions with the caller's session.
+async function fetchAdminFunction(name: string) {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData?.session?.access_token;
+
+  if (!accessToken) {
+    throw {
+      type: "unauthorized",
+      message: "Not authenticated",
+      retryable: false,
+    } as ApiError;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${name}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+    });
+  } catch (fetchError) {
+    throw classifyApiError(fetchError);
+  }
+
+  if (!response.ok) {
+    throw classifyApiError(new Error(`HTTP ${response.status}`), response);
+  }
+
+  const data = await response.json();
+
+  if (data.error) {
+    throw {
+      type: "server_error",
+      message: data.error,
+      retryable: true,
+    } as ApiError;
+  }
+  return data;
+}
+
+// Shared by the Acuity-backed admin queries: slow to build, so cached for
+// five minutes, never refetched on window focus, retried once at most.
+const ACUITY_QUERY_OPTIONS = {
+  staleTime: 1000 * 60 * 5,
+  refetchOnWindowFocus: false,
+  retry: (failureCount: number, error: ApiError) => {
+    const nonRetryableTypes = ["unauthorized", "forbidden", "cors", "network"];
+    if (error?.type && nonRetryableTypes.includes(error.type)) {
+      return false;
+    }
+    return failureCount < 1;
+  },
+};
+
 // Portal adoption + session-to-session progression, built from Acuity.
 // One request feeds every admin insights page. It can take a while (it walks Acuity
 // history), so it is cached and never refetched on window focus.
@@ -417,58 +474,72 @@ export function useCustomerInsights() {
   return useQuery<CustomerInsightsResponse, ApiError>({
     queryKey: ["admin-customer-insights"],
     queryFn: async (): Promise<CustomerInsightsResponse> => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-
-      if (!accessToken) {
-        throw {
-          type: "unauthorized",
-          message: "Not authenticated",
-          retryable: false,
-        } as ApiError;
-      }
-
-      let response: Response;
-      try {
-        response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-customer-insights`,
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-      } catch (fetchError) {
-        throw classifyApiError(fetchError);
-      }
-
-      if (!response.ok) {
-        throw classifyApiError(new Error(`HTTP ${response.status}`), response);
-      }
-
-      const data = await response.json();
-
-      if (data.error) {
-        throw {
-          type: "server_error",
-          message: data.error,
-          retryable: true,
-        } as ApiError;
-      }
-
+      const data = await fetchAdminFunction("admin-customer-insights");
       return { ...data, progression: normalizeProgression(data.progression) } as CustomerInsightsResponse;
     },
     enabled: isAdmin === true,
-    staleTime: 1000 * 60 * 5,
-    refetchOnWindowFocus: false,
-    retry: (failureCount, error) => {
-      const nonRetryableTypes = ["unauthorized", "forbidden", "cors", "network"];
-      if (error?.type && nonRetryableTypes.includes(error.type)) {
-        return false;
+    ...ACUITY_QUERY_OPTIONS,
+  });
+}
+
+// Response of the admin-leads edge function.
+export interface HotLeadsResponse {
+  generatedAt: string;
+  lookbackDays: number;
+  leads: LeadsView;
+  dataIssues: {
+    incompleteDates: string[];
+    leadsWithoutEmail: number;
+    unverifiedHistory: number;
+  };
+  diagnostics: {
+    windowAppointments: number;
+    leads: number;
+    acuityRequests: number;
+    durationMs: number;
+  };
+}
+
+// Hot leads (Let's Talk no-shows and quotes), built from Acuity.
+export function useHotLeads() {
+  const { data: isAdmin } = useIsAdmin();
+
+  return useQuery<HotLeadsResponse, ApiError>({
+    queryKey: ["admin-leads"],
+    queryFn: async () => (await fetchAdminFunction("admin-leads")) as HotLeadsResponse,
+    enabled: isAdmin === true,
+    ...ACUITY_QUERY_OPTIONS,
+  });
+}
+
+const RECENT_ATTEMPTS_QUERY_KEY = [...CONTACT_HISTORY_QUERY_KEY, "recent"];
+
+// Contact attempts logged in the last `days` days, for counting attempts
+// since each lead. Paged past the API's 1000-row cap.
+export function useRecentContactAttempts(days: number) {
+  const { data: isAdmin } = useIsAdmin();
+
+  return useQuery<RecentAttempt[], { code?: string; message: string }>({
+    queryKey: [...RECENT_ATTEMPTS_QUERY_KEY, days],
+    queryFn: async () => {
+      const since = new Date(Date.now() - days * 86_400_000).toISOString();
+      const rows: RecentAttempt[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from("customer_contact_attempts")
+          .select("customer_key, outcome, created_at")
+          .gte("created_at", since)
+          .order("created_at")
+          .range(from, from + 999);
+        if (error) throw error;
+        rows.push(...data);
+        if (data.length < 1000) break;
       }
-      return failureCount < 1;
+      return rows;
     },
+    enabled: isAdmin === true,
+    staleTime: 1000 * 60,
+    retry: (failureCount, error) => !isMissingTableError(error) && failureCount < 2,
   });
 }
 
@@ -679,6 +750,7 @@ export function useRecordOutcome() {
     },
     onSettled: (_data, _error, { customerKey }) => {
       void queryClient.invalidateQueries({ queryKey: [...CONTACT_HISTORY_QUERY_KEY, customerKey] });
+      void queryClient.invalidateQueries({ queryKey: RECENT_ATTEMPTS_QUERY_KEY });
     },
   });
 }

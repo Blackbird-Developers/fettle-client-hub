@@ -164,7 +164,7 @@ export function InsightsHeader({
   isFetching,
   onRefresh,
 }: {
-  data?: CustomerInsightsResponse;
+  data?: { generatedAt: string };
   isFetching: boolean;
   onRefresh: () => void;
 }) {
