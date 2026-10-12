@@ -14,6 +14,7 @@ import {
 } from "@/lib/customerFollowups";
 import { appendNote, runWithConcurrency } from "@/lib/bulkFollowups";
 import {
+  type AttemptMeta,
   type ContactAttempt,
   type OutcomeInput,
   applyOutcome,
@@ -23,6 +24,7 @@ import {
 
 const FOLLOWUPS_QUERY_KEY = ["customer-followups"];
 const CONTACT_HISTORY_QUERY_KEY = ["customer-contact-history"];
+const NO_ANSWER_QUERY_KEY = ["no-answer-sequences"];
 import type {
   AdoptionView,
   GradeDefinition,
@@ -31,6 +33,7 @@ import type {
 import type { LeadsView } from "../../supabase/functions/admin-leads/logic.ts";
 import type { RecentAttempt } from "@/lib/hotLeads";
 import type { EmailSendRow } from "@/lib/portalEmails";
+import { type NoAnswerSequence, countDue } from "@/lib/noAnswer";
 
 // Types for admin metrics response
 interface AdminMetricsResponse {
@@ -657,10 +660,15 @@ async function appendFollowupNote(customerKey: string, text: string, author: str
 
 // Records an outcome as a new contact attempt; the database updates the
 // customer's summary row, which is read back for the page.
-async function recordOutcome(customerKey: string, customerName: string | null, input: OutcomeInput) {
+async function recordOutcome(
+  customerKey: string,
+  customerName: string | null,
+  input: OutcomeInput,
+  meta?: AttemptMeta
+) {
   const { error } = await supabase
     .from("customer_contact_attempts")
-    .insert(attemptInsert(customerKey, customerName, input));
+    .insert(attemptInsert(customerKey, customerName, input, meta));
   if (error) throw error;
 
   const { data, error: readError } = await supabase
@@ -693,18 +701,21 @@ export function useBulkUpdateFollowups() {
       keys,
       action,
       nameOf,
+      metaOf,
     }: {
       keys: string[];
       action: BulkFollowupAction;
       /** Customer names, stored with outcomes for the Follow-ups report. */
       nameOf?: (key: string) => string | null;
+      /** Phone, source etc. saved with each outcome. */
+      metaOf?: (key: string) => AttemptMeta;
     }) => {
       setProgress({ done: 0, total: keys.length });
       const save =
         action.kind === "contacted"
           ? (key: string) => saveFollowup(key, { contacted: action.contacted })
           : action.kind === "outcome"
-            ? (key: string) => recordOutcome(key, nameOf?.(key) ?? null, action.input)
+            ? (key: string) => recordOutcome(key, nameOf?.(key) ?? null, action.input, metaOf?.(key))
             : (key: string) => appendFollowupNote(key, action.text, user?.email ?? null);
       return runWithConcurrency(
         keys,
@@ -722,6 +733,7 @@ export function useBulkUpdateFollowups() {
     onSettled: () => {
       setProgress(null);
       void queryClient.invalidateQueries({ queryKey: CONTACT_HISTORY_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: NO_ANSWER_QUERY_KEY });
     },
   });
 
@@ -766,11 +778,13 @@ export function useRecordOutcome() {
       customerKey,
       customerName,
       input,
+      meta,
     }: {
       customerKey: string;
       customerName: string | null;
       input: OutcomeInput;
-    }) => recordOutcome(customerKey, customerName, input),
+      meta?: AttemptMeta;
+    }) => recordOutcome(customerKey, customerName, input, meta),
     onMutate: async ({ customerKey, customerName, input }) => {
       await queryClient.cancelQueries({ queryKey: FOLLOWUPS_QUERY_KEY });
       const previous = queryClient.getQueryData<CustomerFollowup[]>(FOLLOWUPS_QUERY_KEY);
@@ -790,6 +804,7 @@ export function useRecordOutcome() {
     onSettled: (_data, _error, { customerKey }) => {
       void queryClient.invalidateQueries({ queryKey: [...CONTACT_HISTORY_QUERY_KEY, customerKey] });
       void queryClient.invalidateQueries({ queryKey: RECENT_ATTEMPTS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: NO_ANSWER_QUERY_KEY });
     },
   });
 }
@@ -833,5 +848,83 @@ export function useContactHistory(customerKey: string, enabled: boolean) {
       return data;
     },
     enabled,
+  });
+}
+
+// No-answer follow-up sequences (the No answer page and its sidebar badge).
+// Read straight from the table; RLS limits it to admins. Paged past the
+// API's 1000-row cap.
+export function useNoAnswerSequences() {
+  const { data: isAdmin } = useIsAdmin();
+
+  return useQuery<NoAnswerSequence[], { code?: string; message: string }>({
+    queryKey: NO_ANSWER_QUERY_KEY,
+    queryFn: async () => {
+      const rows: NoAnswerSequence[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from("no_answer_sequences")
+          .select("*")
+          .order("started_at")
+          .range(from, from + 999);
+        if (error) throw error;
+        rows.push(...data);
+        if (data.length < 1000) break;
+      }
+      return rows;
+    },
+    enabled: isAdmin === true,
+    staleTime: 1000 * 60,
+    // Missing table = migration not applied yet; retrying won't help.
+    retry: (failureCount, error) => !isMissingTableError(error) && failureCount < 2,
+  });
+}
+
+/** Sequences with an attempt due today or earlier (0 until loaded). */
+export function useNoAnswerDueCount(): number {
+  const { data } = useNoAnswerSequences();
+  return data ? countDue(data) : 0;
+}
+
+// Ends an open sequence by hand; the reason is required.
+export function useCloseSequence() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ sequenceId, reason }: { sequenceId: string; reason: string }) => {
+      const { data, error } = await supabase.rpc("close_no_answer_sequence", {
+        p_sequence_id: sequenceId,
+        p_reason: reason,
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: NO_ANSWER_QUERY_KEY }),
+  });
+}
+
+// Starts a new sequence by hand (e.g. within 60 days of the last one finishing).
+export function useRestartSequence() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      customerKey,
+      customerName,
+      customerPhone,
+    }: {
+      customerKey: string;
+      customerName: string | null;
+      customerPhone: string | null;
+    }) => {
+      const { data, error } = await supabase.rpc("restart_no_answer_sequence", {
+        p_customer_key: customerKey,
+        p_customer_name: customerName ?? "",
+        p_customer_phone: customerPhone ?? "",
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: NO_ANSWER_QUERY_KEY }),
   });
 }

@@ -243,6 +243,7 @@ export function HotLeads() {
   }, [visibleKeys]);
   const selectedKeys = visibleKeys.filter((key) => selected.has(key));
   const nameByKey = useMemo(() => new Map(leads.map((lead) => [lead.row.key, lead.row.name])), [leads]);
+  const phoneByKey = useMemo(() => new Map(leads.map((lead) => [lead.row.key, lead.row.phone])), [leads]);
 
   const [refocusHeader, setRefocusHeader] = useState(false);
   useEffect(() => {
@@ -452,6 +453,8 @@ export function HotLeads() {
                         unavailable={followupsUnavailable}
                         outcomesUnavailable={outcomesUnavailable}
                         acuityBooked={row.status === "converted"}
+                        customerPhone={row.phone}
+                        source="hot_lead"
                       />
                     </TableCell>
                   </TableRow>
@@ -474,6 +477,8 @@ export function HotLeads() {
           visibleCount={leads.length}
           followupsByKey={followupsByKey}
           nameByKey={nameByKey}
+          phoneByKey={phoneByKey}
+          source="hot_lead"
           unavailable={followupsUnavailable}
           outcomesUnavailable={outcomesUnavailable}
           bulk={bulk}

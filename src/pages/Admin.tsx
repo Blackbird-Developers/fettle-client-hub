@@ -3,6 +3,7 @@ import { AdminDashboard } from "@/components/admin/AdminDashboard";
 import { AdminInvite } from "@/components/admin/AdminInvite";
 import { FollowUpsReport } from "@/components/admin/FollowUpsReport";
 import { HotLeads } from "@/components/admin/HotLeads";
+import { NoAnswer } from "@/components/admin/NoAnswer";
 import { PortalAdoption } from "@/components/admin/PortalAdoption";
 import { SessionProgression } from "@/components/admin/SessionProgression";
 import { useIsAdmin } from "@/hooks/useAdmin";
@@ -19,6 +20,7 @@ import { Loader2 } from "lucide-react";
 const SECTION_CONTENT: Record<AdminSectionId, (props: { subsectionId?: string }) => JSX.Element> = {
   overview: AdminDashboard,
   leads: HotLeads,
+  "no-answer": NoAnswer,
   adoption: PortalAdoption,
   progression: ({ subsectionId }) => (
     <SessionProgression fromSession={parseProgressionRange(subsectionId)!} />

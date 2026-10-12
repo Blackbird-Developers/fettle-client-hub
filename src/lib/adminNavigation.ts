@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   MonitorSmartphone,
   PhoneCall,
+  PhoneMissed,
   Repeat,
   UserPlus,
   type LucideIcon,
@@ -14,6 +15,7 @@ import { PROGRESSION_RANGES } from "../../supabase/functions/admin-customer-insi
 export type AdminSectionId =
   | "overview"
   | "leads"
+  | "no-answer"
   | "adoption"
   | "progression"
   | "followups"
@@ -69,6 +71,13 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     href: "/admin/leads",
     icon: Flame,
     description: "People who missed a free Let's Talk call or were quoted, and haven't booked yet.",
+  },
+  {
+    id: "no-answer",
+    name: "No answer",
+    href: "/admin/no-answer",
+    icon: PhoneMissed,
+    description: "Customers who didn't pick up, with up to six follow-up attempts scheduled.",
   },
   {
     id: "adoption",

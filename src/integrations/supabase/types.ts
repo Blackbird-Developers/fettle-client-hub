@@ -16,6 +16,12 @@ export type Database = {
     Tables: {
       customer_contact_attempts: {
         Row: {
+          attempt_number: number | null
+          customer_phone: string | null
+          method: string | null
+          note: string | null
+          sequence_id: string | null
+          source: string | null
           created_at: string
           created_by: string | null
           created_by_email: string | null
@@ -27,6 +33,12 @@ export type Database = {
           reasons: string[] | null
         }
         Insert: {
+          attempt_number?: number | null
+          customer_phone?: string | null
+          method?: string | null
+          note?: string | null
+          sequence_id?: string | null
+          source?: string | null
           created_at?: string
           created_by?: string | null
           created_by_email?: string | null
@@ -38,6 +50,12 @@ export type Database = {
           reasons?: string[] | null
         }
         Update: {
+          attempt_number?: number | null
+          customer_phone?: string | null
+          method?: string | null
+          note?: string | null
+          sequence_id?: string | null
+          source?: string | null
           created_at?: string
           created_by?: string | null
           created_by_email?: string | null
@@ -224,6 +242,66 @@ export type Database = {
           id?: string
           session_id?: string | null
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      no_answer_sequences: {
+        Row: {
+          attempts_done: number
+          closed_at: string | null
+          closed_by: string | null
+          closed_by_email: string | null
+          closed_reason: string | null
+          customer_key: string
+          customer_name: string | null
+          customer_phone: string | null
+          id: string
+          last_attempt_at: string | null
+          last_attempt_by_email: string | null
+          last_method: string | null
+          next_due_on: string | null
+          source: string
+          started_at: string
+          started_by_email: string | null
+          status: string
+        }
+        Insert: {
+          attempts_done?: number
+          closed_at?: string | null
+          closed_by?: string | null
+          closed_by_email?: string | null
+          closed_reason?: string | null
+          customer_key: string
+          customer_name?: string | null
+          customer_phone?: string | null
+          id?: string
+          last_attempt_at?: string | null
+          last_attempt_by_email?: string | null
+          last_method?: string | null
+          next_due_on?: string | null
+          source?: string
+          started_at?: string
+          started_by_email?: string | null
+          status?: string
+        }
+        Update: {
+          attempts_done?: number
+          closed_at?: string | null
+          closed_by?: string | null
+          closed_by_email?: string | null
+          closed_reason?: string | null
+          customer_key?: string
+          customer_name?: string | null
+          customer_phone?: string | null
+          id?: string
+          last_attempt_at?: string | null
+          last_attempt_by_email?: string | null
+          last_method?: string | null
+          next_due_on?: string | null
+          source?: string
+          started_at?: string
+          started_by_email?: string | null
+          status?: string
         }
         Relationships: []
       }
@@ -421,12 +499,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      close_no_answer_sequence: {
+        Args: { p_reason: string; p_sequence_id: string }
+        Returns: Database["public"]["Tables"]["no_answer_sequences"]["Row"]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
         Returns: boolean
+      }
+      restart_no_answer_sequence: {
+        Args: { p_customer_key: string; p_customer_name: string; p_customer_phone: string }
+        Returns: Database["public"]["Tables"]["no_answer_sequences"]["Row"]
       }
       trigger_monthly_credit_summary: { Args: never; Returns: undefined }
     }

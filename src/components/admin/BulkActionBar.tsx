@@ -38,6 +38,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  type AttemptSource,
   type ContactOutcome,
   type OutcomeInput,
   CONTACT_OUTCOMES,
@@ -82,6 +83,8 @@ export function BulkActionBar({
   bulk,
   onClear,
   onFinished,
+  phoneByKey,
+  source,
 }: {
   selectedKeys: string[];
   visibleCount: number;
@@ -92,6 +95,10 @@ export function BulkActionBar({
   bulk: BulkUpdater;
   onClear: () => void;
   onFinished: (failedKeys: string[]) => void;
+  /** Saved with outcomes, so the No answer page can show who to call. */
+  phoneByKey?: Map<string, string | null>;
+  /** The page this is on; a No answer starts a sequence with this source. */
+  source?: AttemptSource;
 }) {
   const { toast } = useToast();
   const [confirmUncontact, setConfirmUncontact] = useState(false);
@@ -107,7 +114,17 @@ export function BulkActionBar({
 
   /** Runs the action and reports it; resolves to the keys that failed. */
   const runBulk = async (keys: string[], action: BulkFollowupAction, done: string) => {
-    const results = await bulk.run({ keys, action, nameOf: (key) => nameByKey.get(key) ?? null });
+    const missedCall = action.kind === "outcome" && action.input.outcome === "no_answer";
+    const results = await bulk.run({
+      keys,
+      action,
+      nameOf: (key) => nameByKey.get(key) ?? null,
+      metaOf: (key) => ({
+        source,
+        customerPhone: phoneByKey?.get(key) ?? null,
+        method: missedCall ? "call" : null,
+      }),
+    });
     const { succeeded, failed } = splitResults(results);
     const failedKeys = failed.map((r) => r.key);
     onFinished(failedKeys);

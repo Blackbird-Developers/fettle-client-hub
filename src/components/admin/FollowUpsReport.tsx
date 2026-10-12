@@ -160,6 +160,8 @@ export function FollowUpsReport() {
       unavailable={null}
       outcomesUnavailable={outcomesUnavailable}
       acuityBooked={c.nextSessionStatus !== null && c.nextSessionStatus !== "none"}
+      customerPhone={c.phone}
+      source="followups"
     />
   );
 

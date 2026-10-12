@@ -34,6 +34,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useRecordOutcome, useUpdateFollowup } from "@/hooks/useAdmin";
 import {
+  type AttemptSource,
   type ContactOutcome,
   type OutcomeInput,
   CONTACT_OUTCOMES,
@@ -74,6 +75,8 @@ export function FollowupActions({
   unavailable,
   outcomesUnavailable,
   acuityBooked,
+  customerPhone,
+  source,
 }: {
   customerKey: string;
   customerName: string | null;
@@ -82,6 +85,10 @@ export function FollowupActions({
   outcomesUnavailable: string | null;
   /** Acuity already shows their next session (hint on the Booked button). */
   acuityBooked?: boolean;
+  /** Saved with the outcome, so the No answer page can show who to call. */
+  customerPhone?: string | null;
+  /** The page this is on; a No answer starts a sequence with this source. */
+  source?: AttemptSource;
 }) {
   const { toast } = useToast();
   const contactMutation = useUpdateFollowup();
@@ -126,7 +133,13 @@ export function FollowupActions({
   const record = (input: OutcomeInput) =>
     new Promise<string | null>((resolve) => {
       outcomeMutation.mutate(
-        { customerKey, customerName, input },
+        {
+          customerKey,
+          customerName,
+          input,
+          // A No answer from these pages is a missed call.
+          meta: { source, customerPhone, method: input.outcome === "no_answer" ? "call" : null },
+        },
         {
           onSuccess: (saved) => {
             resolve(null);

@@ -76,11 +76,28 @@ export function describeReasons(
     .join(", ");
 }
 
+export type ContactMethod = "call" | "email" | "sms" | "whatsapp" | "other";
+
+/** Where an outcome was logged; a No answer starts a sequence with this source. */
+export type AttemptSource = "progression" | "hot_lead" | "followups" | "no_answer";
+
+/** Optional details saved with an outcome (all checked by the database). */
+export interface AttemptMeta {
+  method?: ContactMethod | null;
+  note?: string | null;
+  source?: AttemptSource | null;
+  customerPhone?: string | null;
+}
+
+/** Matches the CHECK constraint on customer_contact_attempts.note. */
+export const ATTEMPT_NOTE_MAX_LENGTH = 500;
+
 /** Row for customer_contact_attempts. Who/when are stamped by the database. */
 export function attemptInsert(
   customerKey: string,
   customerName: string | null,
-  input: OutcomeInput
+  input: OutcomeInput,
+  meta: AttemptMeta = {}
 ): TablesInsert<"customer_contact_attempts"> {
   const notContinuing = input.outcome === "not_continuing";
   // Stored in the popup's order, without duplicates.
@@ -94,6 +111,10 @@ export function attemptInsert(
     reasons,
     reason_other:
       notContinuing && reasons?.includes("other") ? input.reasonOther?.trim() || null : null,
+    method: meta.method ?? null,
+    note: meta.note?.trim() || null,
+    source: meta.source ?? null,
+    customer_phone: meta.customerPhone?.trim() || null,
   };
 }
 

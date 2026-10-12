@@ -166,6 +166,7 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
   }, [visibleKeys]);
   const selectedKeys = visibleKeys.filter((key) => selected.has(key));
   const nameByKey = useMemo(() => new Map(rows.map((row) => [row.key, row.name])), [rows]);
+  const phoneByKey = useMemo(() => new Map(rows.map((row) => [row.key, row.phone])), [rows]);
 
   // When everything saves, the bar (and the button that opened any dialog)
   // goes away with the selection, so focus moves to the header checkbox once
@@ -398,6 +399,8 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
                         unavailable={followupsUnavailable}
                         outcomesUnavailable={outcomesUnavailable}
                         acuityBooked={row.nextSessionStatus !== "none"}
+                        customerPhone={row.phone}
+                        source="progression"
                       />
                     </TableCell>
                   </TableRow>
@@ -420,6 +423,8 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
           visibleCount={rows.length}
           followupsByKey={followupsByKey}
           nameByKey={nameByKey}
+          phoneByKey={phoneByKey}
+          source="progression"
           unavailable={followupsUnavailable}
           outcomesUnavailable={outcomesUnavailable}
           bulk={bulk}

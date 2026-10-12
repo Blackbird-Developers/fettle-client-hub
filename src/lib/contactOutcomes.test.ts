@@ -57,7 +57,25 @@ describe("attemptInsert", () => {
       outcome: "not_continuing",
       reasons: ["price", "other"],
       reason_other: "moving",
+      method: null,
+      note: null,
+      source: null,
+      customer_phone: null,
     });
+  });
+
+  it("saves the method, note, source and phone, trimmed", () => {
+    expect(
+      attemptInsert(
+        "email:a@x.ie",
+        "Ann",
+        { outcome: "no_answer" },
+        { method: "call", note: "  left a voicemail ", source: "hot_lead", customerPhone: " 087 123 " }
+      )
+    ).toMatchObject({ method: "call", note: "left a voicemail", source: "hot_lead", customer_phone: "087 123" });
+    expect(
+      attemptInsert("email:a@x.ie", "Ann", { outcome: "no_answer" }, { note: "   ", customerPhone: "" })
+    ).toMatchObject({ note: null, customer_phone: null });
   });
 
   it("drops the Other text when Other isn't ticked", () => {

@@ -706,6 +706,8 @@ describe("contact outcomes", () => {
     expect(row.getByText("1 attempt · not reached yet")).toBeInTheDocument();
     expect(row.getByText("No answer")).toBeInTheDocument();
     expect(db.rows.get(keyOf("Ann Archer"))?.contacted).toBe(false);
+    // Saved so the No answer page knows where it came from and who to call.
+    expect(db.attempts[0]).toMatchObject({ source: "progression", method: "call" });
 
     // Clicking again logs another attempt.
     await pick(user, "Ann Archer", "No answer");

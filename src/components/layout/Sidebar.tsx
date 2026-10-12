@@ -18,7 +18,7 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
-import { useFollowUpsDueCount, useIsAdmin } from "@/hooks/useAdmin";
+import { useFollowUpsDueCount, useIsAdmin, useNoAnswerDueCount } from "@/hooks/useAdmin";
 import { ADMIN_SECTIONS, hasActiveChild } from "@/lib/adminNavigation";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -113,6 +113,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { data: isAdmin } = useIsAdmin();
   const adminMode = !!user && isAdmin === true;
   const followUpsDue = useFollowUpsDueCount();
+  const noAnswerDue = useNoAnswerDueCount();
 
   const handleSignOut = async () => {
     await signOut();
@@ -125,10 +126,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   const navigation = adminMode
     ? adminNavigation.map((item) =>
-        // Follow-ups due a call today or earlier.
+        // Follow-ups and No answer attempts due today or earlier.
         item.href === "/admin/followups" && followUpsDue > 0
           ? { ...item, badge: String(followUpsDue) }
-          : item
+          : item.href === "/admin/no-answer" && noAnswerDue > 0
+            ? { ...item, badge: String(noAnswerDue) }
+            : item
       )
     : user
       ? authenticatedNavigation
