@@ -31,6 +31,7 @@ import type {
   ProgressionView,
 } from "../../supabase/functions/admin-customer-insights/logic.ts";
 import type { LeadsView } from "../../supabase/functions/admin-leads/logic.ts";
+import type { BundlesView } from "../../supabase/functions/admin-bundles/logic.ts";
 import type { RecentAttempt } from "@/lib/hotLeads";
 import type { EmailSendRow } from "@/lib/portalEmails";
 import { type NoAnswerSequence, countDue } from "@/lib/noAnswer";
@@ -511,6 +512,36 @@ export function useHotLeads() {
   return useQuery<HotLeadsResponse, ApiError>({
     queryKey: ["admin-leads"],
     queryFn: async () => (await fetchAdminFunction("admin-leads")) as HotLeadsResponse,
+    enabled: isAdmin === true,
+    ...ACUITY_QUERY_OPTIONS,
+  });
+}
+
+// Response of the admin-bundles edge function.
+export interface BundlesResponse {
+  generatedAt: string;
+  lookbackDays: number;
+  bundles: BundlesView;
+  dataIssues: {
+    incompleteDates: string[];
+    bundlesWithoutEmail: number;
+    matchedByEmailOnly: number;
+  };
+  diagnostics: {
+    certificates: number;
+    windowAppointments: number;
+    acuityRequests: number;
+    durationMs: number;
+  };
+}
+
+// Session bundles (Acuity certificates) with credits used and left.
+export function useBundles() {
+  const { data: isAdmin } = useIsAdmin();
+
+  return useQuery<BundlesResponse, ApiError>({
+    queryKey: ["admin-bundles"],
+    queryFn: async () => (await fetchAdminFunction("admin-bundles")) as BundlesResponse,
     enabled: isAdmin === true,
     ...ACUITY_QUERY_OPTIONS,
   });

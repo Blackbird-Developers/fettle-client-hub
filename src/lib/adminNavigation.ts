@@ -1,5 +1,6 @@
 import {
   Flame,
+  Package,
   LayoutDashboard,
   MonitorSmartphone,
   PhoneCall,
@@ -17,6 +18,7 @@ export type AdminSectionId =
   | "leads"
   | "no-answer"
   | "adoption"
+  | "bundles"
   | "progression"
   | "followups"
   | "team";
@@ -85,6 +87,13 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     href: "/admin/adoption",
     icon: MonitorSmartphone,
     description: "Recently active Acuity customers who don't have a My Fettle Hub account.",
+  },
+  {
+    id: "bundles",
+    name: "Bundles",
+    href: "/admin/bundles",
+    icon: Package,
+    description: "Session bundles in Acuity: credits used and left, expiry, and who needs a call.",
   },
   {
     id: "progression",
