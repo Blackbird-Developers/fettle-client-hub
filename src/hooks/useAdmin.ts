@@ -30,6 +30,7 @@ import type {
 } from "../../supabase/functions/admin-customer-insights/logic.ts";
 import type { LeadsView } from "../../supabase/functions/admin-leads/logic.ts";
 import type { RecentAttempt } from "@/lib/hotLeads";
+import type { EmailSendRow } from "@/lib/portalEmails";
 
 // Types for admin metrics response
 interface AdminMetricsResponse {
@@ -539,6 +540,44 @@ export function useRecentContactAttempts(days: number) {
     },
     enabled: isAdmin === true,
     staleTime: 1000 * 60,
+    retry: (failureCount, error) => !isMissingTableError(error) && failureCount < 2,
+  });
+}
+
+// Portal-adoption emails sent so far, plus how many addresses have
+// unsubscribed, for the Portal adoption page's email panel. Admin-only by RLS.
+export function usePortalEmailSends() {
+  const { data: isAdmin } = useIsAdmin();
+
+  return useQuery<
+    { sends: EmailSendRow[]; unsubscribed: number },
+    { code?: string; message: string }
+  >({
+    queryKey: ["portal-email-sends"],
+    queryFn: async () => {
+      const sends: EmailSendRow[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from("email_sends")
+          .select(
+            "id, campaign, status, customer_name, email, sent_at, delivered_at, opened_at, first_clicked_at, bounced_at, complained_at, signed_up_at"
+          )
+          .order("created_at")
+          .range(from, from + 999);
+        if (error) throw error;
+        sends.push(...(data as EmailSendRow[]));
+        if (data.length < 1000) break;
+      }
+      const { count, error } = await supabase
+        .from("email_suppressions")
+        .select("email", { count: "exact", head: true })
+        .eq("reason", "unsubscribed");
+      if (error) throw error;
+      return { sends, unsubscribed: count ?? 0 };
+    },
+    enabled: isAdmin === true,
+    staleTime: 1000 * 60,
+    // Missing table = migration not applied yet; retrying won't help.
     retry: (failureCount, error) => !isMissingTableError(error) && failureCount < 2,
   });
 }

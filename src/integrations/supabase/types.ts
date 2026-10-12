@@ -122,6 +122,81 @@ export type Database = {
         }
         Relationships: []
       }
+      email_sends: {
+        Row: {
+          bounced_at: string | null
+          campaign: string
+          click_count: number
+          complained_at: string | null
+          created_at: string
+          customer_key: string
+          customer_name: string | null
+          delivered_at: string | null
+          email: string
+          first_clicked_at: string | null
+          id: string
+          opened_at: string | null
+          resend_message_id: string | null
+          sent_at: string | null
+          signed_up_at: string | null
+          status: string
+        }
+        Insert: {
+          bounced_at?: string | null
+          campaign: string
+          click_count?: number
+          complained_at?: string | null
+          created_at?: string
+          customer_key: string
+          customer_name?: string | null
+          delivered_at?: string | null
+          email: string
+          first_clicked_at?: string | null
+          id?: string
+          opened_at?: string | null
+          resend_message_id?: string | null
+          sent_at?: string | null
+          signed_up_at?: string | null
+          status?: string
+        }
+        Update: {
+          bounced_at?: string | null
+          campaign?: string
+          click_count?: number
+          complained_at?: string | null
+          created_at?: string
+          customer_key?: string
+          customer_name?: string | null
+          delivered_at?: string | null
+          email?: string
+          first_clicked_at?: string | null
+          id?: string
+          opened_at?: string | null
+          resend_message_id?: string | null
+          sent_at?: string | null
+          signed_up_at?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
+      email_suppressions: {
+        Row: {
+          created_at: string
+          email: string
+          reason: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          reason: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          reason?: string
+        }
+        Relationships: []
+      }
       help_article_feedback: {
         Row: {
           article_slug: string

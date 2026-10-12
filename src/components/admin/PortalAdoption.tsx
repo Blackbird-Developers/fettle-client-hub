@@ -29,6 +29,7 @@ import {
   type SortDirection,
   StatTile,
 } from "./CustomerInsightsShared";
+import { PortalEmailsPanel } from "./PortalEmailsPanel";
 
 type SortKey = "grade" | "name" | "lastSession";
 
@@ -168,6 +169,8 @@ export function PortalAdoption() {
           )}
         </CardContent>
       </Card>
+
+      <PortalEmailsPanel />
     </div>
   );
 }

@@ -1,0 +1,26 @@
+# Weekday trigger for the portal-adoption emails (Email 1 to existing clients
+# without a hub account, Email 2 to new enquiries). The edge function does all
+# the deciding — including dry-run mode until PORTAL_EMAILS_LIVE=true is set in
+# Supabase — this workflow just rings the bell on weekday mornings.
+name: Portal adoption emails
+
+on:
+  schedule:
+    - cron: "30 8 * * 1-5" # weekdays 08:30 UTC (09:30 Irish summer / 08:30 winter)
+  workflow_dispatch: {}
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invoke portal-adoption email function
+        run: |
+          set -euo pipefail
+          response=$(curl -sS -w "\n%{http_code}" -X POST \
+            -H "x-cron-secret: ${{ secrets.REMINDER_CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "https://gxeoillrmjezpehmcvrh.supabase.co/functions/v1/portal-adoption-emails")
+          status=$(echo "$response" | tail -1)
+          echo "$response" | head -n -1
+          test "$status" = "200"

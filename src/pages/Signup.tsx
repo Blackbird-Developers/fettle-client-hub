@@ -35,6 +35,15 @@ export default function Signup() {
     }
   }, [refFromUrl]);
 
+  // Pre-fill ?email= from the portal-adoption emails, so the account uses the
+  // same address as their bookings and the hub can match them.
+  const emailFromUrl = searchParams.get("email");
+  useEffect(() => {
+    if (emailFromUrl) {
+      setEmail((current) => current || emailFromUrl.trim());
+    }
+  }, [emailFromUrl]);
+
   useEffect(() => {
     if (user) {
       navigate("/dashboard");

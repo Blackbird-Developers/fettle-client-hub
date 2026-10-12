@@ -53,6 +53,21 @@ verify_jwt = false
 [functions.unpaid-session-reminders]
 verify_jwt = false
 
+# Same as unpaid-session-reminders: invoked by the scheduled GitHub Actions
+# workflow and authenticated by the x-cron-secret header.
+[functions.portal-adoption-emails]
+verify_jwt = false
+
+# Resend calls this server-to-server; every request is checked against the
+# Svix signature (RESEND_WEBHOOK_SECRET) instead of a JWT.
+[functions.resend-webhook]
+verify_jwt = false
+
+# Opened from unsubscribe links by people who aren't logged in (and by inbox
+# one-click unsubscribe); the signed token in the link is checked instead.
+[functions.email-unsubscribe]
+verify_jwt = false
+
 [functions.export-user-data]
 verify_jwt = false
 

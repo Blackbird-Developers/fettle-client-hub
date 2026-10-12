@@ -27,6 +27,7 @@ import Psychiatry from "./pages/Psychiatry";
 import GetStarted from "./pages/GetStarted";
 import HelpCenter from "./pages/HelpCenter";
 import HelpArticle from "./pages/HelpArticle";
+import Unsubscribe from "./pages/Unsubscribe";
 
 const queryClient = new QueryClient();
 
@@ -59,6 +60,7 @@ const App = () => (
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsConditions />} />
+            <Route path="/unsubscribe" element={<Unsubscribe />} />
             <Route path="/packages" element={<CustomerOnly><Packages /></CustomerOnly>} />
             <Route path="/help" element={<CustomerOnly><HelpCenter /></CustomerOnly>} />
             <Route path="/help/:slug" element={<CustomerOnly><HelpArticle /></CustomerOnly>} />
