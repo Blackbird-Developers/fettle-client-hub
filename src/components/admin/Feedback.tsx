@@ -320,8 +320,11 @@ const COMPACT_CALENDAR = {
   nav_button: "inline-flex h-6 w-6 items-center justify-center rounded-md border border-input opacity-60 hover:opacity-100",
   head_cell: "text-muted-foreground rounded-md w-8 font-normal text-[0.7rem]",
   row: "flex w-full mt-1",
-  cell: "h-8 w-8 text-center text-sm p-0 relative [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
+  // No background on the cell itself: only the days in between get a band,
+  // so a lone start/end day is a clean rounded square.
+  cell: "h-8 w-8 text-center text-sm p-0 relative focus-within:relative focus-within:z-20",
   day: "inline-flex h-8 w-8 items-center justify-center rounded-md p-0 text-sm font-normal hover:bg-accent hover:text-accent-foreground aria-selected:opacity-100",
+  day_range_middle: "rounded-none aria-selected:bg-accent aria-selected:text-accent-foreground",
 };
 
 /** Date range picker using the hub's calendar, in a popover. */
@@ -357,9 +360,11 @@ function DateRangeFilter({
       {/* Always opens below the button, even near the bottom of the window
           (the page scrolls instead). */}
       <PopoverContent className="w-auto p-0" align="start" side="bottom" avoidCollisions={false}>
-        <div className="flex items-center justify-between gap-3 border-b px-3 py-1.5 text-xs">
+        {/* w-0 min-w-full: the header takes the calendar's width instead of
+            stretching the popover, so there's no gap beside the calendar. */}
+        <div className="flex w-0 min-w-full items-center justify-between gap-2 border-b px-3 py-1.5 text-xs">
           <span className="font-medium" aria-live="polite">
-            {from && !to ? `${label} – pick an end date` : (label ?? "Pick a start and end date")}
+            {from && !to ? "Now pick an end date" : (label ?? "Pick a start and end date")}
           </span>
           {label && (
             <button
