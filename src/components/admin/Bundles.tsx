@@ -78,7 +78,7 @@ export function Bundles() {
     [data, segment, search]
   );
 
-  if (isLoading) return <InsightsLoading />;
+  if (isLoading) return <InsightsLoading source="admin-bundles" />;
   if (error || !data) {
     return error ? <InsightsError error={error} onRetry={() => refetch()} /> : null;
   }

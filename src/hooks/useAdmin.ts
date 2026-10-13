@@ -1,8 +1,10 @@
-import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { queryOptions, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { ApiError, classifyApiError } from "@/lib/api-errors";
+import { readCachedAdminData, writeCachedAdminData } from "@/lib/adminDataCache";
+import { type AdminDataSource, timeLoad } from "@/lib/adminLoadProgress";
 import { normalizeProgression } from "@/lib/customerInsights";
 import {
   type CustomerFollowup,
@@ -456,10 +458,12 @@ async function fetchAdminFunction(name: string) {
   return data;
 }
 
-// Shared by the Acuity-backed admin queries: slow to build, so cached for
-// five minutes, never refetched on window focus, retried once at most.
+// Shared by the Acuity-backed admin queries: slow to build, so fresh for 30
+// minutes (Refresh reloads sooner), kept in memory for an hour, never
+// refetched on window focus, retried once at most.
 const ACUITY_QUERY_OPTIONS = {
-  staleTime: 1000 * 60 * 5,
+  staleTime: 1000 * 60 * 30,
+  gcTime: 1000 * 60 * 60,
   refetchOnWindowFocus: false,
   retry: (failureCount: number, error: ApiError) => {
     const nonRetryableTypes = ["unauthorized", "forbidden", "cors", "network"];
@@ -470,21 +474,48 @@ const ACUITY_QUERY_OPTIONS = {
   },
 };
 
+// Query for one Acuity-backed edge function. The load is timed for the
+// progress loader, and the last good response is saved for this tab so a
+// reload shows it at once (marked with its age, so it refreshes if stale).
+function acuityQueryOptions<T>(
+  source: AdminDataSource,
+  userId: string | undefined,
+  parse: (data: Record<string, unknown>) => T
+) {
+  return queryOptions<T, ApiError>({
+    queryKey: [source],
+    queryFn: async () => {
+      const data = parse(await timeLoad(source, () => fetchAdminFunction(source)));
+      writeCachedAdminData(source, userId, data);
+      return data;
+    },
+    initialData: () => readCachedAdminData<T>(source, userId)?.data,
+    initialDataUpdatedAt: () => readCachedAdminData<T>(source, userId)?.savedAt,
+    ...ACUITY_QUERY_OPTIONS,
+  });
+}
+
+const customerInsightsQuery = (userId: string | undefined) =>
+  acuityQueryOptions(
+    "admin-customer-insights",
+    userId,
+    (data) => ({ ...data, progression: normalizeProgression(data.progression) }) as unknown as CustomerInsightsResponse
+  );
+
+const hotLeadsQuery = (userId: string | undefined) =>
+  acuityQueryOptions("admin-leads", userId, (data) => data as unknown as HotLeadsResponse);
+
+const bundlesQuery = (userId: string | undefined) =>
+  acuityQueryOptions("admin-bundles", userId, (data) => data as unknown as BundlesResponse);
+
 // Portal adoption + session-to-session progression, built from Acuity.
 // One request feeds every admin insights page. It can take a while (it walks Acuity
 // history), so it is cached and never refetched on window focus.
 export function useCustomerInsights() {
   const { data: isAdmin } = useIsAdmin();
+  const { user } = useAuth();
 
-  return useQuery<CustomerInsightsResponse, ApiError>({
-    queryKey: ["admin-customer-insights"],
-    queryFn: async (): Promise<CustomerInsightsResponse> => {
-      const data = await fetchAdminFunction("admin-customer-insights");
-      return { ...data, progression: normalizeProgression(data.progression) } as CustomerInsightsResponse;
-    },
-    enabled: isAdmin === true,
-    ...ACUITY_QUERY_OPTIONS,
-  });
+  return useQuery({ ...customerInsightsQuery(user?.id), enabled: isAdmin === true });
 }
 
 // Response of the admin-leads edge function.
@@ -508,13 +539,9 @@ export interface HotLeadsResponse {
 // Hot leads (Let's Talk no-shows and quotes), built from Acuity.
 export function useHotLeads() {
   const { data: isAdmin } = useIsAdmin();
+  const { user } = useAuth();
 
-  return useQuery<HotLeadsResponse, ApiError>({
-    queryKey: ["admin-leads"],
-    queryFn: async () => (await fetchAdminFunction("admin-leads")) as HotLeadsResponse,
-    enabled: isAdmin === true,
-    ...ACUITY_QUERY_OPTIONS,
-  });
+  return useQuery({ ...hotLeadsQuery(user?.id), enabled: isAdmin === true });
 }
 
 // Response of the admin-bundles edge function.
@@ -538,13 +565,38 @@ export interface BundlesResponse {
 // Session bundles (Acuity certificates) with credits used and left.
 export function useBundles() {
   const { data: isAdmin } = useIsAdmin();
+  const { user } = useAuth();
 
-  return useQuery<BundlesResponse, ApiError>({
-    queryKey: ["admin-bundles"],
-    queryFn: async () => (await fetchAdminFunction("admin-bundles")) as BundlesResponse,
-    enabled: isAdmin === true,
-    ...ACUITY_QUERY_OPTIONS,
-  });
+  return useQuery({ ...bundlesQuery(user?.id), enabled: isAdmin === true });
+}
+
+// Loads the Acuity-backed pages' data in the background once an admin opens
+// /admin, so it is usually ready by the time they click into a page. One
+// request at a time to stay clear of Acuity's rate limit; data that's still
+// fresh isn't fetched again.
+export function usePreloadAdminData(enabled: boolean) {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const userId = user?.id;
+
+  useEffect(() => {
+    if (!enabled || !userId) return;
+    let cancelled = false;
+    const preloads = [
+      () => queryClient.prefetchQuery(customerInsightsQuery(userId)),
+      () => queryClient.prefetchQuery(hotLeadsQuery(userId)),
+      () => queryClient.prefetchQuery(bundlesQuery(userId)),
+    ];
+    (async () => {
+      for (const preload of preloads) {
+        if (cancelled) return;
+        await preload();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, userId, queryClient]);
 }
 
 const RECENT_ATTEMPTS_QUERY_KEY = [...CONTACT_HISTORY_QUERY_KEY, "recent"];

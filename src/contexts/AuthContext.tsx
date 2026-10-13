@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useRef, ReactNode } fro
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
+import { clearCachedAdminData } from '@/lib/adminDataCache';
 
 interface Profile {
   id: string;
@@ -64,6 +65,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }, 0);
         } else {
           setProfile(null);
+          // Signed out or session expired: drop admin data saved for this tab.
+          clearCachedAdminData();
         }
       }
     );
@@ -252,6 +255,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    clearCachedAdminData();
     await supabase.auth.signOut();
     setProfile(null);
   };
