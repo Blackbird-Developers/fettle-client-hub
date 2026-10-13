@@ -12,13 +12,19 @@ import {
   Gift,
   Stethoscope,
   ChevronDown,
+  MessageSquare,
   type LucideIcon,
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
-import { useFollowUpsDueCount, useIsAdmin, useNoAnswerDueCount } from "@/hooks/useAdmin";
+import {
+  useFollowUpsDueCount,
+  useIsAdmin,
+  useNewFeedbackCount,
+  useNoAnswerDueCount,
+} from "@/hooks/useAdmin";
 import { ADMIN_SECTIONS, hasActiveChild } from "@/lib/adminNavigation";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -40,6 +46,7 @@ const authenticatedNavigation: NavItem[] = [
   { name: "Profile", href: "/profile", icon: User },
   { name: "Refer & Earn", href: "/referrals", icon: Gift },
   { name: "Help Center", href: "/help", icon: HelpCircle },
+  { name: "Feedback", href: "/feedback", icon: MessageSquare },
 ];
 
 const publicNavigation: NavItem[] = [
@@ -114,6 +121,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const adminMode = !!user && isAdmin === true;
   const followUpsDue = useFollowUpsDueCount();
   const noAnswerDue = useNoAnswerDueCount();
+  const newFeedback = useNewFeedbackCount();
 
   const handleSignOut = async () => {
     await signOut();
@@ -126,12 +134,14 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   const navigation = adminMode
     ? adminNavigation.map((item) =>
-        // Follow-ups and No answer attempts due today or earlier.
+        // Follow-ups and No answer attempts due today or earlier; unread feedback.
         item.href === "/admin/followups" && followUpsDue > 0
           ? { ...item, badge: String(followUpsDue) }
           : item.href === "/admin/no-answer" && noAnswerDue > 0
             ? { ...item, badge: String(noAnswerDue) }
-            : item
+            : item.href === "/admin/feedback" && newFeedback > 0
+              ? { ...item, badge: String(newFeedback) }
+              : item
       )
     : user
       ? authenticatedNavigation
@@ -169,6 +179,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             <NavLink
               key={item.name}
               to={item.href}
+              // The Feedback page records which page the client was on.
+              state={item.href === "/feedback" ? { from: location.pathname } : undefined}
               onClick={onNavigate}
               className={cn(navItemClass, isActive ? activeNavItemClass : inactiveNavItemClass)}
             >
