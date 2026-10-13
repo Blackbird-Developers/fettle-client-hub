@@ -313,6 +313,17 @@ function dateRangeLabel(from: string, to: string): string | null {
   return from ? `From ${show(from, true)}` : `Until ${show(to, true)}`;
 }
 
+// Smaller cells and spacing than the default calendar, for a filter popover.
+const COMPACT_CALENDAR = {
+  month: "space-y-2",
+  caption: "flex justify-center pt-0.5 relative items-center",
+  nav_button: "inline-flex h-6 w-6 items-center justify-center rounded-md border border-input opacity-60 hover:opacity-100",
+  head_cell: "text-muted-foreground rounded-md w-8 font-normal text-[0.7rem]",
+  row: "flex w-full mt-1",
+  cell: "h-8 w-8 text-center text-sm p-0 relative [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
+  day: "inline-flex h-8 w-8 items-center justify-center rounded-md p-0 text-sm font-normal hover:bg-accent hover:text-accent-foreground aria-selected:opacity-100",
+};
+
 /** Date range picker using the hub's calendar, in a popover. */
 function DateRangeFilter({
   id,
@@ -344,19 +355,27 @@ function DateRangeFilter({
         </Button>
       </PopoverTrigger>
       {/* Always opens below the button, even near the bottom of the window
-          (the page scrolls instead). fixedWeeks keeps the height the same
-          every month. */}
+          (the page scrolls instead). */}
       <PopoverContent className="w-auto p-0" align="start" side="bottom" avoidCollisions={false}>
-        <div className="border-b px-3 py-2 text-sm">
-          <p className="font-medium" aria-live="polite">
-            {label ?? "Any date"}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {from && !to ? "Now pick an end date" : "Pick a start date, then an end date"}
-          </p>
+        <div className="flex items-center justify-between gap-3 border-b px-3 py-1.5 text-xs">
+          <span className="font-medium" aria-live="polite">
+            {from && !to ? `${label} – pick an end date` : (label ?? "Pick a start and end date")}
+          </span>
+          {label && (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                onChange("", "");
+                setOpen(false);
+              }}
+            >
+              <X className="h-3 w-3" />
+              Clear
+            </button>
+          )}
         </div>
         <Calendar
-          fixedWeeks
           mode="range"
           selected={selected}
           defaultMonth={selected?.from}
@@ -371,23 +390,9 @@ function DateRangeFilter({
           weekStartsOn={1}
           numberOfMonths={1}
           initialFocus
+          className="p-2"
+          classNames={COMPACT_CALENDAR}
         />
-        {label && (
-          <div className="border-t p-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full"
-              onClick={() => {
-                onChange("", "");
-                setOpen(false);
-              }}
-            >
-              <X className="mr-2 h-3 w-3" />
-              Any date
-            </Button>
-          </div>
-        )}
       </PopoverContent>
     </Popover>
   );
