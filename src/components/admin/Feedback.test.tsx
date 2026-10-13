@@ -102,7 +102,8 @@ describe("Feedback page", () => {
 
     await user.click(screen.getByRole("button", { name: "Clear filters" }));
     await user.click(screen.getByRole("button", { name: "Date" }));
-    await user.click(screen.getByRole("gridcell", { name: "5" }));
+    // The calendar also shows early November; the first "5" is 5 October.
+    await user.click(screen.getAllByRole("gridcell", { name: "5" })[0]);
     await user.click(screen.getByRole("gridcell", { name: "10" }));
     expect(screen.getByRole("button", { name: "Date" })).toHaveTextContent("5 Oct – 10 Oct 2026");
     expect(screen.getByText("Bo Byrne")).toBeInTheDocument();

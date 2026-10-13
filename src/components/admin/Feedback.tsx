@@ -343,8 +343,19 @@ function DateRangeFilter({
           {label ?? "Any date"}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
+      {/* Always below the button; fixedWeeks keeps the height the same every
+          month, so the popover doesn't jump above/below when switching months. */}
+      <PopoverContent className="w-auto p-0" align="start" side="bottom">
+        <div className="border-b px-3 py-2 text-sm">
+          <p className="font-medium" aria-live="polite">
+            {label ?? "Any date"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {from && !to ? "Now pick an end date" : "Pick a start date, then an end date"}
+          </p>
+        </div>
         <Calendar
+          fixedWeeks
           mode="range"
           selected={selected}
           defaultMonth={selected?.from}
