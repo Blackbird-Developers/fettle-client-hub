@@ -2,6 +2,7 @@ import {
   Flame,
   Package,
   LayoutDashboard,
+  MessageSquare,
   MonitorSmartphone,
   PhoneCall,
   PhoneMissed,
@@ -21,6 +22,7 @@ export type AdminSectionId =
   | "bundles"
   | "progression"
   | "followups"
+  | "feedback"
   | "team";
 
 /** A page under a section, e.g. Progression → Session 2–3. */
@@ -110,6 +112,13 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     icon: PhoneCall,
     description:
       "Customers who'll continue later, due a call 30 days on, and why others aren't continuing.",
+  },
+  {
+    id: "feedback",
+    name: "Feedback",
+    href: "/admin/feedback",
+    icon: MessageSquare,
+    description: "Feedback clients have sent from the hub, by category, with a status for each.",
   },
   {
     id: "team",

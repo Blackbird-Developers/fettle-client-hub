@@ -245,6 +245,51 @@ export type Database = {
         }
         Relationships: []
       }
+      hub_feedback: {
+        Row: {
+          category: string
+          created_at: string
+          id: string
+          message: string
+          page: string | null
+          rating: number | null
+          sender_email: string | null
+          sender_name: string | null
+          status: string
+          status_updated_at: string | null
+          status_updated_by_email: string | null
+          user_id: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          id?: string
+          message: string
+          page?: string | null
+          rating?: number | null
+          sender_email?: string | null
+          sender_name?: string | null
+          status?: string
+          status_updated_at?: string | null
+          status_updated_by_email?: string | null
+          user_id?: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          id?: string
+          message?: string
+          page?: string | null
+          rating?: number | null
+          sender_email?: string | null
+          sender_name?: string | null
+          status?: string
+          status_updated_at?: string | null
+          status_updated_by_email?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       no_answer_sequences: {
         Row: {
           attempts_done: number

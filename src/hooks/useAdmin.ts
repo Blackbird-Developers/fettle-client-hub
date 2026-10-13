@@ -27,6 +27,7 @@ import {
 const FOLLOWUPS_QUERY_KEY = ["customer-followups"];
 const CONTACT_HISTORY_QUERY_KEY = ["customer-contact-history"];
 const NO_ANSWER_QUERY_KEY = ["no-answer-sequences"];
+const HUB_FEEDBACK_QUERY_KEY = ["hub-feedback"];
 import type {
   AdoptionView,
   GradeDefinition,
@@ -37,6 +38,7 @@ import type { BundlesView } from "../../supabase/functions/admin-bundles/logic.t
 import type { RecentAttempt } from "@/lib/hotLeads";
 import type { EmailSendRow } from "@/lib/portalEmails";
 import { type NoAnswerSequence, countDue } from "@/lib/noAnswer";
+import type { FeedbackStatus, HubFeedback } from "@/lib/hubFeedback";
 
 // Types for admin metrics response
 interface AdminMetricsResponse {
@@ -1009,5 +1011,70 @@ export function useRestartSequence() {
       return data;
     },
     onSettled: () => void queryClient.invalidateQueries({ queryKey: NO_ANSWER_QUERY_KEY }),
+  });
+}
+
+// Feedback clients send from the hub's Feedback page. Read straight from the
+// table; RLS limits it to admins. Paged past the API's 1000-row cap.
+export function useHubFeedback() {
+  const { data: isAdmin } = useIsAdmin();
+
+  return useQuery<HubFeedback[], { code?: string; message: string }>({
+    queryKey: HUB_FEEDBACK_QUERY_KEY,
+    queryFn: async () => {
+      const rows: HubFeedback[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from("hub_feedback")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .range(from, from + 999);
+        if (error) throw error;
+        rows.push(...data);
+        if (data.length < 1000) break;
+      }
+      return rows;
+    },
+    enabled: isAdmin === true,
+    staleTime: 1000 * 60,
+    // Missing table = migration not applied yet; retrying won't help.
+    retry: (failureCount, error) => !isMissingTableError(error) && failureCount < 2,
+  });
+}
+
+/** Feedback nobody has read yet (0 until loaded). */
+export function useNewFeedbackCount(): number {
+  const { data } = useHubFeedback();
+  return data ? data.filter((row) => row.status === "new").length : 0;
+}
+
+// Marks feedback new / read / actioned. Updates the cached list straight away
+// and rolls back if the save fails.
+export function useUpdateFeedbackStatus() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: FeedbackStatus }) => {
+      const { data, error } = await supabase
+        .from("hub_feedback")
+        .update({ status })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as HubFeedback;
+    },
+    onMutate: async ({ id, status }) => {
+      await queryClient.cancelQueries({ queryKey: HUB_FEEDBACK_QUERY_KEY });
+      const previous = queryClient.getQueryData<HubFeedback[]>(HUB_FEEDBACK_QUERY_KEY);
+      queryClient.setQueryData<HubFeedback[]>(HUB_FEEDBACK_QUERY_KEY, (rows) =>
+        rows?.map((row) => (row.id === id ? { ...row, status } : row))
+      );
+      return { previous };
+    },
+    onError: (_error, _vars, context) => {
+      if (context?.previous) queryClient.setQueryData(HUB_FEEDBACK_QUERY_KEY, context.previous);
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: HUB_FEEDBACK_QUERY_KEY }),
   });
 }
