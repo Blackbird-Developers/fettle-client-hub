@@ -325,6 +325,8 @@ const COMPACT_CALENDAR = {
   cell: "h-8 w-8 text-center text-sm p-0 relative focus-within:relative focus-within:z-20",
   day: "inline-flex h-8 w-8 items-center justify-center rounded-md p-0 text-sm font-normal hover:bg-accent hover:text-accent-foreground aria-selected:opacity-100",
   day_range_middle: "rounded-none aria-selected:bg-accent aria-selected:text-accent-foreground",
+  // Today isn't highlighted; only the chosen dates are.
+  day_today: "",
 };
 
 /** Date range picker using the hub's calendar, in a popover. */
