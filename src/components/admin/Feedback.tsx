@@ -2,8 +2,9 @@ import { useMemo, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Calendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -16,7 +17,10 @@ import {
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useToast } from "@/hooks/use-toast";
-import { AlertCircle, MessageSquare, RefreshCw, Star } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import type { DateRange } from "react-day-picker";
+import { AlertCircle, CalendarDays, MessageSquare, RefreshCw, Star, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useHubFeedback, useUpdateFeedbackStatus } from "@/hooks/useAdmin";
 import { isMissingTableError } from "@/lib/customerFollowups";
 import { formatDateTime } from "@/lib/customerInsights";
@@ -152,29 +156,14 @@ export function Feedback() {
               </Select>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="feedback-from" className="text-xs text-muted-foreground">
-                From
+              <Label htmlFor="feedback-dates" className="text-xs text-muted-foreground">
+                Date
               </Label>
-              <Input
-                id="feedback-from"
-                type="date"
-                value={filters.from}
-                max={filters.to || undefined}
-                onChange={(e) => setFilter("from", e.target.value)}
-                className="w-[160px]"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="feedback-to" className="text-xs text-muted-foreground">
-                To
-              </Label>
-              <Input
-                id="feedback-to"
-                type="date"
-                value={filters.to}
-                min={filters.from || undefined}
-                onChange={(e) => setFilter("to", e.target.value)}
-                className="w-[160px]"
+              <DateRangeFilter
+                id="feedback-dates"
+                from={filters.from}
+                to={filters.to}
+                onChange={(from, to) => setFilters((current) => ({ ...current, from, to }))}
               />
             </div>
             {filtered && (
@@ -308,6 +297,87 @@ function StatusCell({ row }: { row: HubFeedback }) {
         </div>
       )}
     </div>
+  );
+}
+
+const DAY_FORMAT = "yyyy-MM-dd";
+
+/** Label for the date button, e.g. "1 Oct – 13 Oct 2026". */
+function dateRangeLabel(from: string, to: string): string | null {
+  if (!from && !to) return null;
+  const show = (day: string, withYear: boolean) => format(parseISO(day), withYear ? "d MMM yyyy" : "d MMM");
+  if (from && to) {
+    if (from === to) return show(from, true);
+    return `${show(from, from.slice(0, 4) !== to.slice(0, 4))} – ${show(to, true)}`;
+  }
+  return from ? `From ${show(from, true)}` : `Until ${show(to, true)}`;
+}
+
+/** Date range picker using the hub's calendar, in a popover. */
+function DateRangeFilter({
+  id,
+  from,
+  to,
+  onChange,
+}: {
+  id: string;
+  from: string;
+  to: string;
+  onChange: (from: string, to: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected: DateRange | undefined = from
+    ? { from: parseISO(from), to: to ? parseISO(to) : undefined }
+    : undefined;
+  const label = dateRangeLabel(from, to);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          id={id}
+          variant="outline"
+          className={cn("w-[240px] justify-start font-normal", !label && "text-muted-foreground")}
+        >
+          <CalendarDays className="mr-2 h-4 w-4" />
+          {label ?? "Any date"}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="range"
+          selected={selected}
+          defaultMonth={selected?.from}
+          onSelect={(range) => {
+            onChange(
+              range?.from ? format(range.from, DAY_FORMAT) : "",
+              range?.to ? format(range.to, DAY_FORMAT) : ""
+            );
+            if (range?.to) setOpen(false);
+          }}
+          disabled={{ after: new Date() }}
+          weekStartsOn={1}
+          numberOfMonths={1}
+          initialFocus
+        />
+        {label && (
+          <div className="border-t p-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full"
+              onClick={() => {
+                onChange("", "");
+                setOpen(false);
+              }}
+            >
+              <X className="mr-2 h-3 w-3" />
+              Any date
+            </Button>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 

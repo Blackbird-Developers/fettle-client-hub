@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import "@/test/setupDom";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HubFeedback } from "@/lib/hubFeedback";
 import { Feedback } from "./Feedback";
 
@@ -51,9 +51,16 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  // Only Date is faked, so the calendar opens on October 2026 and user events still run.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-13T12:00:00.000Z"));
   state.rows = [];
   state.error = null;
   state.mutate.mockReset();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("Feedback page", () => {
@@ -94,8 +101,10 @@ describe("Feedback page", () => {
     expect(screen.queryByText("Cy Cole")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Clear filters" }));
-    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-10-05" } });
-    fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-10-10" } });
+    await user.click(screen.getByRole("button", { name: "Date" }));
+    await user.click(screen.getByRole("gridcell", { name: "5" }));
+    await user.click(screen.getByRole("gridcell", { name: "10" }));
+    expect(screen.getByRole("button", { name: "Date" })).toHaveTextContent("5 Oct – 10 Oct 2026");
     expect(screen.getByText("Bo Byrne")).toBeInTheDocument();
     expect(screen.queryByText("Ann Archer")).toBeNull();
     expect(screen.queryByText("Cy Cole")).toBeNull();
