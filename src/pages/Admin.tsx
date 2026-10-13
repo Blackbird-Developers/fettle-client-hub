@@ -7,7 +7,7 @@ import { HotLeads } from "@/components/admin/HotLeads";
 import { NoAnswer } from "@/components/admin/NoAnswer";
 import { PortalAdoption } from "@/components/admin/PortalAdoption";
 import { SessionProgression } from "@/components/admin/SessionProgression";
-import { useIsAdmin } from "@/hooks/useAdmin";
+import { useIsAdmin, usePreloadAdminData } from "@/hooks/useAdmin";
 import {
   type AdminSectionId,
   parseProgressionRange,
@@ -34,6 +34,7 @@ const SECTION_CONTENT: Record<AdminSectionId, (props: { subsectionId?: string })
 export default function Admin() {
   const { section: sectionId, subsection: subsectionId } = useParams();
   const { data: isAdmin, isLoading } = useIsAdmin();
+  usePreloadAdminData(isAdmin === true);
 
   // Full-screen loader (no layout) so the sidebar never renders before we
   // know whether to show the admin or customer menu.

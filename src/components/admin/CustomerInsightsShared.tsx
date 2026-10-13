@@ -4,7 +4,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { TableHead } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -17,6 +16,7 @@ import {
   ChevronUp,
   RefreshCw,
 } from "lucide-react";
+import type { AdminDataSource } from "@/lib/adminLoadProgress";
 import type { ApiError } from "@/lib/api-errors";
 import type { CustomerInsightsResponse } from "@/hooks/useAdmin";
 import type {
@@ -24,6 +24,7 @@ import type {
   GradeDefinition,
   PortalStatus,
 } from "../../../supabase/functions/admin-customer-insights/logic.ts";
+import { AdminDataLoader } from "./AdminDataLoader";
 
 const GRADE_STYLES: Record<Grade, string> = {
   A: "bg-red-100 text-red-700 border-red-200",
@@ -174,6 +175,7 @@ export function InsightsHeader({
         {data
           ? `Live from Acuity · updated ${formatDistanceToNowStrict(parseISO(data.generatedAt))} ago`
           : "Live from Acuity"}
+        {data && isFetching && " · refreshing…"}
       </span>
       <Button variant="outline" size="sm" onClick={onRefresh} disabled={isFetching}>
         <RefreshCw className={`h-3 w-3 mr-2 ${isFetching ? "animate-spin" : ""}`} />
@@ -183,22 +185,8 @@ export function InsightsHeader({
   );
 }
 
-export function InsightsLoading() {
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Fetching appointments and customer history from Acuity — this can take up to a minute.
-      </p>
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        {[1, 2, 3, 4].map((i) => (
-          <Skeleton key={i} className="h-20 w-full" />
-        ))}
-      </div>
-      {[1, 2, 3, 4, 5].map((i) => (
-        <Skeleton key={i} className="h-12 w-full" />
-      ))}
-    </div>
-  );
+export function InsightsLoading({ source }: { source: AdminDataSource }) {
+  return <AdminDataLoader source={source} />;
 }
 
 export function InsightsError({ error, onRetry }: { error: ApiError; onRetry: () => void }) {

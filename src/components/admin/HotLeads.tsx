@@ -264,7 +264,7 @@ export function HotLeads() {
       direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
     }));
 
-  if (isLoading) return <InsightsLoading />;
+  if (isLoading) return <InsightsLoading source="admin-leads" />;
   if (error || !data) {
     return error ? <InsightsError error={error} onRetry={() => refetch()} /> : null;
   }
