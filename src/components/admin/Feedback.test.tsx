@@ -121,3 +121,17 @@ describe("Feedback page", () => {
     expect(screen.getByText(/once the hub-feedback database update is deployed/)).toBeInTheDocument();
   });
 });
+
+describe("Feedback status history", () => {
+  it("shows the full email of whoever last changed the status", () => {
+    state.rows = [
+      feedback("Ann Archer", {
+        status: "actioned",
+        status_updated_by_email: "tech@blackbird.marketing",
+        status_updated_at: "2026-10-13T13:48:00.000Z",
+      }),
+    ];
+    renderPage();
+    expect(screen.getByText("tech@blackbird.marketing")).toBeInTheDocument();
+  });
+});

@@ -302,9 +302,10 @@ function StatusCell({ row }: { row: HubFeedback }) {
         </SelectContent>
       </Select>
       {row.status_updated_by_email && row.status_updated_at && (
-        <p className="text-[11px] text-muted-foreground">
-          {row.status_updated_by_email.split("@")[0]} · {formatDateTime(row.status_updated_at)}
-        </p>
+        <div className="text-[11px] text-muted-foreground">
+          <p className="break-all">{row.status_updated_by_email}</p>
+          <p>{formatDateTime(row.status_updated_at)}</p>
+        </div>
       )}
     </div>
   );
