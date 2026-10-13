@@ -343,9 +343,10 @@ function DateRangeFilter({
           {label ?? "Any date"}
         </Button>
       </PopoverTrigger>
-      {/* Always below the button; fixedWeeks keeps the height the same every
-          month, so the popover doesn't jump above/below when switching months. */}
-      <PopoverContent className="w-auto p-0" align="start" side="bottom">
+      {/* Always opens below the button, even near the bottom of the window
+          (the page scrolls instead). fixedWeeks keeps the height the same
+          every month. */}
+      <PopoverContent className="w-auto p-0" align="start" side="bottom" avoidCollisions={false}>
         <div className="border-b px-3 py-2 text-sm">
           <p className="font-medium" aria-live="polite">
             {label ?? "Any date"}
