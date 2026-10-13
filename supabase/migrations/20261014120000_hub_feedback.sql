@@ -96,18 +96,23 @@ WITH CHECK (user_id = auth.uid());
 
 -- Admins read everything and move it through new → read → actioned.
 -- No delete policy: feedback is never removed from the browser.
+--
+-- Checks user_roles directly rather than calling has_role(), because some
+-- databases only have has_role('admin') and others only
+-- has_role(uuid, app_role). role::text works whether role is TEXT or the
+-- app_role enum, and users can always read their own user_roles rows.
 DROP POLICY IF EXISTS "Admins can view hub feedback" ON public.hub_feedback;
 CREATE POLICY "Admins can view hub feedback"
 ON public.hub_feedback
 FOR SELECT
-USING (public.has_role('admin'));
+USING (EXISTS (SELECT 1 FROM public.user_roles ur WHERE ur.user_id = auth.uid() AND ur.role::text = 'admin'));
 
 DROP POLICY IF EXISTS "Admins can update hub feedback" ON public.hub_feedback;
 CREATE POLICY "Admins can update hub feedback"
 ON public.hub_feedback
 FOR UPDATE
-USING (public.has_role('admin'))
-WITH CHECK (public.has_role('admin'));
+USING (EXISTS (SELECT 1 FROM public.user_roles ur WHERE ur.user_id = auth.uid() AND ur.role::text = 'admin'))
+WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles ur WHERE ur.user_id = auth.uid() AND ur.role::text = 'admin'));
 
 REVOKE DELETE ON public.hub_feedback FROM anon, authenticated;
 
