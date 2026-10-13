@@ -134,7 +134,7 @@ export function Feedback() {
             ))}
           </ToggleGroup>
           <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1">
+            <div className="flex flex-col gap-1.5">
               <Label htmlFor="feedback-category" className="text-xs text-muted-foreground">
                 Category
               </Label>
@@ -155,7 +155,7 @@ export function Feedback() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
+            <div className="flex flex-col gap-1.5">
               <Label htmlFor="feedback-dates" className="text-xs text-muted-foreground">
                 Date
               </Label>
