@@ -13,6 +13,7 @@ import {
   type AcuityAppointment,
   type PortalStatus,
   DAY_MS,
+  addDays,
   appointmentTime,
   daysSince,
   isCompleted,
@@ -147,6 +148,59 @@ export function remainingCredits(cert: AcuityCertificate): number {
 }
 
 const codeKey = (code: string | null | undefined) => (code ?? "").trim().toUpperCase();
+
+// ---------------------------------------------------------------------------
+// Building in steps: the scheduled workflow fetches appointments a date range
+// per call (one call for everything runs past the edge-function limit), and
+// only keeps the ones buildBundlesView can use.
+// ---------------------------------------------------------------------------
+
+/** What ties an appointment to a bundle: its code, or the bundle's email. */
+export interface BundleMatchKeys {
+  codes: string[];
+  emails: string[];
+}
+
+export function bundleMatchKeys(certificates: AcuityCertificate[]): BundleMatchKeys {
+  const codes = new Set<string>();
+  const emails = new Set<string>();
+  for (const cert of certificates) {
+    if (!isSessionBundle(cert)) continue;
+    const code = codeKey(cert.certificate);
+    if (code) codes.add(code);
+    const email = normalizeEmail(cert.email);
+    if (email) emails.add(email);
+  }
+  return { codes: [...codes], emails: [...emails] };
+}
+
+// buildBundlesView only looks at sessions booked with a bundle's code, or —
+// when there are none — the bundle email's own sessions; a bundle without an
+// email takes it from a coded session, which is kept by code. So nothing else
+// changes the result.
+export function appointmentsForBundles(
+  appointments: AcuityAppointment[],
+  keys: BundleMatchKeys
+): AcuityAppointment[] {
+  const codes = new Set(keys.codes);
+  const emails = new Set(keys.emails);
+  return appointments.filter((appt) => {
+    const code = codeKey(appt.certificate);
+    if (code && codes.has(code)) return true;
+    const email = normalizeEmail(appt.email);
+    return email !== null && emails.has(email);
+  });
+}
+
+/** Consecutive [from, to] date ranges of `days` days covering minDate–maxDate. */
+export function dateRanges(minDate: string, maxDate: string, days: number): [string, string][] {
+  const ranges: [string, string][] = [];
+  for (let from = minDate; from <= maxDate; from = addDays(from, days)) {
+    const to = addDays(from, days - 1);
+    ranges.push([from, to < maxDate ? to : maxDate]);
+  }
+  return ranges;
+}
 
 export interface BundleRow {
   /** Certificate id, unique per row. */

@@ -6,7 +6,10 @@ import {
 } from "../admin-customer-insights/logic.ts";
 import {
   type AcuityCertificate,
+  appointmentsForBundles,
+  bundleMatchKeys,
   buildBundlesView,
+  dateRanges,
   isSessionBundle,
   remainingCredits,
   segmentFor,
@@ -183,5 +186,38 @@ describe("buildBundlesView", () => {
   it("ignores cancelled appointments", () => {
     const { rows } = view([cert({ certificate: "C1" })], [appt(-3, { certificate: "C1", canceled: true })]);
     expect(rows[0].sessionsMatchedBy).toBeNull();
+  });
+});
+
+describe("building in steps", () => {
+  it("keeps only appointments a bundle can use, and gives the same view", () => {
+    const certs = [
+      cert({ certificate: "c1", email: "ann@example.com" }),
+      cert({ certificate: "C2", email: null }),
+      cert({ certificate: "COUPON", type: "coupon", email: "carl@example.com" }),
+    ];
+    const appts = [
+      appt(-3, { certificate: "C1 " }),
+      appt(-10, { certificate: "C2", email: "bo@example.com" }),
+      appt(-5, { email: "ANN@example.com" }),
+      appt(-4, { email: "carl@example.com" }),
+      appt(-2, { email: "someone@example.com", certificate: "OTHER" }),
+    ];
+
+    const keys = bundleMatchKeys(certs);
+    expect(keys).toEqual({ codes: ["C1", "C2"], emails: ["ann@example.com"] });
+
+    const kept = appointmentsForBundles(appts, keys);
+    expect(kept.map((a) => a.id)).toEqual([appts[0].id, appts[1].id, appts[2].id]);
+    expect(view(certs, kept)).toEqual(view(certs, appts));
+  });
+
+  it("splits a date window into consecutive ranges", () => {
+    expect(dateRanges("2026-10-01", "2026-10-30", 14)).toEqual([
+      ["2026-10-01", "2026-10-14"],
+      ["2026-10-15", "2026-10-28"],
+      ["2026-10-29", "2026-10-30"],
+    ]);
+    expect(dateRanges("2026-10-01", "2026-10-01", 14)).toEqual([["2026-10-01", "2026-10-01"]]);
   });
 });

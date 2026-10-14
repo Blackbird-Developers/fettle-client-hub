@@ -1,8 +1,9 @@
 # Rebuilds the saved copy of the admin Bundles page from Acuity, so the page
-# opens at once instead of waiting on Acuity (which can take longer than the
-# browser will wait). The edge function does the work and saves it to
-# admin_snapshots; this workflow just rings the bell. The response is counts
-# only — no client data reaches these logs.
+# opens at once instead of waiting on Acuity. The build is too long for one
+# edge-function call, so the script calls admin-bundles one step at a time
+# (certificates, each date range's appointments, save) and the function saves
+# the result to admin_snapshots. Only counts and timings reach these logs —
+# never client data.
 name: Admin snapshots
 
 on:
@@ -10,18 +11,21 @@ on:
     - cron: "15 6-19 * * *" # hourly 06:15–19:15 UTC, every day
   workflow_dispatch: {}
 
+concurrency:
+  group: admin-snapshots
+  cancel-in-progress: false
+
 jobs:
-  trigger:
+  bundles:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - name: Rebuild the Bundles snapshot
-        run: |
-          set -euo pipefail
-          response=$(curl -sS --max-time 300 -w "\n%{http_code}" -X POST \
-            -H "x-cron-secret: ${{ secrets.REMINDER_CRON_SECRET }}" \
-            -H "Content-Type: application/json" \
-            -d '{}' \
-            "https://gxeoillrmjezpehmcvrh.supabase.co/functions/v1/admin-bundles")
-          status=$(echo "$response" | tail -1)
-          echo "$response" | head -n -1
-          test "$status" = "200"
+        env:
+          FUNCTION_URL: https://gxeoillrmjezpehmcvrh.supabase.co/functions/v1/admin-bundles
+          CRON_SECRET: ${{ secrets.REMINDER_CRON_SECRET }}
+        run: node .github/scripts/build-bundles-snapshot.mjs
