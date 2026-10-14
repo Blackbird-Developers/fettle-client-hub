@@ -8,12 +8,20 @@
 // user_packages only has bundles for customers with a hub account.
 //
 // Building it walks a lot of Acuity history — longer than one edge-function
-// call may run — so it's built in steps and saved:
+// call may run — so it's built in steps and saved. Acuity's full
+// /certificates list times out for this account, so certificates are looked
+// up per email instead, for every email seen in a year of appointments plus
+// every Hub account.
 //   - POST with x-cron-secret, from the admin-snapshots GitHub Actions
 //     workflow (.github/scripts/build-bundles-snapshot.mjs), one step per call:
-//       { step: "certificates" }  → every certificate, the keys that tie
-//                                   appointments to a bundle, and the date
-//                                   ranges to fetch
+//       { step: "plan" }          → the date ranges for the next steps, and
+//                                   the Hub account emails
+//       { step: "emails", minDate, maxDate }
+//                                 → the emails on that range's appointments
+//       { step: "certificates", emails }
+//                                 → the certificates for up to 100 emails
+//       { step: "match", certificates }
+//                                 → the keys that tie appointments to a bundle
 //       { step: "appointments", minDate, maxDate, match }
 //                                 → that range's appointments a bundle can use
 //       { step: "save", certificates, appointments, incompleteDates, diagnostics }
@@ -32,12 +40,13 @@
 // admin requests are checked here instead.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   type AcuityAppointment,
   addDays,
   buildPortalEmailSet,
   fetchAppointmentsInWindows,
+  mapWithConcurrency,
   toDateString,
 } from "../admin-customer-insights/logic.ts";
 import {
@@ -47,6 +56,8 @@ import {
   buildBundlesView,
   bundleMatchKeys,
   dateRanges,
+  lookupEmails,
+  uniqueCertificates,
 } from "./logic.ts";
 
 const corsHeaders = {
@@ -64,12 +75,17 @@ const WINDOW_LIMIT = 500;
 /** How far back sessions are looked up (last session, first redemption):
  *  the longest segment window (expired with credits, last 180 days). */
 const LOOKBACK_DAYS = 180;
+/** How far back emails are collected to look certificates up by: a bundle
+ *  holder with no appointment since then and no Hub account is missed. */
+const EMAIL_LOOKBACK_DAYS = 365;
 /** How far ahead, for booked sessions. */
 const FUTURE_DAYS = 90;
-/** Days per "appointments" step, so each call stays well inside the limit. */
+/** Days per "emails"/"appointments" step, so each call stays well inside the limit. */
 const RANGE_DAYS = 14;
 /** Days per Acuity request within a step; a full one is split in half. */
 const CHUNK_DAYS = 7;
+/** Most emails per "certificates" step. */
+const MAX_EMAILS_PER_STEP = 100;
 const ACUITY_CONCURRENCY = 4;
 
 const NOT_BUILT_MESSAGE =
@@ -87,7 +103,28 @@ function json(body: unknown, status = 200) {
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
 
+const isDateRange = (minDate: unknown, maxDate: unknown) =>
+  typeof minDate === "string" && DATE_PATTERN.test(minDate) &&
+  typeof maxDate === "string" && DATE_PATTERN.test(maxDate) &&
+  minDate <= maxDate;
+
 const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+
+// Hub account emails (service role; email column only).
+async function fetchProfileEmails(adminClient: SupabaseClient): Promise<string[]> {
+  const emails: string[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await adminClient
+      .from("profiles")
+      .select("email")
+      .order("id")
+      .range(from, from + 999);
+    if (error) throw new Error(`Failed to fetch profiles: ${error.message}`);
+    emails.push(...(data ?? []).map((p) => p.email));
+    if (!data || data.length < 1000) break;
+  }
+  return emails;
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -148,29 +185,32 @@ serve(async (req) => {
     const startedAt = Date.now();
     const today = toDateString(startedAt);
 
+    if (step === "plan") {
+      const hubEmails = lookupEmails([], await fetchProfileEmails(adminClient));
+      return json({
+        emailRanges: dateRanges(addDays(today, -EMAIL_LOOKBACK_DAYS), addDays(today, FUTURE_DAYS), RANGE_DAYS),
+        appointmentRanges: dateRanges(addDays(today, -LOOKBACK_DAYS), addDays(today, FUTURE_DAYS), RANGE_DAYS),
+        hubEmails,
+        emailsPerStep: MAX_EMAILS_PER_STEP,
+      });
+    }
+
+    if (step === "match") {
+      if (!Array.isArray(body.certificates)) return json({ error: "match needs certificates" }, 400);
+      return json(bundleMatchKeys(uniqueCertificates(body.certificates as AcuityCertificate[])));
+    }
+
     if (step === "save") {
-      const { certificates, appointments, incompleteDates, diagnostics } = body;
-      if (!Array.isArray(certificates) || !Array.isArray(appointments) || !isStringArray(incompleteDates)) {
+      const { appointments, incompleteDates, diagnostics } = body;
+      if (!Array.isArray(body.certificates) || !Array.isArray(appointments) || !isStringArray(incompleteDates)) {
         return json({ error: "save needs certificates, appointments and incompleteDates" }, 400);
       }
-
-      // Hub account emails (service role; email column only).
-      const profileEmails: string[] = [];
-      for (let from = 0; ; from += 1000) {
-        const { data, error } = await adminClient
-          .from("profiles")
-          .select("email")
-          .order("id")
-          .range(from, from + 999);
-        if (error) throw new Error(`Failed to fetch profiles: ${error.message}`);
-        profileEmails.push(...(data ?? []).map((p) => p.email));
-        if (!data || data.length < 1000) break;
-      }
+      const certificates = uniqueCertificates(body.certificates as AcuityCertificate[]);
 
       const bundles = buildBundlesView(
-        certificates as AcuityCertificate[],
+        certificates,
         appointments as AcuityAppointment[],
-        buildPortalEmailSet(profileEmails),
+        buildPortalEmailSet(await fetchProfileEmails(adminClient)),
         startedAt
       );
 
@@ -179,7 +219,7 @@ serve(async (req) => {
         lookbackDays: LOOKBACK_DAYS,
         bundles,
         dataIssues: {
-          incompleteDates: [...incompleteDates].sort(),
+          incompleteDates: [...new Set(incompleteDates)].sort(),
           bundlesWithoutEmail: bundles.rows.filter((row) => !row.email).length,
           matchedByEmailOnly: bundles.rows.filter((row) => row.sessionsMatchedBy === "email").length,
         },
@@ -207,7 +247,7 @@ serve(async (req) => {
       return json({ saved: true, rows: bundles.rows.length, totals: bundles.totals });
     }
 
-    if (step !== "certificates" && step !== "appointments") {
+    if (step !== "emails" && step !== "certificates" && step !== "appointments") {
       return json({ error: "Unknown step" }, 400);
     }
 
@@ -238,31 +278,35 @@ serve(async (req) => {
     }
 
     if (step === "certificates") {
-      // Every certificate (Acuity has no paging here).
-      const certificates = await acuityGet<AcuityCertificate[]>("/certificates");
-      if (!Array.isArray(certificates)) throw new Error("Unexpected Acuity certificates response");
-      const match = bundleMatchKeys(certificates);
-      const ranges = dateRanges(addDays(today, -LOOKBACK_DAYS), addDays(today, FUTURE_DAYS), RANGE_DAYS);
+      const { emails } = body;
+      if (!isStringArray(emails) || emails.length > MAX_EMAILS_PER_STEP) {
+        return json({ error: `certificates needs up to ${MAX_EMAILS_PER_STEP} emails` }, 400);
+      }
+      const pages = await mapWithConcurrency(emails, ACUITY_CONCURRENCY, async (email) => {
+        const page = await acuityGet<AcuityCertificate[]>(
+          `/certificates?${new URLSearchParams({ email })}`
+        );
+        if (!Array.isArray(page)) throw new Error("Unexpected Acuity certificates response");
+        return page;
+      });
+      const certificates = uniqueCertificates(pages.flat());
       const durationMs = Date.now() - startedAt;
       console.log("admin-bundles certificates", {
+        emails: emails.length,
         certificates: certificates.length,
-        codes: match.codes.length,
-        emails: match.emails.length,
-        ranges: ranges.length,
+        acuityRequests,
         durationMs,
       });
-      return json({ certificates, match, ranges, acuityRequests, durationMs });
+      return json({ certificates, acuityRequests, durationMs });
     }
 
-    // step === "appointments": one date range.
+    // "emails" and "appointments": one date range of appointments.
     const { minDate, maxDate, match } = body;
-    if (
-      typeof minDate !== "string" || !DATE_PATTERN.test(minDate) ||
-      typeof maxDate !== "string" || !DATE_PATTERN.test(maxDate) ||
-      minDate > maxDate ||
-      !isStringArray(match?.codes) || !isStringArray(match?.emails)
-    ) {
-      return json({ error: "appointments needs minDate, maxDate and match" }, 400);
+    if (!isDateRange(minDate, maxDate)) {
+      return json({ error: `${step} needs minDate and maxDate` }, 400);
+    }
+    if (step === "appointments" && (!isStringArray(match?.codes) || !isStringArray(match?.emails))) {
+      return json({ error: "appointments needs match" }, 400);
     }
 
     const fetched = await fetchAppointmentsInWindows(
@@ -279,10 +323,18 @@ serve(async (req) => {
       maxDate,
       { limit: WINDOW_LIMIT, chunkDays: CHUNK_DAYS, concurrency: ACUITY_CONCURRENCY }
     );
-    const appointments = appointmentsForBundles(fetched.appointments, match as BundleMatchKeys);
     const durationMs = Date.now() - startedAt;
+    const windowAppointments = fetched.appointments.length;
+
+    if (step === "emails") {
+      const emails = lookupEmails(fetched.appointments);
+      console.log("admin-bundles emails", { windowAppointments, emails: emails.length, acuityRequests, durationMs });
+      return json({ emails, windowAppointments, acuityRequests, durationMs });
+    }
+
+    const appointments = appointmentsForBundles(fetched.appointments, match as BundleMatchKeys);
     console.log("admin-bundles appointments", {
-      windowAppointments: fetched.appointments.length,
+      windowAppointments,
       kept: appointments.length,
       incompleteDates: fetched.incompleteDates.length,
       acuityRequests,
@@ -290,7 +342,7 @@ serve(async (req) => {
     });
     return json({
       appointments,
-      windowAppointments: fetched.appointments.length,
+      windowAppointments,
       incompleteDates: fetched.incompleteDates,
       acuityRequests,
       durationMs,

@@ -192,6 +192,28 @@ export function appointmentsForBundles(
   });
 }
 
+// Acuity's full /certificates list times out for Fettle's account, so
+// certificates are looked up per email (/certificates?email=). These are the
+// emails to try from a set of appointments: each as written and in lower
+// case, since it isn't known whether Acuity's email filter ignores case.
+export function lookupEmails(appointments: AcuityAppointment[], extra: (string | null | undefined)[] = []): string[] {
+  const emails = new Set<string>();
+  for (const raw of [...appointments.map((appt) => appt.email), ...extra]) {
+    const normalized = normalizeEmail(raw);
+    if (!normalized) continue;
+    emails.add((raw ?? "").trim());
+    emails.add(normalized);
+  }
+  return [...emails].sort();
+}
+
+/** The same certificate found through two emails is listed once. */
+export function uniqueCertificates(certificates: AcuityCertificate[]): AcuityCertificate[] {
+  const byId = new Map<number, AcuityCertificate>();
+  for (const cert of certificates) byId.set(cert.id, cert);
+  return [...byId.values()];
+}
+
 /** Consecutive [from, to] date ranges of `days` days covering minDate–maxDate. */
 export function dateRanges(minDate: string, maxDate: string, days: number): [string, string][] {
   const ranges: [string, string][] = [];

@@ -11,8 +11,10 @@ import {
   buildBundlesView,
   dateRanges,
   isSessionBundle,
+  lookupEmails,
   remainingCredits,
   segmentFor,
+  uniqueCertificates,
 } from "./logic.ts";
 
 const NOW = Date.parse("2026-10-14T12:00:00Z");
@@ -210,6 +212,25 @@ describe("building in steps", () => {
     const kept = appointmentsForBundles(appts, keys);
     expect(kept.map((a) => a.id)).toEqual([appts[0].id, appts[1].id, appts[2].id]);
     expect(view(certs, kept)).toEqual(view(certs, appts));
+  });
+
+  it("looks up each email as written and in lower case, once", () => {
+    const appts = [
+      appt(-1, { email: " Ann@Example.com " }),
+      appt(-2, { email: "ann@example.com" }),
+      appt(-3, { email: "not-an-email" }),
+      appt(-4, { email: null }),
+    ];
+    expect(lookupEmails(appts, ["bo@example.com", null])).toEqual([
+      "Ann@Example.com",
+      "ann@example.com",
+      "bo@example.com",
+    ]);
+  });
+
+  it("lists a certificate found through two emails once", () => {
+    const one = cert({ id: 500 });
+    expect(uniqueCertificates([one, { ...one }, cert({ id: 501 })]).map((c) => c.id)).toEqual([500, 501]);
   });
 
   it("splits a date window into consecutive ranges", () => {
