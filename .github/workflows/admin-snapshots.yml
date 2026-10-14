@@ -1,9 +1,10 @@
 # Rebuilds the saved copy of the admin Bundles page from Acuity, so the page
 # opens at once instead of waiting on Acuity. The build is too long for one
-# edge-function call, so the script calls admin-bundles one step at a time
-# (certificates, each date range's appointments, save) and the function saves
-# the result to admin_snapshots. Only counts and timings reach these logs —
-# never client data.
+# edge-function call, and Acuity's full certificate list times out, so the
+# script calls admin-bundles one step at a time (emails from a year of
+# appointments, certificates looked up per email, appointments, save) and the
+# function saves the result to admin_snapshots. Only counts and timings reach
+# these logs — never client data.
 name: Admin snapshots
 
 on:
@@ -18,7 +19,7 @@ concurrency:
 jobs:
   bundles:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

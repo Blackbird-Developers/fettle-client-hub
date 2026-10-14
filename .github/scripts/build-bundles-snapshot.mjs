@@ -1,7 +1,13 @@
 // Builds the admin Bundles snapshot by calling the admin-bundles edge
-// function one step at a time (see its index.ts): certificates, then each
-// date range's appointments, then save. One call for everything runs past
-// the edge-function time limit; each step stays well inside it.
+// function one step at a time (see its index.ts). One call for everything
+// runs past the edge-function time limit, and Acuity's full certificate list
+// times out, so:
+//   1. plan          — date ranges, and Hub account emails
+//   2. emails        — per date range: the emails on a year of appointments
+//   3. certificates  — per batch of emails: their certificates
+//   4. match         — the codes and emails that tie appointments to a bundle
+//   5. appointments  — per date range: the appointments a bundle can use
+//   6. save          — build the view and save it to admin_snapshots
 //
 // Run by .github/workflows/admin-snapshots.yml with FUNCTION_URL and
 // CRON_SECRET set. PRIVACY: step responses hold client data — this script
@@ -63,23 +69,54 @@ async function callStep(label, payload) {
 }
 
 const started = Date.now();
+let acuityRequests = 0;
 
-const start = await callStep("certificates", { step: "certificates" });
+// 1. Plan.
+const plan = await callStep("plan", { step: "plan" });
 console.log(
-  `  ${start.certificates.length} certificates, ${start.match.codes.length} bundle codes, ` +
-    `${start.ranges.length} date ranges (Acuity took ${seconds(start.durationMs)})`
+  `  ${plan.emailRanges.length} email ranges, ${plan.appointmentRanges.length} appointment ranges, ` +
+    `${plan.hubEmails.length} Hub account emails`
 );
 
+// 2. Emails from a year of appointments, plus the Hub accounts'.
+const emails = new Set(plan.hubEmails);
+for (const [minDate, maxDate] of plan.emailRanges) {
+  const part = await callStep(`emails ${minDate} to ${maxDate}`, { step: "emails", minDate, maxDate });
+  part.emails.forEach((email) => emails.add(email));
+  acuityRequests += part.acuityRequests;
+  console.log(`  ${part.windowAppointments} appointments, ${part.emails.length} emails (${seconds(part.durationMs)})`);
+}
+console.log(`  ${emails.size} emails to look up`);
+
+// 3. Certificates, a batch of emails at a time.
+const allEmails = [...emails].sort();
+const certificates = new Map();
+for (let i = 0; i < allEmails.length; i += plan.emailsPerStep) {
+  const batch = allEmails.slice(i, i + plan.emailsPerStep);
+  const part = await callStep(`certificates ${i + 1}–${i + batch.length} of ${allEmails.length}`, {
+    step: "certificates",
+    emails: batch,
+  });
+  part.certificates.forEach((cert) => certificates.set(cert.id, cert));
+  acuityRequests += part.acuityRequests;
+  console.log(`  ${part.certificates.length} certificates (${seconds(part.durationMs)})`);
+}
+console.log(`  ${certificates.size} certificates in all`);
+
+// 4. What ties appointments to a bundle.
+const match = await callStep("match", { step: "match", certificates: [...certificates.values()] });
+console.log(`  ${match.codes.length} bundle codes, ${match.emails.length} bundle emails`);
+
+// 5. The appointments a bundle can use.
 const appointments = [];
 const incompleteDates = [];
-let acuityRequests = start.acuityRequests;
 let windowAppointments = 0;
-for (const [minDate, maxDate] of start.ranges) {
+for (const [minDate, maxDate] of plan.appointmentRanges) {
   const part = await callStep(`appointments ${minDate} to ${maxDate}`, {
     step: "appointments",
     minDate,
     maxDate,
-    match: start.match,
+    match,
   });
   appointments.push(...part.appointments);
   incompleteDates.push(...part.incompleteDates);
@@ -91,9 +128,10 @@ for (const [minDate, maxDate] of start.ranges) {
   );
 }
 
+// 6. Save.
 const saved = await callStep("save", {
   step: "save",
-  certificates: start.certificates,
+  certificates: [...certificates.values()],
   appointments,
   incompleteDates,
   diagnostics: { windowAppointments, acuityRequests, durationMs: Date.now() - started },
