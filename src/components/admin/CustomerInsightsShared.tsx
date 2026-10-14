@@ -165,16 +165,17 @@ export function InsightsHeader({
   isFetching,
   onRefresh,
 }: {
-  data?: { generatedAt: string };
+  data?: { generatedAt: string; fromSnapshot?: boolean };
   isFetching: boolean;
   onRefresh: () => void;
 }) {
+  const origin = data?.fromSnapshot ? "From Acuity, rebuilt hourly" : "Live from Acuity";
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
       <span>
         {data
-          ? `Live from Acuity · updated ${formatDistanceToNowStrict(parseISO(data.generatedAt))} ago`
-          : "Live from Acuity"}
+          ? `${origin} · updated ${formatDistanceToNowStrict(parseISO(data.generatedAt))} ago`
+          : origin}
         {data && isFetching && " · refreshing…"}
       </span>
       <Button variant="outline" size="sm" onClick={onRefresh} disabled={isFetching}>

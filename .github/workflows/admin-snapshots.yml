@@ -1,0 +1,27 @@
+# Rebuilds the saved copy of the admin Bundles page from Acuity, so the page
+# opens at once instead of waiting on Acuity (which can take longer than the
+# browser will wait). The edge function does the work and saves it to
+# admin_snapshots; this workflow just rings the bell. The response is counts
+# only — no client data reaches these logs.
+name: Admin snapshots
+
+on:
+  schedule:
+    - cron: "15 6-19 * * *" # hourly 06:15–19:15 UTC, every day
+  workflow_dispatch: {}
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rebuild the Bundles snapshot
+        run: |
+          set -euo pipefail
+          response=$(curl -sS --max-time 300 -w "\n%{http_code}" -X POST \
+            -H "x-cron-secret: ${{ secrets.REMINDER_CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "https://gxeoillrmjezpehmcvrh.supabase.co/functions/v1/admin-bundles")
+          status=$(echo "$response" | tail -1)
+          echo "$response" | head -n -1
+          test "$status" = "200"

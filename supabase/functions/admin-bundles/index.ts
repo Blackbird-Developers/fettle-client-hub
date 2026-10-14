@@ -7,11 +7,20 @@
 // Reads certificates straight from Acuity, not the hub's user_packages table:
 // user_packages only has bundles for customers with a hub account.
 //
+// Building it walks a lot of Acuity history, so it's slow. Two modes:
+//   - POST with x-cron-secret (the admin-snapshots GitHub Actions workflow):
+//     builds the view and saves it to admin_snapshots. Answers counts only.
+//   - GET from an admin: returns the saved copy at once. Only when there is
+//     none yet (or the table is missing) is it built live, and then saved.
+//
 // PRIVACY: responses contain client names/emails/phones for admins, but logs
-// must stay counts-only. All rules live in ./logic.ts (tested).
+// and the cron response must stay counts-only. All rules live in ./logic.ts
+// (tested).
 //
 // DEPLOY: imports ../admin-customer-insights/logic.ts, so deploy with the
 // Supabase CLI (`supabase functions deploy admin-bundles`), which bundles it.
+// config.toml turns off the gateway JWT check so the workflow can call it;
+// admin requests are checked here instead.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -32,13 +41,17 @@ const corsHeaders = {
 };
 
 const ACUITY_API_BASE = "https://acuityscheduling.com/api/v1";
+const SNAPSHOT_SOURCE = "admin-bundles";
 
 /** Results per Acuity request for the appointment window. */
 const WINDOW_LIMIT = 500;
-/** How far back sessions are looked up (last session, first redemption). */
-const LOOKBACK_DAYS = 365;
+/** How far back sessions are looked up (last session, first redemption):
+ *  the longest segment window (expired with credits, last 180 days). */
+const LOOKBACK_DAYS = 180;
 /** How far ahead, for booked sessions. */
-const FUTURE_DAYS = 180;
+const FUTURE_DAYS = 90;
+/** Days per appointment request; a full one is split in half. */
+const CHUNK_DAYS = 14;
 const ACUITY_CONCURRENCY = 4;
 
 function json(body: unknown, status = 200) {
@@ -54,32 +67,51 @@ serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return json({ error: "Missing authorization header" }, 401);
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
+    const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return json({ error: "Unauthorized" }, 401);
-    }
+    const cronSecret = Deno.env.get("REMINDER_CRON_SECRET");
+    const isCron =
+      req.method === "POST" && Boolean(cronSecret) && req.headers.get("x-cron-secret") === cronSecret;
 
-    const { data: hasAdminRole, error: roleError } = await supabase.rpc(
-      "has_role",
-      { check_role: "admin" }
-    );
-    if (roleError || !hasAdminRole) {
-      return json({ error: "Forbidden: Admin access required" }, 403);
+    if (!isCron) {
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader) {
+        return json({ error: "Missing authorization header" }, 401);
+      }
+      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+      if (userError || !user) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+
+      const { data: hasAdminRole, error: roleError } = await supabase.rpc(
+        "has_role",
+        { check_role: "admin" }
+      );
+      if (roleError || !hasAdminRole) {
+        return json({ error: "Forbidden: Admin access required" }, 403);
+      }
+
+      // The saved copy, when there is one. A missing table (migration not
+      // applied yet) falls through to a live build.
+      const { data: snapshot, error: snapshotError } = await adminClient
+        .from("admin_snapshots")
+        .select("data")
+        .eq("source", SNAPSHOT_SOURCE)
+        .maybeSingle();
+      if (snapshotError) console.error("admin-bundles snapshot read failed:", snapshotError.code);
+      if (snapshot?.data) {
+        return json({ ...snapshot.data, fromSnapshot: true });
+      }
     }
 
     const acuityUserId = Deno.env.get("ACUITY_USER_ID");
@@ -116,7 +148,7 @@ serve(async (req) => {
     const certificates = await acuityGet<AcuityCertificate[]>("/certificates");
     if (!Array.isArray(certificates)) throw new Error("Unexpected Acuity certificates response");
 
-    // 2. Appointments over the last year and the months ahead.
+    // 2. Appointments over the lookback window and the months ahead.
     const fetched = await fetchAppointmentsInWindows(
       (minDate, maxDate) =>
         acuityGet<AcuityAppointment[]>(
@@ -129,11 +161,10 @@ serve(async (req) => {
         ),
       addDays(today, -LOOKBACK_DAYS),
       addDays(today, FUTURE_DAYS),
-      { limit: WINDOW_LIMIT, chunkDays: 7, concurrency: ACUITY_CONCURRENCY }
+      { limit: WINDOW_LIMIT, chunkDays: CHUNK_DAYS, concurrency: ACUITY_CONCURRENCY }
     );
 
     // 3. Hub account emails (service role; email column only).
-    const adminClient = createClient(supabaseUrl, supabaseServiceKey);
     const profileEmails: string[] = [];
     for (let from = 0; ; from += 1000) {
       const { data, error } = await adminClient
@@ -161,12 +192,13 @@ serve(async (req) => {
     };
     console.log("admin-bundles completed", {
       ...diagnostics,
+      cron: isCron,
       totals: bundles.totals,
       skipped: bundles.skipped,
       incompleteDates: fetched.incompleteDates.length,
     });
 
-    return json({
+    const body = {
       generatedAt: new Date(now).toISOString(),
       lookbackDays: LOOKBACK_DAYS,
       bundles,
@@ -176,7 +208,20 @@ serve(async (req) => {
         matchedByEmailOnly: bundles.rows.filter((row) => row.sessionsMatchedBy === "email").length,
       },
       diagnostics,
-    });
+    };
+
+    // 4. Save it for the next admin. A failed save doesn't fail an admin's
+    //    request, but does fail the workflow run so it shows up there.
+    const { error: saveError } = await adminClient
+      .from("admin_snapshots")
+      .upsert({ source: SNAPSHOT_SOURCE, data: body, generated_at: body.generatedAt });
+    if (saveError) console.error("admin-bundles snapshot save failed:", saveError.code);
+
+    if (isCron) {
+      // Counts only: the workflow prints this in GitHub's logs.
+      return json({ saved: !saveError, diagnostics, totals: bundles.totals }, saveError ? 500 : 200);
+    }
+    return json(body);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error occurred";
     console.error("admin-bundles failed:", message);
