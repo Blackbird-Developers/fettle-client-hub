@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@/test/setupDom";
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -100,6 +100,16 @@ describe("Bundles page", () => {
     expect(ann.getByText("2 of 6 used ·", { exact: false })).toBeInTheDocument();
     expect(ann.getByText(/16 days left/)).toBeInTheDocument();
     expect(screen.queryByText("Bo Byrne")).toBeNull();
+  });
+
+  it("says whether the data is live or the hourly saved copy", () => {
+    renderPage();
+    expect(screen.getByText(/^Live from Acuity · updated/)).toBeInTheDocument();
+    cleanup();
+
+    state.data = { ...response([]), fromSnapshot: true };
+    renderPage();
+    expect(screen.getByText(/^From Acuity, rebuilt hourly · updated/)).toBeInTheDocument();
   });
 
   it("switches segments and searches by bundle code", async () => {

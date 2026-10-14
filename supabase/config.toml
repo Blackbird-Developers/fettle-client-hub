@@ -58,6 +58,11 @@ verify_jwt = false
 [functions.portal-adoption-emails]
 verify_jwt = false
 
+# Two callers: the admin-snapshots workflow (x-cron-secret, no JWT) and
+# admins, whose JWT and admin role the function checks itself.
+[functions.admin-bundles]
+verify_jwt = false
+
 # Resend calls this server-to-server; every request is checked against the
 # Svix signature (RESEND_WEBHOOK_SECRET) instead of a JWT.
 [functions.resend-webhook]

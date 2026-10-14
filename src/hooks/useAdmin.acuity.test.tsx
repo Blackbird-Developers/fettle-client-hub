@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readCachedAdminData, writeCachedAdminData } from "@/lib/adminDataCache";
-import { useBundles, usePreloadAdminData } from "./useAdmin";
+import { ADMIN_FUNCTION_TIMEOUT_MS, useBundles, usePreloadAdminData } from "./useAdmin";
 
 vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ user: { id: "admin-1" } }) }));
 
@@ -92,6 +92,48 @@ describe("Acuity admin data", () => {
       "admin-bundles",
     ]);
     expect(maxInFlight).toBe(1);
+  });
+
+  it("gives up after the timeout and doesn't retry", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fetchMock.mockImplementation(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) =>
+            init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))
+          )
+      );
+
+      const { result } = renderHook(() => useBundles(), { wrapper });
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(ADMIN_FUNCTION_TIMEOUT_MS);
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.error).toMatchObject({ type: "timeout", message: expect.stringMatching(/too long/) });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([504, 546])("treats a %i from Supabase as a timeout, without retrying", async (status) => {
+    fetchMock.mockImplementation(async () => ({ ok: false, status, json: async () => ({}) }));
+
+    const { result } = renderHook(() => useBundles(), { wrapper });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error).toMatchObject({ type: "timeout", statusCode: status });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still retries a server error once", async () => {
+    fetchMock.mockImplementation(async () => ({ ok: false, status: 500, json: async () => ({}) }));
+
+    const { result } = renderHook(() => useBundles(), { wrapper });
+
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 4_000 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("doesn't preload for non-admins", async () => {

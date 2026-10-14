@@ -419,7 +419,18 @@ export interface CustomerInsightsResponse {
   };
 }
 
+/** How long the browser waits for an admin Acuity function before giving up. */
+export const ADMIN_FUNCTION_TIMEOUT_MS = 120_000;
+
+const ACUITY_TIMEOUT_ERROR: ApiError = {
+  type: "timeout",
+  message: "Acuity took too long to answer. Try again in a minute.",
+  retryable: true,
+};
+
 // GETs one of the admin Acuity edge functions with the caller's session.
+// Gives up after ADMIN_FUNCTION_TIMEOUT_MS; a gateway timeout (504) or the
+// function hitting Supabase's limits (546) count as a timeout too.
 async function fetchAdminFunction(name: string) {
   const { data: sessionData } = await supabase.auth.getSession();
   const accessToken = sessionData?.session?.access_token;
@@ -432,23 +443,34 @@ async function fetchAdminFunction(name: string) {
     } as ApiError;
   }
 
-  let response: Response;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ADMIN_FUNCTION_TIMEOUT_MS);
+  let data;
   try {
-    response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${name}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
-  } catch (fetchError) {
-    throw classifyApiError(fetchError);
-  }
+    let response: Response;
+    try {
+      response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${name}`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        signal: controller.signal,
+      });
+    } catch (fetchError) {
+      throw controller.signal.aborted ? ACUITY_TIMEOUT_ERROR : classifyApiError(fetchError);
+    }
 
-  if (!response.ok) {
-    throw classifyApiError(new Error(`HTTP ${response.status}`), response);
-  }
+    if (response.status === 504 || response.status === 546) {
+      throw { ...ACUITY_TIMEOUT_ERROR, statusCode: response.status };
+    }
+    if (!response.ok) {
+      throw classifyApiError(new Error(`HTTP ${response.status}`), response);
+    }
 
-  const data = await response.json();
+    data = await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (data.error) {
     throw {
@@ -462,13 +484,14 @@ async function fetchAdminFunction(name: string) {
 
 // Shared by the Acuity-backed admin queries: slow to build, so fresh for 30
 // minutes (Refresh reloads sooner), kept in memory for an hour, never
-// refetched on window focus, retried once at most.
+// refetched on window focus, retried once at most — but not after a timeout,
+// which would only make the admin wait as long again.
 const ACUITY_QUERY_OPTIONS = {
   staleTime: 1000 * 60 * 30,
   gcTime: 1000 * 60 * 60,
   refetchOnWindowFocus: false,
   retry: (failureCount: number, error: ApiError) => {
-    const nonRetryableTypes = ["unauthorized", "forbidden", "cors", "network"];
+    const nonRetryableTypes = ["unauthorized", "forbidden", "cors", "network", "timeout"];
     if (error?.type && nonRetryableTypes.includes(error.type)) {
       return false;
     }
@@ -549,6 +572,8 @@ export function useHotLeads() {
 // Response of the admin-bundles edge function.
 export interface BundlesResponse {
   generatedAt: string;
+  /** True when this is the copy saved by the hourly rebuild, not a live build. */
+  fromSnapshot?: boolean;
   lookbackDays: number;
   bundles: BundlesView;
   dataIssues: {
