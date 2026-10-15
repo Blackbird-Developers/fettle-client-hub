@@ -245,23 +245,43 @@ export function Bundles() {
 }
 
 /** A muted tag for a contact detail Acuity doesn't have. */
-function MissingTag({ children }: { children: string }) {
+// Customer and Bundle cells share one rhythm so their lines sit level: a
+// primary line (leading-5), secondary metadata 4px below it (text-xs,
+// leading-4), and anything extra (chips, status) set apart 10px lower.
+// Both are width-capped so long names, emails and titles truncate (full
+// text in the tooltip) instead of pushing into the next column.
+
+/** One contact line: a muted icon and the value, or quiet "No …" text. */
+function ContactLine({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof Mail;
+  label: string;
+  value: string | null;
+}) {
   return (
-    <Badge variant="outline" className="border-border bg-muted/60 px-2 py-0 text-[11px] font-normal text-muted-foreground">
-      {children}
-    </Badge>
+    <p className="flex min-w-0 items-center gap-2">
+      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span className="sr-only">{label}: </span>
+      {value ? (
+        <span className="truncate" title={value}>
+          {value}
+        </span>
+      ) : (
+        <span className="italic">No {label.toLowerCase()}</span>
+      )}
+    </p>
   );
 }
 
-// Name on its own line, contact details underneath; anything missing is a
-// quiet tag rather than a coloured line, so complete rows read cleanly.
 function BundleCustomerCell({ row }: { row: BundleRow }) {
-  const identified = row.name || row.email;
-  if (!identified) {
+  if (!row.name && !row.email) {
     return (
-      <div className="min-w-[200px] space-y-1.5">
-        <p className="font-medium text-muted-foreground">Unidentified customer</p>
-        <p className="max-w-[240px] text-xs leading-relaxed text-muted-foreground">
+      <div className="min-w-[180px] max-w-[240px]">
+        <p className="font-medium leading-5 text-muted-foreground">Unidentified customer</p>
+        <p className="mt-1 text-xs leading-4 text-muted-foreground">
           No email on this bundle in Acuity. Search Acuity for code{" "}
           <span className="font-mono">{row.code}</span> to find who bought it.
         </p>
@@ -269,20 +289,20 @@ function BundleCustomerCell({ row }: { row: BundleRow }) {
     );
   }
   return (
-    <div className="min-w-[200px] space-y-1.5">
-      <p className="font-medium leading-snug">{row.name ?? <span className="text-muted-foreground">Name not in Acuity</span>}</p>
-      <div className="space-y-1 text-xs text-muted-foreground">
-        <p className="flex items-center gap-1.5 break-all">
-          <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          {row.email ?? <MissingTag>No email</MissingTag>}
+    <div className="min-w-[180px] max-w-[240px]">
+      {row.name ? (
+        <p className="truncate font-medium leading-5" title={row.name}>
+          {row.name}
         </p>
-        <p className="flex items-center gap-1.5">
-          <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          {row.phone ?? <MissingTag>No phone</MissingTag>}
-        </p>
+      ) : (
+        <p className="font-medium leading-5 text-muted-foreground">Name not in Acuity</p>
+      )}
+      <div className="mt-1 space-y-1 text-xs leading-4 text-muted-foreground">
+        <ContactLine icon={Mail} label="Email" value={row.email} />
+        <ContactLine icon={Phone} label="Phone" value={row.phone} />
       </div>
       {row.otherBundles > 0 && (
-        <Badge variant="outline" className="text-[11px] font-normal">
+        <Badge variant="outline" className="mt-2.5 px-2 py-0 text-[11px] font-normal leading-5">
           {row.otherBundles + 1} bundles
         </Badge>
       )}
@@ -292,10 +312,21 @@ function BundleCustomerCell({ row }: { row: BundleRow }) {
 
 function BundleCell({ row }: { row: BundleRow }) {
   return (
-    <div className="min-w-[150px] space-y-1.5">
-      <p className={row.knownProduct ? "whitespace-nowrap font-medium" : "max-w-[220px] font-medium text-amber-700"}>{row.bundleName}</p>
-      <p className="font-mono text-xs text-muted-foreground">{row.code}</p>
-      <Badge variant="outline" className={`whitespace-nowrap text-[11px] ${SEGMENT_STYLES[row.segment]}`}>
+    <div className="min-w-[140px] max-w-[200px]">
+      <p
+        className={`truncate font-medium leading-5 ${row.knownProduct ? "" : "text-amber-700"}`}
+        title={row.bundleName}
+      >
+        {row.bundleName}
+      </p>
+      <p className="mt-1 font-mono text-xs leading-4 tracking-wide text-muted-foreground">
+        <span className="sr-only">Code </span>
+        {row.code}
+      </p>
+      <Badge
+        variant="outline"
+        className={`mt-2.5 whitespace-nowrap px-2 py-0 text-[11px] font-medium leading-5 ${SEGMENT_STYLES[row.segment]}`}
+      >
         {SEGMENT_LABELS[row.segment].label}
       </Badge>
     </div>
