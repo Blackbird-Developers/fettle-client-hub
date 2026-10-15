@@ -58,6 +58,7 @@ import {
   dateRanges,
   lookupEmails,
   uniqueCertificates,
+  withFoundByEmail,
 } from "./logic.ts";
 
 const corsHeaders = {
@@ -110,20 +111,37 @@ const isDateRange = (minDate: unknown, maxDate: unknown) =>
 
 const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 
-// Hub account emails (service role; email column only).
-async function fetchProfileEmails(adminClient: SupabaseClient): Promise<string[]> {
-  const emails: string[] = [];
+interface HubProfile {
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+// Hub accounts (service role; email and name columns only).
+async function fetchProfiles(adminClient: SupabaseClient): Promise<HubProfile[]> {
+  const profiles: HubProfile[] = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await adminClient
       .from("profiles")
-      .select("email")
+      .select("email, first_name, last_name")
       .order("id")
       .range(from, from + 999);
     if (error) throw new Error(`Failed to fetch profiles: ${error.message}`);
-    emails.push(...(data ?? []).map((p) => p.email));
+    profiles.push(...(data ?? []));
     if (!data || data.length < 1000) break;
   }
-  return emails;
+  return profiles;
+}
+
+/** Hub account names by normalised email, for bundles Acuity has no name for. */
+function hubNamesByEmail(profiles: HubProfile[]): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const profile of profiles) {
+    const email = (profile.email ?? "").trim().toLowerCase();
+    const name = [profile.first_name, profile.last_name].map((p) => (p ?? "").trim()).filter(Boolean).join(" ");
+    if (email && name) names.set(email, name);
+  }
+  return names;
 }
 
 serve(async (req) => {
@@ -186,7 +204,7 @@ serve(async (req) => {
     const today = toDateString(startedAt);
 
     if (step === "plan") {
-      const hubEmails = lookupEmails([], await fetchProfileEmails(adminClient));
+      const hubEmails = lookupEmails([], (await fetchProfiles(adminClient)).map((p) => p.email));
       return json({
         emailRanges: dateRanges(addDays(today, -EMAIL_LOOKBACK_DAYS), addDays(today, FUTURE_DAYS), RANGE_DAYS),
         appointmentRanges: dateRanges(addDays(today, -LOOKBACK_DAYS), addDays(today, FUTURE_DAYS), RANGE_DAYS),
@@ -207,11 +225,13 @@ serve(async (req) => {
       }
       const certificates = uniqueCertificates(body.certificates as AcuityCertificate[]);
 
+      const profiles = await fetchProfiles(adminClient);
       const bundles = buildBundlesView(
         certificates,
         appointments as AcuityAppointment[],
-        buildPortalEmailSet(await fetchProfileEmails(adminClient)),
-        startedAt
+        buildPortalEmailSet(profiles.map((p) => p.email)),
+        startedAt,
+        hubNamesByEmail(profiles)
       );
 
       const snapshot = {
@@ -287,7 +307,9 @@ serve(async (req) => {
           `/certificates?${new URLSearchParams({ email })}`
         );
         if (!Array.isArray(page)) throw new Error("Unexpected Acuity certificates response");
-        return page;
+        // Acuity often leaves a certificate's email blank; remember whose
+        // search found it so the bundle can still be tied to them.
+        return page.map((cert) => withFoundByEmail(cert, email));
       });
       const certificates = uniqueCertificates(pages.flat());
       const durationMs = Date.now() - startedAt;

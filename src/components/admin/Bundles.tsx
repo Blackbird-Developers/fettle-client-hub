@@ -12,7 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { AlertTriangle, Package, Search } from "lucide-react";
+import { AlertTriangle, Mail, Package, Phone, Search } from "lucide-react";
 import { useBundles, useContactOutcomesAvailable, useCustomerFollowups } from "@/hooks/useAdmin";
 import { indexFollowups, isMissingTableError } from "@/lib/customerFollowups";
 import { daysAgoLabel, formatDate, formatDateTime, matchesSearch } from "@/lib/customerInsights";
@@ -24,7 +24,6 @@ import {
 } from "../../../supabase/functions/admin-bundles/logic.ts";
 import { FollowupActions } from "./FollowupActions";
 import {
-  CustomerCell,
   InsightsError,
   InsightsHeader,
   InsightsLoading,
@@ -102,7 +101,7 @@ export function Bundles() {
     );
   }
   if (issues.bundlesWithoutEmail > 0) {
-    notes.push(`${issues.bundlesWithoutEmail} bundle(s) have no email, so they can't be matched to a customer or a portal account.`);
+    notes.push(`${issues.bundlesWithoutEmail} bundle(s) have no email in Acuity and no customer could be found for them; they show as "Unidentified customer". Adding the email to the bundle in Acuity fixes them on the next hourly rebuild.`);
   }
 
   const meta = SEGMENT_LABELS[segment];
@@ -194,14 +193,9 @@ export function Bundles() {
               </TableHeader>
               <TableBody>
                 {rows.map((row) => (
-                  <TableRow key={row.id}>
+                  <TableRow key={row.id} className="[&>td]:py-5 [&>td]:align-top">
                     <TableCell>
-                      <CustomerCell name={row.name} email={row.email} phone={row.phone} />
-                      {row.otherBundles > 0 && (
-                        <Badge variant="outline" className="mt-1 text-[11px] font-normal">
-                          {row.otherBundles + 1} bundles
-                        </Badge>
-                      )}
+                      <BundleCustomerCell row={row} />
                     </TableCell>
                     <TableCell>
                       <BundleCell row={row} />
@@ -215,7 +209,7 @@ export function Bundles() {
                     <TableCell className="whitespace-nowrap">
                       <SessionsCell row={row} />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap">
                       <PortalStatusBadge status={row.portalStatus} />
                     </TableCell>
                     <TableCell>
@@ -250,12 +244,58 @@ export function Bundles() {
   );
 }
 
+/** A muted tag for a contact detail Acuity doesn't have. */
+function MissingTag({ children }: { children: string }) {
+  return (
+    <Badge variant="outline" className="border-border bg-muted/60 px-2 py-0 text-[11px] font-normal text-muted-foreground">
+      {children}
+    </Badge>
+  );
+}
+
+// Name on its own line, contact details underneath; anything missing is a
+// quiet tag rather than a coloured line, so complete rows read cleanly.
+function BundleCustomerCell({ row }: { row: BundleRow }) {
+  const identified = row.name || row.email;
+  if (!identified) {
+    return (
+      <div className="min-w-[200px] space-y-1.5">
+        <p className="font-medium text-muted-foreground">Unidentified customer</p>
+        <p className="max-w-[240px] text-xs leading-relaxed text-muted-foreground">
+          No email on this bundle in Acuity. Search Acuity for code{" "}
+          <span className="font-mono">{row.code}</span> to find who bought it.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="min-w-[200px] space-y-1.5">
+      <p className="font-medium leading-snug">{row.name ?? <span className="text-muted-foreground">Name not in Acuity</span>}</p>
+      <div className="space-y-1 text-xs text-muted-foreground">
+        <p className="flex items-center gap-1.5 break-all">
+          <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          {row.email ?? <MissingTag>No email</MissingTag>}
+        </p>
+        <p className="flex items-center gap-1.5">
+          <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          {row.phone ?? <MissingTag>No phone</MissingTag>}
+        </p>
+      </div>
+      {row.otherBundles > 0 && (
+        <Badge variant="outline" className="text-[11px] font-normal">
+          {row.otherBundles + 1} bundles
+        </Badge>
+      )}
+    </div>
+  );
+}
+
 function BundleCell({ row }: { row: BundleRow }) {
   return (
-    <div className="space-y-1">
-      <p className={row.knownProduct ? "font-medium" : "font-medium text-amber-700"}>{row.bundleName}</p>
+    <div className="min-w-[150px] space-y-1.5">
+      <p className={row.knownProduct ? "whitespace-nowrap font-medium" : "max-w-[220px] font-medium text-amber-700"}>{row.bundleName}</p>
       <p className="font-mono text-xs text-muted-foreground">{row.code}</p>
-      <Badge variant="outline" className={`text-[11px] ${SEGMENT_STYLES[row.segment]}`}>
+      <Badge variant="outline" className={`whitespace-nowrap text-[11px] ${SEGMENT_STYLES[row.segment]}`}>
         {SEGMENT_LABELS[row.segment].label}
       </Badge>
     </div>
@@ -265,14 +305,14 @@ function BundleCell({ row }: { row: BundleRow }) {
 function CreditsCell({ row }: { row: BundleRow }) {
   if (row.totalCredits === null) {
     return (
-      <div className="space-y-0.5">
+      <div className="space-y-1.5">
         <p>{row.remainingCredits} left</p>
         <p className="text-xs text-muted-foreground">Total unknown</p>
       </div>
     );
   }
   return (
-    <div className="min-w-[140px] space-y-1">
+    <div className="min-w-[140px] space-y-1.5">
       <div
         className="h-2 w-full rounded-full bg-muted"
         role="img"
@@ -298,7 +338,7 @@ function DatesCell({ row }: { row: BundleRow }) {
           ? "Expires today"
           : `${row.daysToExpiry} day${row.daysToExpiry === 1 ? "" : "s"} left`;
   return (
-    <div className="space-y-0.5">
+    <div className="space-y-1.5">
       <p>
         {row.purchasedAt ? formatDate(row.purchasedAt) : <span className="text-muted-foreground">Unknown</span>}
         {row.purchasedSource === "first_session" && (
@@ -315,7 +355,7 @@ function DatesCell({ row }: { row: BundleRow }) {
 
 function SessionsCell({ row }: { row: BundleRow }) {
   return (
-    <div className="space-y-0.5">
+    <div className="space-y-1.5">
       <p>
         Last:{" "}
         {row.lastSessionAt ? (

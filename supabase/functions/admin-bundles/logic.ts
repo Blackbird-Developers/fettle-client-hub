@@ -52,8 +52,16 @@ export interface AcuityCertificate {
   id: number;
   certificate: string;
   productID?: number | null;
+  /** The product's title (e.g. "Bundle 6 x 50min Individual Therapy Sessions"), not the buyer. */
   name?: string | null;
+  /** Often blank in Acuity, even on a certificate its email search returns. */
   email?: string | null;
+  /**
+   * Not from Acuity: the (normalised) emails whose /certificates?email=
+   * search returned this certificate, added by the certificates step so a
+   * bundle with a blank email can still be tied to its customer.
+   */
+  foundByEmails?: string[] | null;
   type?: string | null;
   remainingCounts?: number | Record<string, number> | null;
   remainingMinutes?: number | null;
@@ -149,6 +157,25 @@ export function remainingCredits(cert: AcuityCertificate): number {
 
 const codeKey = (code: string | null | undefined) => (code ?? "").trim().toUpperCase();
 
+/** Marks a certificate with the email whose search returned it. */
+export function withFoundByEmail(cert: AcuityCertificate, email: string): AcuityCertificate {
+  const normalized = normalizeEmail(email);
+  const found = new Set(cert.foundByEmails ?? []);
+  if (normalized) found.add(normalized);
+  return { ...cert, foundByEmails: [...found].sort() };
+}
+
+// The bundle's customer email: its own, or — when Acuity left it blank — the
+// email whose search found it. Only when exactly one customer's email found
+// it (spellings of one address count once), so a bundle is never given to
+// the wrong person.
+export function bundleEmail(cert: AcuityCertificate): string | null {
+  const own = normalizeEmail(cert.email);
+  if (own) return own;
+  const found = new Set((cert.foundByEmails ?? []).map(normalizeEmail).filter(Boolean));
+  return found.size === 1 ? [...found][0]! : null;
+}
+
 // ---------------------------------------------------------------------------
 // Building in steps: the scheduled workflow fetches appointments a date range
 // per call (one call for everything runs past the edge-function limit), and
@@ -168,7 +195,7 @@ export function bundleMatchKeys(certificates: AcuityCertificate[]): BundleMatchK
     if (!isSessionBundle(cert)) continue;
     const code = codeKey(cert.certificate);
     if (code) codes.add(code);
-    const email = normalizeEmail(cert.email);
+    const email = bundleEmail(cert);
     if (email) emails.add(email);
   }
   return { codes: [...codes], emails: [...emails] };
@@ -207,10 +234,14 @@ export function lookupEmails(appointments: AcuityAppointment[], extra: (string |
   return [...emails].sort();
 }
 
-/** The same certificate found through two emails is listed once. */
+/** The same certificate found through two emails is listed once, with both emails. */
 export function uniqueCertificates(certificates: AcuityCertificate[]): AcuityCertificate[] {
   const byId = new Map<number, AcuityCertificate>();
-  for (const cert of certificates) byId.set(cert.id, cert);
+  for (const cert of certificates) {
+    const earlier = byId.get(cert.id);
+    const found = [...(earlier?.foundByEmails ?? []), ...(cert.foundByEmails ?? [])];
+    byId.set(cert.id, found.length > 0 ? { ...cert, foundByEmails: [...new Set(found)].sort() } : cert);
+  }
   return [...byId.values()];
 }
 
@@ -303,7 +334,9 @@ export function buildBundlesView(
   certificates: AcuityCertificate[],
   appointments: AcuityAppointment[],
   portalEmails: Set<string>,
-  now: number
+  now: number,
+  /** Hub account names by normalised email, used when Acuity has no name. */
+  hubNames: Map<string, string> = new Map()
 ): BundlesView {
   const skipped = { notSessionBundles: 0, oldUsedUp: 0, oldExpired: 0, unknownProducts: 0 };
 
@@ -335,7 +368,7 @@ export function buildBundlesView(
 
     // Sessions booked with this code; without any, the customer's own sessions.
     const coded = byCode.get(codeKey(cert.certificate)) ?? [];
-    const email = normalizeEmail(cert.email) ?? normalizeEmail(coded[0]?.email);
+    const email = bundleEmail(cert) ?? normalizeEmail(coded[0]?.email);
     const sessions = coded.length > 0 ? coded : (email ? (byEmail.get(email) ?? []).filter(isSession) : []);
     const matchedBy = coded.length > 0 ? "code" : sessions.length > 0 ? "email" : null;
     const past = sessions.filter((a) => isCompleted(a, now));
@@ -371,12 +404,18 @@ export function buildBundlesView(
       continue;
     }
 
+    // Name and phone from the bundle's sessions, else from any of the
+    // customer's bookings (a Let's Talk call, say), else the Hub account's
+    // name. Never cert.name: that's the product's title.
     const named = last ?? next ?? coded[0] ?? null;
+    const anyBooking = email ? [...(byEmail.get(email) ?? [])].reverse() : [];
     const name =
-      [named?.firstName, named?.lastName].map((part) => (part ?? "").trim()).filter(Boolean).join(" ") ||
-      (cert.name ?? "").trim() ||
+      fullName(named) ||
+      anyBooking.map(fullName).find(Boolean) ||
+      (email ? hubNames.get(email) : undefined) ||
       null;
-    const phone = [...sessions].reverse().find((a) => (a.phone ?? "").trim())?.phone?.trim() ?? null;
+    const phone =
+      [...[...sessions].reverse(), ...anyBooking].find((a) => (a.phone ?? "").trim())?.phone?.trim() ?? null;
 
     rows.push({
       id: cert.id,
@@ -432,6 +471,10 @@ export function buildBundlesView(
     },
     skipped,
   };
+}
+
+function fullName(appt: AcuityAppointment | null): string {
+  return [appt?.firstName, appt?.lastName].map((part) => (part ?? "").trim()).filter(Boolean).join(" ");
 }
 
 // Within a segment, the most urgent first.

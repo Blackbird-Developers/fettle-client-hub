@@ -97,7 +97,12 @@ for (let i = 0; i < allEmails.length; i += plan.emailsPerStep) {
     step: "certificates",
     emails: batch,
   });
-  part.certificates.forEach((cert) => certificates.set(cert.id, cert));
+  // A certificate found through emails in two batches keeps both emails
+  // (the bundle's customer is the one email that found it).
+  part.certificates.forEach((cert) => {
+    const found = [...(certificates.get(cert.id)?.foundByEmails ?? []), ...(cert.foundByEmails ?? [])];
+    certificates.set(cert.id, { ...cert, foundByEmails: [...new Set(found)].sort() });
+  });
   acuityRequests += part.acuityRequests;
   console.log(`  ${part.certificates.length} certificates (${seconds(part.durationMs)})`);
 }
