@@ -157,6 +157,25 @@ describe("Bundles page", () => {
     expect(row.getByText("actions for Ann Archer")).toBeInTheDocument();
   });
 
+  it("tags missing contact details and flags bundles nobody could be tied to", () => {
+    state.data = response(
+      [
+        bundle("Ann Archer", "expiring", { phone: null }),
+        bundle("ignored", "expiring", { name: null, email: null, phone: null, code: "9B704A71" }),
+      ],
+      { bundlesWithoutEmail: 1 }
+    );
+    renderPage();
+
+    const ann = within(screen.getByText("Ann Archer").closest("tr")!);
+    expect(ann.getByText("ann@example.com")).toBeInTheDocument();
+    expect(ann.getByText("No phone")).toBeInTheDocument();
+
+    const unknown = within(screen.getByText("Unidentified customer").closest("tr")!);
+    expect(unknown.getAllByText("9B704A71")).toHaveLength(2);
+    expect(screen.getByText(/1 bundle\(s\) have no email in Acuity/)).toBeInTheDocument();
+  });
+
   it("says what was left out", () => {
     renderPage();
     expect(screen.getByText(/Not shown: 2 discount or gift codes, 5 bundles used up/)).toBeInTheDocument();

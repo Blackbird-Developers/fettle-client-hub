@@ -7,6 +7,7 @@ import {
 import {
   type AcuityCertificate,
   appointmentsForBundles,
+  bundleEmail,
   bundleMatchKeys,
   buildBundlesView,
   dateRanges,
@@ -15,6 +16,7 @@ import {
   remainingCredits,
   segmentFor,
   uniqueCertificates,
+  withFoundByEmail,
 } from "./logic.ts";
 
 const NOW = Date.parse("2026-10-14T12:00:00Z");
@@ -231,6 +233,71 @@ describe("building in steps", () => {
   it("lists a certificate found through two emails once", () => {
     const one = cert({ id: 500 });
     expect(uniqueCertificates([one, { ...one }, cert({ id: 501 })]).map((c) => c.id)).toEqual([500, 501]);
+  });
+
+  it("keeps every email that found a certificate", () => {
+    const one = cert({ id: 502, email: null });
+    const merged = uniqueCertificates([
+      withFoundByEmail(one, " Ann@Example.com "),
+      withFoundByEmail(one, "bo@example.com"),
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].foundByEmails).toEqual(["ann@example.com", "bo@example.com"]);
+  });
+});
+
+describe("who a bundle belongs to", () => {
+  it("uses the bundle's own email first", () => {
+    expect(bundleEmail(cert({ email: " Ann@Example.com ", foundByEmails: ["bo@example.com"] }))).toBe(
+      "ann@example.com"
+    );
+  });
+
+  it("falls back to the one email whose search found it", () => {
+    expect(bundleEmail(cert({ email: null, foundByEmails: ["ann@example.com"] }))).toBe("ann@example.com");
+    expect(bundleEmail(cert({ email: "", foundByEmails: ["Ann@Example.com", "ann@example.com"] }))).toBe(
+      "ann@example.com"
+    );
+  });
+
+  it("leaves it unidentified when two customers' searches found it", () => {
+    expect(bundleEmail(cert({ email: null, foundByEmails: ["ann@example.com", "bo@example.com"] }))).toBeNull();
+    expect(bundleEmail(cert({ email: null }))).toBeNull();
+  });
+
+  it("identifies a not-started bundle with a blank email from its other bookings", () => {
+    const blank = withFoundByEmail(
+      cert({ email: null, name: "Bundle 6 x 50min Individual Therapy Sessions", remainingCounts: 6, createdDate: days(-20) }),
+      "ann@example.com"
+    );
+    const letsTalk = appt(-30, { type: "Let's Talk - Finding your Path", phone: "086 555 0000" });
+    const keys = bundleMatchKeys([blank]);
+    expect(keys.emails).toEqual(["ann@example.com"]);
+
+    const [row] = view([blank], appointmentsForBundles([letsTalk], keys)).rows;
+    expect(row).toMatchObject({
+      name: "Ann Archer",
+      email: "ann@example.com",
+      phone: "086 555 0000",
+      segment: "not_started",
+      sessionsMatchedBy: null,
+    });
+  });
+
+  it("never shows the product title as the customer's name", () => {
+    const [row] = view([cert({ email: null, name: "Bundle 3 x 50min Zoom Sessions" })]).rows;
+    expect(row).toMatchObject({ name: null, email: null, phone: null });
+  });
+
+  it("takes the name from the Hub account when Acuity has none", () => {
+    const [row] = buildBundlesView(
+      [cert({ email: "cara@example.com" })],
+      [],
+      buildPortalEmailSet(["cara@example.com"]),
+      NOW,
+      new Map([["cara@example.com", "Cara Dunne"]])
+    ).rows;
+    expect(row).toMatchObject({ name: "Cara Dunne", portalStatus: "has_account" });
   });
 
   it("splits a date window into consecutive ranges", () => {
