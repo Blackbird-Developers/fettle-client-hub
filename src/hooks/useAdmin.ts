@@ -35,6 +35,7 @@ import type {
 } from "../../supabase/functions/admin-customer-insights/logic.ts";
 import type { LeadsView } from "../../supabase/functions/admin-leads/logic.ts";
 import type { BundlesView } from "../../supabase/functions/admin-bundles/logic.ts";
+import type { AssessmentView, PsychiatryView } from "../../supabase/functions/admin-clinical/logic.ts";
 import type { RecentAttempt } from "@/lib/hotLeads";
 import type { EmailSendRow } from "@/lib/portalEmails";
 import { type NoAnswerSequence, countDue } from "@/lib/noAnswer";
@@ -595,6 +596,60 @@ export function useBundles() {
   const { user } = useAuth();
 
   return useQuery({ ...bundlesQuery(user?.id), enabled: isAdmin === true });
+}
+
+// Response of the admin-clinical edge function.
+export interface ClinicalResponse {
+  generatedAt: string;
+  lookbackDays: number;
+  psychiatryRule: { contactAfterDays: number; followUpByDays: number };
+  psychiatry: PsychiatryView;
+  assessments: AssessmentView;
+  dataIssues: {
+    incompleteDates: string[];
+    psychiatryWithoutEmail: number;
+    assessmentsWithoutEmail: number;
+  };
+  diagnostics: {
+    windowAppointments: number;
+    acuityRequests: number;
+    durationMs: number;
+  };
+}
+
+const clinicalQuery = (userId: string | undefined) =>
+  acuityQueryOptions("admin-clinical", userId, (data) => data as unknown as ClinicalResponse);
+
+// Psychiatry follow-ups and assessment next steps, built from Acuity. One
+// request feeds both pages. Not preloaded with the others: it's only needed
+// on those two pages.
+export function useClinical() {
+  const { data: isAdmin } = useIsAdmin();
+  const { user } = useAuth();
+
+  return useQuery({ ...clinicalQuery(user?.id), enabled: isAdmin === true });
+}
+
+// Follow-ups and contact outcomes for a page's Contact column, with why
+// they're disabled when they can't load.
+export function useFollowupsForPage() {
+  const followups = useCustomerFollowups();
+  const outcomesCheck = useContactOutcomesAvailable();
+  const unavailable = followups.isPending
+    ? "Loading follow-ups…"
+    : followups.isError
+      ? isMissingTableError(followups.error)
+        ? "Available once the follow-ups database update is deployed"
+        : "Couldn't load follow-ups. Refresh the page to try again."
+      : null;
+  const outcomesUnavailable = outcomesCheck.isPending
+    ? "Loading…"
+    : outcomesCheck.isError
+      ? isMissingTableError(outcomesCheck.error)
+        ? "Outcomes are available once the contact-outcomes database update is deployed"
+        : "Couldn't load contact outcomes. Refresh the page to try again."
+      : null;
+  return { followups: followups.data, unavailable, outcomesUnavailable };
 }
 
 // Loads the Acuity-backed pages' data in the background once an admin opens

@@ -6,7 +6,11 @@
 // progress bar and step list along that expected duration. Only timings are
 // stored, never client data.
 
-export type AdminDataSource = "admin-customer-insights" | "admin-leads" | "admin-bundles";
+export type AdminDataSource =
+  | "admin-customer-insights"
+  | "admin-leads"
+  | "admin-bundles"
+  | "admin-clinical";
 
 export interface LoadStep {
   label: string;
@@ -52,6 +56,14 @@ export const LOAD_PROFILES: Record<AdminDataSource, LoadProfile> = {
       { label: "Fetching appointments", share: 0.65 },
       { label: "Matching Hub accounts", share: 0.1 },
       { label: "Working out credits used", share: 0.1 },
+    ],
+  },
+  "admin-clinical": {
+    label: "psychiatry and assessments",
+    defaultMs: 25_000,
+    steps: [
+      { label: "Fetching appointments", share: 0.9 },
+      { label: "Working out who's due", share: 0.1 },
     ],
   },
 };

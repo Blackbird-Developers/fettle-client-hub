@@ -1,12 +1,14 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { AdminDashboard } from "@/components/admin/AdminDashboard";
 import { AdminInvite } from "@/components/admin/AdminInvite";
+import { AssessmentPipeline } from "@/components/admin/AssessmentPipeline";
 import { Bundles } from "@/components/admin/Bundles";
 import { Feedback } from "@/components/admin/Feedback";
 import { FollowUpsReport } from "@/components/admin/FollowUpsReport";
 import { HotLeads } from "@/components/admin/HotLeads";
 import { NoAnswer } from "@/components/admin/NoAnswer";
 import { PortalAdoption } from "@/components/admin/PortalAdoption";
+import { PsychiatryFollowUps } from "@/components/admin/PsychiatryFollowUps";
 import { SessionProgression } from "@/components/admin/SessionProgression";
 import { useIsAdmin, usePreloadAdminData } from "@/hooks/useAdmin";
 import {
@@ -25,6 +27,8 @@ const SECTION_CONTENT: Record<AdminSectionId, (props: { subsectionId?: string })
   "no-answer": NoAnswer,
   adoption: PortalAdoption,
   bundles: Bundles,
+  psychiatry: PsychiatryFollowUps,
+  assessments: AssessmentPipeline,
   progression: ({ subsectionId }) => (
     <SessionProgression fromSession={parseProgressionRange(subsectionId)!} />
   ),

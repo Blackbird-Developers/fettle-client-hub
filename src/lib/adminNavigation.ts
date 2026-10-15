@@ -1,5 +1,7 @@
 import {
+  ClipboardList,
   Flame,
+  Pill,
   Package,
   LayoutDashboard,
   MessageSquare,
@@ -20,6 +22,8 @@ export type AdminSectionId =
   | "no-answer"
   | "adoption"
   | "bundles"
+  | "psychiatry"
+  | "assessments"
   | "progression"
   | "followups"
   | "feedback"
@@ -96,6 +100,21 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     href: "/admin/bundles",
     icon: Package,
     description: "Session bundles in Acuity: credits used and left, expiry, and who needs a call.",
+  },
+  {
+    id: "psychiatry",
+    name: "Psychiatry",
+    href: "/admin/psychiatry",
+    icon: Pill,
+    description:
+      "Psychiatry clients and when they're due a call: 3 weeks after an appointment, to book a follow-up for week 4.",
+  },
+  {
+    id: "assessments",
+    name: "Assessments",
+    href: "/admin/assessments",
+    icon: ClipboardList,
+    description: "Assessment clients, the step they've done, and the session they still need booked.",
   },
   {
     id: "progression",
