@@ -13,9 +13,13 @@ import {
   verifyUnsubscribeToken,
 } from "../_shared/unsubscribe.ts";
 import {
+  type Campaign,
+  type DeliverDeps,
   type Recipient,
   type SendHistory,
   EMAIL_GAP_DAYS,
+  MAX_RECIPIENTS_CEILING,
+  deliver,
   enquiryCandidates,
   enquiryRecipients,
   existingClientRecipients,
@@ -23,6 +27,7 @@ import {
   isFreeCall,
   maskEmail,
   planSends,
+  readConfig,
 } from "./logic.ts";
 import { renderEmail } from "./templates.ts";
 
@@ -62,6 +67,10 @@ function emptyHistory(): SendHistory {
 function recipient(campaign: Recipient["campaign"], email: string): Recipient {
   return { campaign, customerKey: `email:${email}`, email, name: null, firstName: null };
 }
+
+const BOTH = new Set<Campaign>(["existing_clients", "new_enquiries"]);
+
+const envOf = (vars: Record<string, string>) => (name: string) => vars[name];
 
 describe("free calls", () => {
   it.each([LETS_TALK, "Let’s Talk", INTRO_CHAT])("treats %j as a free call", (type) => {
@@ -165,7 +174,8 @@ describe("planSends", () => {
       ["a", "b", "c", "d"].map((x) => recipient("existing_clients", `${x}@example.com`)),
       history,
       NOW,
-      25
+      25,
+      BOTH
     );
     expect(plan.send.map((r) => r.email)).toEqual(["d@example.com"]);
     expect(plan.skipped).toMatchObject({ already_sent: 1, suppressed: 1, not_continuing: 1 });
@@ -176,7 +186,8 @@ describe("planSends", () => {
       [recipient("new_enquiries", "a@example.com"), recipient("existing_clients", "a@example.com")],
       emptyHistory(),
       NOW,
-      25
+      25,
+      BOTH
     );
     expect(plan.send).toEqual([recipient("existing_clients", "a@example.com")]);
     expect(plan.skipped.duplicate_in_run).toBe(1);
@@ -190,7 +201,8 @@ describe("planSends", () => {
       [recipient("existing_clients", "a@example.com"), recipient("existing_clients", "b@example.com")],
       history,
       NOW,
-      25
+      25,
+      BOTH
     );
     expect(plan.send.map((r) => r.email)).toEqual(["b@example.com"]);
     expect(plan.skipped.emailed_recently).toBe(1);
@@ -201,10 +213,192 @@ describe("planSends", () => {
       ["a", "b", "c"].map((x) => recipient("existing_clients", `${x}@example.com`)),
       emptyHistory(),
       NOW,
-      2
+      2,
+      BOTH
     );
     expect(plan.send).toHaveLength(2);
     expect(plan.waiting.map((r) => r.email)).toEqual(["c@example.com"]);
+  });
+});
+
+describe("readConfig", () => {
+  it("is a dry run with Email 1 only and a cap of 25 when nothing is set", () => {
+    expect(readConfig(envOf({}))).toEqual({
+      live: false,
+      campaigns: new Set(["existing_clients"]),
+      maxRecipients: 25,
+    });
+  });
+
+  it("goes live only on exactly \"true\"", () => {
+    expect(readConfig(envOf({ PORTAL_EMAILS_LIVE: "true" })).live).toBe(true);
+    for (const value of ["TRUE", "1", "yes", " true", ""]) {
+      expect(readConfig(envOf({ PORTAL_EMAILS_LIVE: value })).live).toBe(false);
+    }
+  });
+
+  it("runs only existing_clients with the launch settings", () => {
+    expect(
+      readConfig(envOf({
+        PORTAL_EMAILS_LIVE: "true",
+        PORTAL_EMAILS_CAMPAIGNS: "existing_clients",
+        PORTAL_EMAILS_MAX_RECIPIENTS: "25",
+      }))
+    ).toEqual({ live: true, campaigns: new Set(["existing_clients"]), maxRecipients: 25 });
+  });
+
+  it.each(["", " ", ",", "existing_clients", " Existing_Clients ", "existing_clients,typo"])(
+    "keeps new_enquiries off for PORTAL_EMAILS_CAMPAIGNS=%j",
+    (value) => {
+      const { campaigns } = readConfig(envOf({ PORTAL_EMAILS_CAMPAIGNS: value }));
+      expect([...campaigns]).toEqual(["existing_clients"]);
+    }
+  );
+
+  it("sends nothing when only unknown campaigns are listed", () => {
+    expect(readConfig(envOf({ PORTAL_EMAILS_CAMPAIGNS: "new_enquires,all" })).campaigns.size).toBe(0);
+  });
+
+  it("still allows Email 2 when it is listed explicitly", () => {
+    const { campaigns } = readConfig(envOf({ PORTAL_EMAILS_CAMPAIGNS: "existing_clients, new_enquiries" }));
+    expect(campaigns).toEqual(BOTH);
+  });
+
+  it(`never lets the cap go above ${MAX_RECIPIENTS_CEILING}, and falls back to it when unreadable`, () => {
+    const cap = (value: string) => readConfig(envOf({ PORTAL_EMAILS_MAX_RECIPIENTS: value })).maxRecipients;
+    expect(MAX_RECIPIENTS_CEILING).toBe(25);
+    expect(cap("10")).toBe(10);
+    expect(cap("0")).toBe(0);
+    expect(cap("250")).toBe(25);
+    for (const value of ["", "abc", "-5", "2.5", "1e3"]) expect(cap(value)).toBe(25);
+  });
+});
+
+describe("launch: Email 1 only", () => {
+  const launch = readConfig(envOf({
+    PORTAL_EMAILS_LIVE: "true",
+    PORTAL_EMAILS_CAMPAIGNS: "existing_clients",
+    PORTAL_EMAILS_MAX_RECIPIENTS: "25",
+  }));
+
+  it("drops new_enquiries recipients even if they reach the planner", () => {
+    const plan = planSends(
+      [recipient("existing_clients", "a@example.com"), recipient("new_enquiries", "b@example.com")],
+      emptyHistory(),
+      NOW,
+      launch.maxRecipients,
+      launch.campaigns
+    );
+    expect(plan.send).toEqual([recipient("existing_clients", "a@example.com")]);
+    expect(plan.waiting).toEqual([]);
+    expect(plan.skipped.campaign_disabled).toBe(1);
+  });
+
+  it("sends 25 of a 121-person backlog and leaves the rest for later runs", () => {
+    const backlog = Array.from({ length: 121 }, (_, i) => recipient("existing_clients", `c${i}@example.com`));
+    const plan = planSends(backlog, emptyHistory(), NOW, launch.maxRecipients, launch.campaigns);
+    expect(plan.send).toHaveLength(25);
+    expect(plan.waiting).toHaveLength(96);
+    expect(plan.send[0].email).toBe("c0@example.com");
+  });
+
+  it("skips suppressed (unsubscribed, bounced, complained) and already-sent addresses", () => {
+    const history = emptyHistory();
+    history.suppressed.add("unsub@example.com");
+    history.sent.existing_clients.add("done@example.com");
+    const plan = planSends(
+      ["unsub", "done", "new"].map((x) => recipient("existing_clients", `${x}@example.com`)),
+      history,
+      NOW,
+      launch.maxRecipients,
+      launch.campaigns
+    );
+    expect(plan.send.map((r) => r.email)).toEqual(["new@example.com"]);
+    expect(plan.skipped).toMatchObject({ suppressed: 1, already_sent: 1 });
+  });
+});
+
+describe("deliver", () => {
+  // In-memory stand-in for email_sends (unique per campaign + email) and Resend.
+  function fakeDeps(options: { failSendFor?: string; taken?: string[] } = {}) {
+    const rows = new Map<string, { key: string; status: "claimed" | "sent"; messageId?: string }>();
+    const keys = new Set((options.taken ?? []).map((email) => `existing_clients:${email}`));
+    const sentTo: string[] = [];
+    let nextRow = 1;
+    const deps: DeliverDeps = {
+      async claim(r) {
+        const key = `${r.campaign}:${r.email}`;
+        if (keys.has(key)) return null;
+        keys.add(key);
+        const id = `row${nextRow++}`;
+        rows.set(id, { key, status: "claimed" });
+        return id;
+      },
+      async send(r) {
+        if (r.email === options.failSendFor) throw new Error("Resend 500");
+        sentTo.push(r.email);
+        return `msg-${sentTo.length}`;
+      },
+      async release(id) {
+        keys.delete(rows.get(id)!.key);
+        rows.delete(id);
+      },
+      async markSent(id, messageId) {
+        rows.set(id, { ...rows.get(id)!, status: "sent", messageId });
+      },
+      log: () => {},
+    };
+    return { deps, rows, sentTo };
+  }
+  const list = (...emails: string[]) => emails.map((e) => recipient("existing_clients", e));
+
+  it("sends nothing and claims nothing in a dry run", async () => {
+    const { deps, rows, sentTo } = fakeDeps();
+    const result = await deliver(list("a@example.com", "b@example.com"), false, deps);
+    expect(result).toEqual({ sent: 0, failures: [], alreadyClaimed: 0 });
+    expect(sentTo).toEqual([]);
+    expect(rows.size).toBe(0);
+  });
+
+  it("claims, sends and records each email when live", async () => {
+    const { deps, rows, sentTo } = fakeDeps();
+    const result = await deliver(list("a@example.com", "b@example.com"), true, deps);
+    expect(result.sent).toBe(2);
+    expect(sentTo).toEqual(["a@example.com", "b@example.com"]);
+    expect([...rows.values()].map((r) => r.status)).toEqual(["sent", "sent"]);
+  });
+
+  it("never sends an email another run has already claimed", async () => {
+    const { deps, sentTo } = fakeDeps({ taken: ["a@example.com"] });
+    const result = await deliver(list("a@example.com", "b@example.com"), true, deps);
+    expect(sentTo).toEqual(["b@example.com"]);
+    expect(result).toMatchObject({ sent: 1, alreadyClaimed: 1 });
+  });
+
+  it("sends only once when the same list is delivered twice", async () => {
+    const { deps, sentTo } = fakeDeps();
+    await deliver(list("a@example.com"), true, deps);
+    const second = await deliver(list("a@example.com"), true, deps);
+    expect(sentTo).toEqual(["a@example.com"]);
+    expect(second).toMatchObject({ sent: 0, alreadyClaimed: 1 });
+  });
+
+  it("releases the claim when Resend fails, so a later run can retry", async () => {
+    const { deps, rows, sentTo } = fakeDeps({ failSendFor: "a@example.com" });
+    const result = await deliver(list("a@example.com", "b@example.com"), true, deps);
+    expect(result).toMatchObject({ sent: 1, failures: ["a***@example.com"] });
+    expect(sentTo).toEqual(["b@example.com"]);
+    expect([...rows.values()].map((r) => r.key)).toEqual(["existing_clients:b@example.com"]);
+  });
+
+  it("counts a claim error as a failure and sends nothing for it", async () => {
+    const { deps, sentTo } = fakeDeps();
+    deps.claim = async () => {
+      throw new Error("database down");
+    };
+    const result = await deliver(list("a@example.com"), true, deps);
+    expect(result).toEqual({ sent: 0, failures: ["a***@example.com"], alreadyClaimed: 0 });
+    expect(sentTo).toEqual([]);
   });
 });
 

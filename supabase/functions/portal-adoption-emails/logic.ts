@@ -27,6 +27,46 @@ import {
 
 export type Campaign = "existing_clients" | "new_enquiries";
 
+export const ALL_CAMPAIGNS: Campaign[] = ["existing_clients", "new_enquiries"];
+
+/** Used when PORTAL_EMAILS_CAMPAIGNS is unset or blank. Email 2 stays off
+ *  until Fettle confirms its copy; list it explicitly to turn it on. */
+export const DEFAULT_CAMPAIGNS: Campaign[] = ["existing_clients"];
+
+/** Most emails one run sends. PORTAL_EMAILS_MAX_RECIPIENTS can lower it,
+ *  never raise it, so a typo can't mail the whole backlog at once. */
+export const MAX_RECIPIENTS_CEILING = 25;
+
+export interface RunConfig {
+  live: boolean;
+  campaigns: Set<Campaign>;
+  maxRecipients: number;
+}
+
+// Reads the function's settings, failing safe: dry-run unless the live flag
+// is exactly "true", Email 1 only unless campaigns are listed (unknown names
+// are dropped, so a list of only typos sends nothing), and the cap falls back
+// to the ceiling when it's missing or not a whole number.
+export function readConfig(env: (name: string) => string | undefined): RunConfig {
+  const listed = (env("PORTAL_EMAILS_CAMPAIGNS") ?? "")
+    .split(",")
+    .map((c) => c.trim().toLowerCase())
+    .filter(Boolean);
+  const campaigns = new Set<Campaign>(
+    listed.length === 0
+      ? DEFAULT_CAMPAIGNS
+      : listed.filter((c): c is Campaign => ALL_CAMPAIGNS.includes(c as Campaign))
+  );
+  const max = (env("PORTAL_EMAILS_MAX_RECIPIENTS") ?? "").trim();
+  return {
+    live: env("PORTAL_EMAILS_LIVE") === "true",
+    campaigns,
+    maxRecipients: /^\d+$/.test(max)
+      ? Math.min(parseInt(max, 10), MAX_RECIPIENTS_CEILING)
+      : MAX_RECIPIENTS_CEILING,
+  };
+}
+
 /** Free 20-minute consultations, on any calendar. */
 const FREE_CALL_TYPE = /let.?s talk|introduction chat/i;
 
@@ -130,6 +170,7 @@ export function enquiryRecipients(candidates: EnquiryCandidate[]): Recipient[] {
 }
 
 export type SkipReason =
+  | "campaign_disabled"
   | "already_sent"
   | "suppressed"
   | "not_continuing"
@@ -156,14 +197,17 @@ export interface SendHistory {
 
 // Applies the stop rules to both lists and caps the run. Existing clients go
 // first, so someone on both lists gets Email 1 and Email 2 is skipped for at
-// least EMAIL_GAP_DAYS.
+// least EMAIL_GAP_DAYS. Recipients of a campaign that isn't enabled are
+// dropped here too, even though the caller shouldn't have listed them.
 export function planSends(
   recipients: Recipient[],
   history: SendHistory,
   now: number,
-  max: number
+  max: number,
+  enabled: ReadonlySet<Campaign>
 ): SendPlan {
   const skipped: Record<SkipReason, number> = {
+    campaign_disabled: 0,
     already_sent: 0,
     suppressed: 0,
     not_continuing: 0,
@@ -180,7 +224,8 @@ export function planSends(
   for (const recipient of ordered) {
     const lastSent = history.lastSentAt.get(recipient.email);
     let reason: SkipReason | null = null;
-    if (history.sent[recipient.campaign].has(recipient.email)) reason = "already_sent";
+    if (!enabled.has(recipient.campaign)) reason = "campaign_disabled";
+    else if (history.sent[recipient.campaign].has(recipient.email)) reason = "already_sent";
     else if (history.suppressed.has(recipient.email)) reason = "suppressed";
     else if (history.notContinuing.has(recipient.customerKey)) reason = "not_continuing";
     else if (lastSent !== undefined && now - lastSent < EMAIL_GAP_DAYS * DAY_MS) {
@@ -196,6 +241,78 @@ export function planSends(
   }
 
   return { send: due.slice(0, Math.max(0, max)), waiting: due.slice(Math.max(0, max)), skipped };
+}
+
+export interface DeliverDeps {
+  /** Reserves (campaign, email) before sending. Returns the row id, or null
+   *  when another run already holds it (unique constraint). Throws otherwise. */
+  claim(recipient: Recipient): Promise<string | null>;
+  /** Sends through Resend and returns the message id. */
+  send(recipient: Recipient): Promise<string>;
+  /** Frees a claim whose send failed, so a later run retries it. */
+  release(claimId: string): Promise<void>;
+  markSent(claimId: string, messageId: string): Promise<void>;
+  log(step: string, details?: unknown): void;
+}
+
+export interface DeliverResult {
+  sent: number;
+  /** Masked addresses whose claim or send failed. */
+  failures: string[];
+  /** Skipped because another run had already claimed them. */
+  alreadyClaimed: number;
+}
+
+// Sends the planned emails, only when live. Each row is claimed before Resend
+// is called, so an overlapping run can't send the same email twice; a failed
+// send releases its claim. A claim that can't be released or marked sent is
+// logged and left in place, which blocks a resend (the safe side).
+export async function deliver(
+  recipients: Recipient[],
+  live: boolean,
+  deps: DeliverDeps
+): Promise<DeliverResult> {
+  const result: DeliverResult = { sent: 0, failures: [], alreadyClaimed: 0 };
+  if (!live) return result;
+
+  for (const recipient of recipients) {
+    const to = maskEmail(recipient.email);
+    let claimId: string | null;
+    try {
+      claimId = await deps.claim(recipient);
+    } catch (e) {
+      result.failures.push(to);
+      deps.log("Claim failed", { to, error: String(e).slice(0, 150) });
+      continue;
+    }
+    if (claimId === null) {
+      result.alreadyClaimed++;
+      continue;
+    }
+
+    let messageId: string;
+    try {
+      messageId = await deps.send(recipient);
+    } catch (e) {
+      result.failures.push(to);
+      deps.log("Send failed", { to, error: String(e).slice(0, 150) });
+      try {
+        await deps.release(claimId);
+      } catch {
+        deps.log("Claim release failed", { to });
+      }
+      continue;
+    }
+
+    result.sent++;
+    try {
+      await deps.markSent(claimId, messageId);
+    } catch {
+      deps.log("WARNING: sent but not recorded as sent", { to });
+    }
+    deps.log("Email sent", { campaign: recipient.campaign, to });
+  }
+  return result;
 }
 
 export function maskEmail(email: string): string {
