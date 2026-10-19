@@ -12,6 +12,7 @@ import { useClinical, useFollowupsForPage } from "@/hooks/useAdmin";
 import { type BadgeTone, uniqueCalendars } from "@/lib/clinicalDisplay";
 import { indexFollowups } from "@/lib/customerFollowups";
 import { daysAgoLabel, formatDate, formatDateTime, matchesSearch } from "@/lib/customerInsights";
+import { initialSearchFromUrl } from "@/lib/salesTasks";
 import {
   type AssessmentRow,
   type AssessmentStatus,
@@ -103,7 +104,8 @@ export function AssessmentPipeline() {
 
   const [tab, setTab] = useState<AssessmentStatus>("needs_booking");
   const [calendar, setCalendar] = useState("all");
-  const [search, setSearch] = useState("");
+  // Opened from a sales task: start searched for that customer.
+  const [search, setSearch] = useState(initialSearchFromUrl);
 
   const allRows = useMemo(() => data?.assessments.rows ?? [], [data]);
   const calendars = useMemo(() => uniqueCalendars(allRows.map((row) => row.clinician)), [allRows]);

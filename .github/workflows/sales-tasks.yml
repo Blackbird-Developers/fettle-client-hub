@@ -1,0 +1,30 @@
+# Morning trigger for the admin Sales Tasks list. The edge function does all
+# the work (new tasks, carrying over unfinished ones, re-scoring, closing
+# leads that have booked) and is safe to run again, so "Run workflow" by hand
+# is fine too. The response is counts only — never client data.
+name: Sales tasks
+
+on:
+  schedule:
+    - cron: "30 5 * * *" # daily 05:30 UTC (06:30 Irish summer / 05:30 winter)
+  workflow_dispatch: {}
+
+concurrency:
+  group: sales-tasks
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare today's sales tasks
+        run: |
+          set -euo pipefail
+          response=$(curl -sS --max-time 170 -w "\n%{http_code}" -X POST \
+            -H "x-cron-secret: ${{ secrets.REMINDER_CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "https://gxeoillrmjezpehmcvrh.supabase.co/functions/v1/sales-tasks")
+          status=$(echo "$response" | tail -1)
+          echo "$response" | head -n -1
+          test "$status" = "200"

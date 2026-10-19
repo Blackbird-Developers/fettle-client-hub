@@ -9,6 +9,7 @@ import { HotLeads } from "@/components/admin/HotLeads";
 import { NoAnswer } from "@/components/admin/NoAnswer";
 import { PortalAdoption } from "@/components/admin/PortalAdoption";
 import { PsychiatryFollowUps } from "@/components/admin/PsychiatryFollowUps";
+import { SalesTasks } from "@/components/admin/SalesTasks";
 import { SessionProgression } from "@/components/admin/SessionProgression";
 import { useIsAdmin, usePreloadAdminData } from "@/hooks/useAdmin";
 import {
@@ -23,6 +24,7 @@ import { Loader2 } from "lucide-react";
 // already checked it's valid). Keyed by it, so each child page starts fresh.
 const SECTION_CONTENT: Record<AdminSectionId, (props: { subsectionId?: string }) => JSX.Element> = {
   overview: AdminDashboard,
+  "sales-tasks": SalesTasks,
   leads: HotLeads,
   "no-answer": NoAnswer,
   adoption: PortalAdoption,

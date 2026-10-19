@@ -78,3 +78,9 @@ verify_jwt = false
 
 [functions.delete-user-account]
 verify_jwt = false
+
+# Two callers: the sales-tasks workflow every morning (x-cron-secret, no JWT)
+# and admins pressing "Prepare today's list", whose JWT and admin role the
+# function checks itself.
+[functions.sales-tasks]
+verify_jwt = false

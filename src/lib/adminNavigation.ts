@@ -4,6 +4,7 @@ import {
   Pill,
   Package,
   LayoutDashboard,
+  ListChecks,
   MessageSquare,
   MonitorSmartphone,
   PhoneCall,
@@ -18,6 +19,7 @@ import { PROGRESSION_RANGES } from "../../supabase/functions/admin-customer-insi
 // page; add new admin features here.
 export type AdminSectionId =
   | "overview"
+  | "sales-tasks"
   | "leads"
   | "no-answer"
   | "adoption"
@@ -72,6 +74,14 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     href: "/admin",
     icon: LayoutDashboard,
     description: "Business metrics across sessions, packages and retention.",
+  },
+  {
+    id: "sales-tasks",
+    name: "Sales tasks",
+    href: "/admin/sales-tasks",
+    icon: ListChecks,
+    description:
+      "Today's calls in priority order: hot leads, assessment clients to book, and psychiatry follow-ups. Unfinished tasks carry over.",
   },
   {
     id: "leads",

@@ -26,6 +26,7 @@ import {
 import { headerCheckboxState, pruneSelection, toggleAllVisible, toggleSelected } from "@/lib/bulkFollowups";
 import { indexFollowups, isMissingTableError } from "@/lib/customerFollowups";
 import { daysAgoLabel, formatDate, formatDateTime, matchesSearch } from "@/lib/customerInsights";
+import { initialSearchFromUrl } from "@/lib/salesTasks";
 import {
   type LeadContact,
   type LeadScore,
@@ -191,7 +192,8 @@ export function HotLeads() {
   const [tab, setTab] = useState<LeadTab>("open");
   const [source, setSource] = useState<"all" | LeadSource>("all");
   const [owner, setOwner] = useState("all");
-  const [search, setSearch] = useState("");
+  // Opened from a sales task: start searched for that customer.
+  const [search, setSearch] = useState(initialSearchFromUrl);
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
     key: "score",
     direction: "asc",

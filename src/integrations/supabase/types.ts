@@ -383,6 +383,177 @@ export type Database = {
         }
         Relationships: []
       }
+      sales_tasks: {
+        Row: {
+          carried_over_count: number
+          closed_reason: string | null
+          completed_at: string | null
+          completed_by: string | null
+          completed_by_email: string | null
+          created_at: string
+          created_on: string
+          customer_email: string | null
+          customer_key: string
+          customer_name: string | null
+          customer_phone: string | null
+          dedupe_key: string
+          due_on: string
+          id: string
+          kind: string
+          last_carried_on: string | null
+          lead_status: string | null
+          next_action: string | null
+          original_due_on: string
+          owner: string | null
+          priority: string
+          priority_at_completion: string | null
+          priority_at_creation: string
+          priority_reasons: Json
+          reason: string
+          score: number
+          score_at_completion: number | null
+          score_at_creation: number
+          seconds_to_complete: number | null
+          service_type: string | null
+          status: string
+          trigger_at: string
+          updated_at: string
+        }
+        Insert: {
+          carried_over_count?: number
+          closed_reason?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
+          completed_by_email?: string | null
+          created_at?: string
+          created_on?: string
+          customer_email?: string | null
+          customer_key?: string
+          customer_name?: string | null
+          customer_phone?: string | null
+          dedupe_key?: string
+          due_on?: string
+          id?: string
+          kind?: string
+          last_carried_on?: string | null
+          lead_status?: string | null
+          next_action?: string | null
+          original_due_on?: string
+          owner?: string | null
+          priority?: string
+          priority_at_completion?: string | null
+          priority_at_creation?: string
+          priority_reasons?: Json
+          reason?: string
+          score?: number
+          score_at_completion?: number | null
+          score_at_creation?: number
+          seconds_to_complete?: number | null
+          service_type?: string | null
+          status?: string
+          trigger_at?: string
+          updated_at?: string
+        }
+        Update: {
+          carried_over_count?: number
+          closed_reason?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
+          completed_by_email?: string | null
+          created_at?: string
+          created_on?: string
+          customer_email?: string | null
+          customer_key?: string
+          customer_name?: string | null
+          customer_phone?: string | null
+          dedupe_key?: string
+          due_on?: string
+          id?: string
+          kind?: string
+          last_carried_on?: string | null
+          lead_status?: string | null
+          next_action?: string | null
+          original_due_on?: string
+          owner?: string | null
+          priority?: string
+          priority_at_completion?: string | null
+          priority_at_creation?: string
+          priority_reasons?: Json
+          reason?: string
+          score?: number
+          score_at_completion?: number | null
+          score_at_creation?: number
+          seconds_to_complete?: number | null
+          service_type?: string | null
+          status?: string
+          trigger_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      sales_task_events: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          created_by_email: string | null
+          details: Json
+          event: string
+          id: string
+          task_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          created_by_email?: string | null
+          details?: Json
+          event?: string
+          id?: string
+          task_id?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          created_by_email?: string | null
+          details?: Json
+          event?: string
+          id?: string
+          task_id?: string
+        }
+        Relationships: []
+      }
+      sales_task_runs: {
+        Row: {
+          error: string | null
+          finished_at: string | null
+          run_on: string
+          runs_today: number
+          started_at: string
+          status: string
+          summary: Json | null
+          triggered_by: string | null
+        }
+        Insert: {
+          error?: string | null
+          finished_at?: string | null
+          run_on?: string
+          runs_today?: number
+          started_at?: string
+          status?: string
+          summary?: Json | null
+          triggered_by?: string | null
+        }
+        Update: {
+          error?: string | null
+          finished_at?: string | null
+          run_on?: string
+          runs_today?: number
+          started_at?: string
+          status?: string
+          summary?: Json | null
+          triggered_by?: string | null
+        }
+        Relationships: []
+      }
       user_achievements: {
         Row: {
           achieved_at: string
@@ -548,6 +719,10 @@ export type Database = {
         Args: { p_reason: string; p_sequence_id: string }
         Returns: Database["public"]["Tables"]["no_answer_sequences"]["Row"]
       }
+      complete_sales_task: {
+        Args: { p_task_id: string }
+        Returns: Database["public"]["Tables"]["sales_tasks"]["Row"]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -559,7 +734,19 @@ export type Database = {
         Args: { p_customer_key: string; p_customer_name: string; p_customer_phone: string }
         Returns: Database["public"]["Tables"]["no_answer_sequences"]["Row"]
       }
+      reopen_sales_task: {
+        Args: { p_task_id: string }
+        Returns: Database["public"]["Tables"]["sales_tasks"]["Row"]
+      }
+      set_sales_task_due: {
+        Args: { p_due_on: string; p_task_id: string }
+        Returns: Database["public"]["Tables"]["sales_tasks"]["Row"]
+      }
       trigger_monthly_credit_summary: { Args: never; Returns: undefined }
+      update_sales_task_note: {
+        Args: { p_note: string; p_task_id: string }
+        Returns: Database["public"]["Tables"]["customer_followups"]["Row"]
+      }
     }
     Enums: {
       activity_type:

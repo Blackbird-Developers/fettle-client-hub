@@ -26,6 +26,7 @@ import {
   useNoAnswerDueCount,
 } from "@/hooks/useAdmin";
 import { ADMIN_SECTIONS, hasActiveChild } from "@/lib/adminNavigation";
+import { useSalesTasksDueCount } from "@/hooks/useSalesTasks";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -122,6 +123,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const followUpsDue = useFollowUpsDueCount();
   const noAnswerDue = useNoAnswerDueCount();
   const newFeedback = useNewFeedbackCount();
+  const salesTasksDue = useSalesTasksDueCount();
 
   const handleSignOut = async () => {
     await signOut();
@@ -134,8 +136,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   const navigation = adminMode
     ? adminNavigation.map((item) =>
-        // Follow-ups and No answer attempts due today or earlier; unread feedback.
-        item.href === "/admin/followups" && followUpsDue > 0
+        // Sales tasks, Follow-ups and No answer attempts due today or earlier; unread feedback.
+        item.href === "/admin/sales-tasks" && salesTasksDue > 0
+          ? { ...item, badge: String(salesTasksDue) }
+          : item.href === "/admin/followups" && followUpsDue > 0
           ? { ...item, badge: String(followUpsDue) }
           : item.href === "/admin/no-answer" && noAnswerDue > 0
             ? { ...item, badge: String(noAnswerDue) }
