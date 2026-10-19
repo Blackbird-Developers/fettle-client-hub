@@ -957,7 +957,7 @@ export function BookingModal({
                         acuity_not_applicable: "This coupon doesn't apply to this session type.",
                         acuity_package_code: "This is a session-bundle code, but we couldn't link it to your account just now — please try again or email hello@fettle.ie.",
                         acuity_unsupported: "This code can't be applied here. Email hello@fettle.ie and we'll apply it for you.",
-                        new_customers_only: 'This code is for new clients only.',
+                        website_only: "This code can't be used in the client portal.",
                     };
                     toast({
                         title: 'Coupon not applied',

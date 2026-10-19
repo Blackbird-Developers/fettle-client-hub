@@ -25,30 +25,11 @@ const LOYALTY_COUPONS: Record<string, { achievementId: string }> = {
   FETTLELOYALTY10: { achievementId: "twenty_sessions" },
 };
 
-// First-time-customer codes. TENOFF is the fettle.ie website welcome offer —
-// a Stripe promotion code on the shared account — and is only for an email
-// with no appointment on record in Acuity, the same rule the website's
-// stripe-payment Lambda applies. Portal users are existing clients, so here it
-// is normally refused. A failed lookup refuses it too: full price, never a block.
-const NEW_CUSTOMER_ONLY_CODES = new Set(["TENOFF"]);
-
-async function newCustomerOnlyRejection(email: string): Promise<string | null> {
-  const acuityUserId = Deno.env.get("ACUITY_USER_ID");
-  const acuityApiKey = Deno.env.get("ACUITY_API_KEY");
-  if (!acuityUserId || !acuityApiKey || !email) return "validation_error";
-  try {
-    const res = await fetch(
-      "https://acuityscheduling.com/api/v1/appointments?max=1&email=" +
-        encodeURIComponent(String(email).trim().toLowerCase()),
-      { headers: { Authorization: `Basic ${btoa(`${acuityUserId}:${acuityApiKey}`)}` } },
-    );
-    if (!res.ok) return "validation_error";
-    const appts = await res.json();
-    return Array.isArray(appts) && appts.length === 0 ? null : "new_customers_only";
-  } catch (_e) {
-    return "validation_error";
-  }
-}
+// Codes that exist on the shared Stripe account for the fettle.ie website only.
+// TENOFF is the website's first-time-client welcome offer; it never applies in
+// the portal, for anyone. Refused before the Stripe lookup: full price, the
+// booking still goes ahead.
+const WEBSITE_ONLY_CODES = new Set(["TENOFF"]);
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -164,11 +145,9 @@ serve(async (req) => {
     const trimmedCoupon = (couponCode || "").toString().trim();
     const normalizedCoupon = trimmedCoupon.toUpperCase();
 
-    if (NEW_CUSTOMER_ONLY_CODES.has(normalizedCoupon)) {
-      couponRejected = await newCustomerOnlyRejection(email);
-      if (couponRejected) {
-        logStep("New-customer-only code rejected", { normalizedCoupon, reason: couponRejected });
-      }
+    if (WEBSITE_ONLY_CODES.has(normalizedCoupon)) {
+      couponRejected = "website_only";
+      logStep("Website-only code rejected in the portal", { normalizedCoupon });
     }
 
     if (normalizedCoupon && !couponRejected) {
