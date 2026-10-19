@@ -15,6 +15,7 @@ import {
   planDailyRun,
   priorityFor,
   psychiatryCandidates,
+  scopeCandidates,
   scoreTask,
 } from "./logic.ts";
 
@@ -124,6 +125,7 @@ function saveInserts(plan: ReturnType<typeof planDailyRun>): SavedTask[] {
     score: row.score,
     carried_over_count: 0,
     last_carried_on: null,
+    created_on: row.created_on,
   }));
 }
 
@@ -302,6 +304,37 @@ describe("assessment and psychiatry candidates", () => {
   });
 });
 
+describe("Courtney's list", () => {
+  it("keeps hot leads on Courtney's calendar and drops everything else", () => {
+    const { candidates } = scopeCandidates({
+      candidates: [
+        candidate({ customerKey: "email:a@example.com", owner: "Courtney" }),
+        candidate({ customerKey: "email:b@example.com", owner: "Alex Hamm" }),
+        candidate({ customerKey: "email:c@example.com", owner: null }),
+        candidate({ customerKey: "email:d@example.com", kind: "psychiatry", owner: "Dr Rubeo" }),
+        // Even on her calendar, assessment and psychiatry stay off for now.
+        candidate({ customerKey: "email:e@example.com", kind: "assessment", owner: "Courtney" }),
+      ],
+      resolutions: new Map(),
+    });
+    expect(candidates.map((c) => c.customerKey)).toEqual(["email:a@example.com"]);
+  });
+
+  it("matches her calendar name loosely", () => {
+    const owners = ["Courtney ", "courtney", "Courtney Byrne"];
+    const { candidates } = scopeCandidates({
+      candidates: owners.map((owner, i) => candidate({ customerKey: `email:${i}@example.com`, owner })),
+      resolutions: new Map(),
+    });
+    expect(candidates).toHaveLength(3);
+  });
+
+  it("keeps resolutions so her open tasks still close when the client books", () => {
+    const resolutions = new Map([["hot_lead|email:aoife@example.com", "Booked a session"]]);
+    expect(scopeCandidates({ candidates: [], resolutions }).resolutions).toBe(resolutions);
+  });
+});
+
 describe("daily run", () => {
   it("creates new tasks with their analytics fields", () => {
     const plan = planDailyRun({ candidates: [candidate()], resolutions: new Map(), saved: [], now: NOW, newId });
@@ -353,6 +386,15 @@ describe("daily run", () => {
     const again = planDailyRun({ candidates: [candidate()], resolutions: new Map(), saved: applyUpdates(saved, next), now: tomorrow + 60_000, newId });
     expect(again.summary.carriedOver).toBe(0);
     expect(again.updates[0]?.patch ?? {}).not.toHaveProperty("carried_over_count");
+  });
+
+  it("doesn't carry over a task on the day it was made, even if it started overdue", () => {
+    const late = candidate({ dueOn: "2026-09-12" });
+    const saved = saveInserts(planDailyRun({ candidates: [late], resolutions: new Map(), saved: [], now: NOW, newId }));
+    const sameDay = planDailyRun({ candidates: [late], resolutions: new Map(), saved, now: NOW + 3_600_000, newId });
+    expect(sameDay.summary.carriedOver).toBe(0);
+    const nextDay = planDailyRun({ candidates: [late], resolutions: new Map(), saved, now: NOW + DAY, newId });
+    expect(nextDay.summary.carriedOver).toBe(1);
   });
 
   it("carries over even when the lead has dropped out of the source data", () => {

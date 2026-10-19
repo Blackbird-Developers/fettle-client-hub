@@ -81,7 +81,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     href: "/admin/sales-tasks",
     icon: ListChecks,
     description:
-      "Today's calls in priority order: hot leads, assessment clients to book, and psychiatry follow-ups. Unfinished tasks carry over.",
+      "Courtney's calls for today in priority order: hot leads from her calendar. Unfinished tasks carry over.",
   },
   {
     id: "leads",

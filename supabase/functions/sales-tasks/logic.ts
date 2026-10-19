@@ -53,6 +53,23 @@ export const KIND_LABELS: Record<SalesTaskKind, string> = {
   psychiatry: "Psychiatry",
 };
 
+// Whose list this is. Tasks are only made for events on these Acuity
+// calendars, and only of these kinds: for now, Courtney's own calendar and
+// her hot leads (Let's Talk calls and quotes). Assessment and psychiatry
+// clients stay on their own admin pages until Fettle confirms Courtney should
+// chase them; widening the list is a change to these two constants.
+// Calendar names are matched loosely (case, stray spaces, a surname added).
+export const SALES_TASK_CALENDARS: readonly string[] = ["courtney"];
+export const SALES_TASK_KINDS: readonly SalesTaskKind[] = ["hot_lead"];
+
+export function inSalesScope(candidate: Pick<TaskCandidate, "kind" | "owner">): boolean {
+  const calendar = candidate.owner?.trim().toLowerCase() ?? "";
+  return (
+    SALES_TASK_KINDS.includes(candidate.kind) &&
+    SALES_TASK_CALENDARS.some((name) => calendar.includes(name))
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Dates (Irish calendar days, as staff see them)
 // ---------------------------------------------------------------------------
@@ -396,6 +413,11 @@ export function mergeCandidateSets(...sets: CandidateSet[]): CandidateSet {
   };
 }
 
+/** Keeps only the candidates on Courtney's list (see inSalesScope). Resolutions are kept so her open tasks still close. */
+export function scopeCandidates(set: CandidateSet): CandidateSet {
+  return { candidates: set.candidates.filter(inSalesScope), resolutions: set.resolutions };
+}
+
 // ---------------------------------------------------------------------------
 // The daily run
 // ---------------------------------------------------------------------------
@@ -413,6 +435,7 @@ export interface SavedTask {
   score: number;
   carried_over_count: number;
   last_carried_on: string | null;
+  created_on: string;
 }
 
 export interface TaskEvent {
@@ -579,8 +602,9 @@ export function planDailyRun({ candidates, resolutions, saved, now, newId }: Pla
       }
     }
 
-    // Still open after its due date: carried over (once per day).
-    if (dueOn < today && task.last_carried_on !== today) {
+    // Still open after its due date: carried over (once per day). A task made
+    // today isn't carried over yet, even if it started out overdue.
+    if (dueOn < today && task.last_carried_on !== today && task.created_on !== today) {
       patch.carried_over_count = task.carried_over_count + 1;
       patch.last_carried_on = today;
       plan.events.push({

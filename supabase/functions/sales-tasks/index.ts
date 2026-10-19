@@ -1,6 +1,7 @@
 // sales-tasks — prepares the admin "Sales Tasks" list: works out from Acuity
 // who needs a call today (open hot leads, assessment clients whose next step
-// isn't booked, psychiatry clients due a follow-up) and saves them as tasks.
+// isn't booked, psychiatry clients due a follow-up) and saves the ones on
+// Courtney's list as tasks (see SALES_TASK_CALENDARS / _KINDS in logic.ts).
 //   - POST with x-cron-secret, from the sales-tasks GitHub Actions workflow
 //     every morning
 //   - POST from an admin ("Prepare today's list" / "Refresh" on the page);
@@ -50,6 +51,7 @@ import {
   mergeCandidateSets,
   planDailyRun,
   psychiatryCandidates,
+  scopeCandidates,
 } from "./logic.ts";
 
 const corsHeaders = {
@@ -70,7 +72,7 @@ const ATTEMPTS_DAYS = LOOKBACK_DAYS + 30;
 /** A run still "running" after this long is treated as crashed. */
 const STALE_RUN_MS = 10 * 60_000;
 const SAVED_COLUMNS =
-  "id, dedupe_key, customer_key, kind, status, trigger_at, due_on, priority, score, carried_over_count, last_carried_on";
+  "id, dedupe_key, customer_key, kind, status, trigger_at, due_on, priority, score, carried_over_count, last_carried_on, created_on";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -245,10 +247,13 @@ serve(async (req) => {
       now
     ).rows;
     const followups = new Map(followupRows.map((row) => [row.customer_key, row]));
-    const { candidates, resolutions } = mergeCandidateSets(
-      hotLeadCandidates(leadRows, attempts, followups, now),
-      assessmentCandidates(buildAssessmentView(customers, now).rows, attempts, now),
-      psychiatryCandidates(buildPsychiatryView(customers, now).rows, attempts, now)
+    // Only Courtney's tasks are kept (see SALES_TASK_CALENDARS / _KINDS).
+    const { candidates, resolutions } = scopeCandidates(
+      mergeCandidateSets(
+        hotLeadCandidates(leadRows, attempts, followups, now),
+        assessmentCandidates(buildAssessmentView(customers, now).rows, attempts, now),
+        psychiatryCandidates(buildPsychiatryView(customers, now).rows, attempts, now)
+      )
     );
 
     // 4. Saved tasks: every pending one, plus any that already used a

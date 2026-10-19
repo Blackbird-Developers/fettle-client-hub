@@ -88,10 +88,10 @@ type TabId = "today" | "scheduled" | "history";
 type KindFilter = "all" | SalesTaskKind;
 
 /**
- * Sales Tasks page: a daily call list made from hot leads, assessment clients
- * whose next step isn't booked, and psychiatry clients due a follow-up. The
- * sales-tasks function prepares it every morning; unfinished tasks carry
- * over until they're completed or the client books.
+ * Sales Tasks page: Courtney's daily call list. The sales-tasks function
+ * prepares it every morning from the hot leads on her calendar (assessment
+ * and psychiatry tasks can be switched on there later); unfinished tasks
+ * carry over until they're completed or the client books.
  */
 export function SalesTasks() {
   const tasks = useSalesTasks();
