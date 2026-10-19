@@ -8,11 +8,13 @@
 // gateway JWT verification for it.
 //
 // SAFETY MODEL, copied from unpaid-session-reminders. Real clients only get
-// mail when ALL of these hold:
+// mail when ALL of these hold (settings read by readConfig in ./logic.ts):
 //   1. env PORTAL_EMAILS_LIVE === "true" (dry-run otherwise: reports, sends nothing)
-//   2. the campaign is listed in PORTAL_EMAILS_CAMPAIGNS (default: both)
+//   2. the campaign is listed in PORTAL_EMAILS_CAMPAIGNS (default when unset:
+//      existing_clients only; new_enquiries must be listed to run)
 //   3. they're within this run's cap, PORTAL_EMAILS_MAX_RECIPIENTS (default
-//      25); the rest wait for the next run, so a backlog goes out gradually
+//      and ceiling 25); the rest wait for the next run, so a backlog goes out
+//      gradually
 //   4. no email_sends row exists for (campaign, email): the row is claimed
 //      before Resend is called, and the unique constraint stops duplicates
 //   5. they aren't suppressed (unsubscribed, bounced, complained), marked
@@ -42,16 +44,19 @@ import {
 } from "../admin-customer-insights/logic.ts";
 import { unsubscribeQuery } from "../_shared/unsubscribe.ts";
 import {
+  ALL_CAMPAIGNS,
   type Campaign,
   type EnquiryCandidate,
   type Recipient,
   type SendHistory,
+  deliver,
   enquiryCandidates,
   enquiryRecipients,
   existingClientRecipients,
   hasEarlierSession,
   maskEmail,
   planSends,
+  readConfig,
 } from "./logic.ts";
 import { renderEmail } from "./templates.ts";
 
@@ -70,7 +75,6 @@ const ACUITY_API_BASE = "https://acuityscheduling.com/api/v1";
 const HUB_URL = "https://my.fettle.ie";
 const FROM = "Fettle <noreply@notifications.fettle.ie>";
 const REPLY_TO = "hello@fettle.ie";
-const ALL_CAMPAIGNS: Campaign[] = ["existing_clients", "new_enquiries"];
 
 /** Results per Acuity request for the window fetch. */
 const WINDOW_LIMIT = 500;
@@ -125,12 +129,7 @@ serve(async (req) => {
       return json({ error: "Function not fully configured" }, 500);
     }
 
-    const live = Deno.env.get("PORTAL_EMAILS_LIVE") === "true";
-    const maxRecipients = parseInt(Deno.env.get("PORTAL_EMAILS_MAX_RECIPIENTS") || "25", 10);
-    const enabled = new Set(
-      (Deno.env.get("PORTAL_EMAILS_CAMPAIGNS") || ALL_CAMPAIGNS.join(","))
-        .split(",").map((c) => c.trim()).filter((c): c is Campaign => ALL_CAMPAIGNS.includes(c as Campaign)),
-    );
+    const { live, campaigns: enabled, maxRecipients } = readConfig((name) => Deno.env.get(name));
     const body = await req.json().catch(() => ({}));
     const resend = new Resend(resendKey);
 
@@ -311,7 +310,7 @@ serve(async (req) => {
       recipients.push(...enquiryRecipients(checked.filter((c): c is EnquiryCandidate => c !== null)));
     }
 
-    const plan = planSends(recipients, history, now, maxRecipients);
+    const plan = planSends(recipients, history, now, maxRecipients, enabled);
     const summary = {
       eligible: {
         existing_clients: recipients.filter((r) => r.campaign === "existing_clients").length,
@@ -321,6 +320,7 @@ serve(async (req) => {
       waitingForNextRun: plan.waiting.length,
       enquiryHistoryFailures,
       campaigns: [...enabled],
+      maxRecipients,
     };
     const describe = (list: Recipient[]) => list.map((r) => ({ campaign: r.campaign, email: maskEmail(r.email) }));
 
@@ -349,51 +349,39 @@ serve(async (req) => {
       return json({ dryRun: true, wouldEmail: describe(plan.send), ...summary });
     }
 
-    // 6c. Live: claim the row, send, then record the message id. A failed
-    //     send releases the claim so the next run retries it.
-    let sent = 0;
-    const failures: string[] = [];
-    for (const recipient of plan.send) {
-      const { data: claim, error: claimError } = await admin
-        .from("email_sends")
-        .insert({
-          campaign: recipient.campaign, email: recipient.email,
-          customer_key: recipient.customerKey, customer_name: recipient.name, status: "claimed",
-        })
-        .select("id")
-        .single();
-      if (claimError) {
+    // 6c. Live: claim the row, send, then record the message id (see deliver).
+    const { sent, failures, alreadyClaimed } = await deliver(plan.send, live, {
+      async claim(recipient) {
+        const { data, error } = await admin
+          .from("email_sends")
+          .insert({
+            campaign: recipient.campaign, email: recipient.email,
+            customer_key: recipient.customerKey, customer_name: recipient.name, status: "claimed",
+          })
+          .select("id")
+          .single();
         // 23505 = another run already has this (campaign, email).
-        if (claimError.code !== "23505") {
-          failures.push(maskEmail(recipient.email));
-          logStep("Claim failed", { to: maskEmail(recipient.email), error: claimError.message.slice(0, 150) });
-        }
-        continue;
-      }
+        if (error?.code === "23505") return null;
+        if (error) throw new Error(error.message);
+        return data.id as string;
+      },
+      send: (recipient) => send(recipient),
+      async release(claimId) {
+        const { error } = await admin.from("email_sends").delete().eq("id", claimId);
+        if (error) throw new Error(error.message);
+      },
+      async markSent(claimId, messageId) {
+        const { error } = await admin
+          .from("email_sends")
+          .update({ status: "sent", resend_message_id: messageId, sent_at: new Date().toISOString() })
+          .eq("id", claimId);
+        if (error) throw new Error(error.message);
+      },
+      log: logStep,
+    });
 
-      let messageId: string;
-      try {
-        messageId = await send(recipient);
-      } catch (e) {
-        failures.push(maskEmail(recipient.email));
-        logStep("Send failed", { to: maskEmail(recipient.email), error: String(e).slice(0, 150) });
-        const { error } = await admin.from("email_sends").delete().eq("id", claim.id);
-        // A claim that can't be released blocks a resend, which is the safe side.
-        if (error) logStep("Claim release failed", { to: maskEmail(recipient.email) });
-        continue;
-      }
-
-      sent++;
-      const { error } = await admin
-        .from("email_sends")
-        .update({ status: "sent", resend_message_id: messageId, sent_at: new Date().toISOString() })
-        .eq("id", claim.id);
-      if (error) logStep("WARNING: sent but not recorded as sent", { to: maskEmail(recipient.email) });
-      logStep("Email sent", { campaign: recipient.campaign, to: maskEmail(recipient.email) });
-    }
-
-    logStep("Run complete", { sent, failures: failures.length, ...summary });
-    return json({ sent, failures, ...summary, checkedAt: new Date(now).toISOString() });
+    logStep("Run complete", { sent, failures: failures.length, alreadyClaimed, ...summary });
+    return json({ sent, failures, alreadyClaimed, ...summary, checkedAt: new Date(now).toISOString() });
   } catch (error) {
     // Messages here are built without client data (see acuityAppointments).
     logStep("ERROR", { message: String(error).slice(0, 300) });
