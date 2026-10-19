@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -12,6 +12,7 @@ import {
 import { Search, UserX } from "lucide-react";
 import { useCustomerInsights } from "@/hooks/useAdmin";
 import { daysAgoLabel, formatDate, formatDateTime, matchesSearch } from "@/lib/customerInsights";
+import { paginate } from "@/lib/pagination";
 import {
   type AdoptionRow,
   GRADE_ORDER,
@@ -30,8 +31,12 @@ import {
   StatTile,
 } from "./CustomerInsightsShared";
 import { PortalEmailsPanel } from "./PortalEmailsPanel";
+import { TablePagination } from "./TablePagination";
 
 type SortKey = "grade" | "name" | "lastSession";
+
+/** Rows per page; matches the daily cap of the account set-up emails. */
+const PAGE_SIZE = 25;
 
 const COMPARATORS: Record<SortKey, (a: AdoptionRow, b: AdoptionRow) => number> = {
   grade: (a, b) =>
@@ -48,6 +53,8 @@ export function PortalAdoption() {
     key: "grade",
     direction: "asc",
   });
+  const [page, setPage] = useState(1);
+  const tableRef = useRef<HTMLDivElement>(null);
 
   const rows = useMemo(() => {
     const filtered = (data?.adoption.rows ?? []).filter((row) => matchesSearch(row, search));
@@ -55,11 +62,25 @@ export function PortalAdoption() {
     return filtered.sort((a, b) => (sort.direction === "asc" ? compare(a, b) : compare(b, a)));
   }, [data, search, sort]);
 
-  const onSort = (key: SortKey) =>
+  const shown = paginate(rows, page, PAGE_SIZE);
+
+  // A new search or sort starts again from the first page.
+  const onSort = (key: SortKey) => {
+    setPage(1);
     setSort((current) => ({
       key,
       direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
     }));
+  };
+
+  // The controls sit under the table, so bring its top back into view.
+  const onPageChange = (next: number) => {
+    setPage(next);
+    const card = tableRef.current;
+    if (card && card.getBoundingClientRect().top < 0) {
+      card.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    }
+  };
 
   if (isLoading) return <InsightsLoading source="admin-customer-insights" />;
   if (error || !data) {
@@ -90,7 +111,7 @@ export function PortalAdoption() {
 
       <DataIssuesPanel data={data} />
 
-      <Card className="border-border/50">
+      <Card ref={tableRef} className="border-border/50">
         <CardHeader className="space-y-3">
           <div>
             <CardTitle className="text-lg font-heading">Customers without a portal account</CardTitle>
@@ -104,7 +125,10 @@ export function PortalAdoption() {
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
               placeholder="Search name, email or phone"
               className="pl-8"
               aria-label="Search customers"
@@ -133,7 +157,7 @@ export function PortalAdoption() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((row) => (
+                {shown.rows.map((row) => (
                   <TableRow key={row.key}>
                     <TableCell>
                       <GradeBadge grade={row.grade} reason={row.gradeReason} />
@@ -163,9 +187,15 @@ export function PortalAdoption() {
             </Table>
           )}
           {rows.length > 0 && (
-            <p className="mt-3 text-xs text-muted-foreground">
-              Showing {rows.length} of {data.adoption.rows.length} customers
-            </p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-muted-foreground">
+                Showing {shown.start}–{shown.end} of {rows.length}
+                {rows.length < data.adoption.rows.length
+                  ? ` matching customers (${data.adoption.rows.length} in total)`
+                  : " customers"}
+              </p>
+              <TablePagination page={shown.page} pageCount={shown.pageCount} onPageChange={onPageChange} />
+            </div>
           )}
         </CardContent>
       </Card>
