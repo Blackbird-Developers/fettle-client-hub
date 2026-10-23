@@ -1,8 +1,14 @@
 // Pure logic for the sales-tasks edge function: the admin "Sales Tasks" page,
-// a daily prioritised call list built from three existing admin views:
+// a daily prioritised call list in seven sections, worked through in order:
+//   progression — customers between sessions 1→2 … 4→5 with nothing booked (admin-customer-insights)
+//   bundle      — session bundles that are stalled or nearly done (admin-bundles' saved snapshot)
+//   followup    — "Continue later" customers whose follow-up date has come (customer_followups)
+//   no_answer   — no-answer sequences with an attempt due (no_answer_sequences)
 //   hot_lead    — Hot leads that are still open (admin-leads)
-//   assessment  — assessment clients whose next step isn't booked (admin-clinical)
 //   psychiatry  — psychiatry clients due or overdue their follow-up call (admin-clinical)
+//   assessment  — assessment clients whose next step isn't booked (admin-clinical)
+// A customer is listed once, in the first section that has them (see
+// arrangeCandidates).
 //
 // Each morning planDailyRun() compares what those views say now with the
 // tasks already saved, and returns what to insert, update and close. It is
@@ -29,8 +35,17 @@ import {
   type PsychiatryRow,
   NEXT_STEP_LABELS,
 } from "../admin-clinical/logic.ts";
+import type { ProgressionRow } from "../admin-customer-insights/logic.ts";
+import { type BundleRow, type BundleSegment, SEGMENT_LABELS } from "../admin-bundles/logic.ts";
 
-export type SalesTaskKind = "hot_lead" | "assessment" | "psychiatry";
+export type SalesTaskKind =
+  | "progression"
+  | "bundle"
+  | "followup"
+  | "no_answer"
+  | "hot_lead"
+  | "psychiatry"
+  | "assessment";
 export type SalesPriority = "high" | "medium" | "low";
 export type SalesTaskStatus = "pending" | "completed" | "auto_closed";
 
@@ -47,27 +62,40 @@ const OVERDUE_POINTS_PER_DAY = 10;
 const OVERDUE_MAX_POINTS = 30;
 const RECENTLY_CONTACTED_HOURS = 48;
 
+/** The page's sections, in the order they're worked through. */
+export const SECTION_ORDER: readonly SalesTaskKind[] = [
+  "progression",
+  "bundle",
+  "followup",
+  "no_answer",
+  "hot_lead",
+  "psychiatry",
+  "assessment",
+];
+
 export const KIND_LABELS: Record<SalesTaskKind, string> = {
+  progression: "Progression",
+  bundle: "Bundle",
+  followup: "Follow-up",
+  no_answer: "No answer",
   hot_lead: "Hot lead",
-  assessment: "Assessment",
   psychiatry: "Psychiatry",
+  assessment: "Assessment",
 };
 
-// Whose list this is. Tasks are only made for events on these Acuity
-// calendars, and only of these kinds: for now, Courtney's own calendar and
-// her hot leads (Let's Talk calls and quotes). Assessment and psychiatry
-// clients stay on their own admin pages until Fettle confirms Courtney should
-// chase them; widening the list is a change to these two constants.
-// Calendar names are matched loosely (case, stray spaces, a surname added).
+// Which tasks are made. Hot leads only for events on these Acuity calendars
+// (Courtney's own Let's Talk calls and quotes); the other kinds aren't tied
+// to a sales calendar, so they're all listed. Narrowing the list is a change
+// to these two constants. Calendar names are matched loosely (case, stray
+// spaces, a surname added).
 export const SALES_TASK_CALENDARS: readonly string[] = ["courtney"];
-export const SALES_TASK_KINDS: readonly SalesTaskKind[] = ["hot_lead"];
+export const SALES_TASK_KINDS: readonly SalesTaskKind[] = SECTION_ORDER;
 
 export function inSalesScope(candidate: Pick<TaskCandidate, "kind" | "owner">): boolean {
+  if (!SALES_TASK_KINDS.includes(candidate.kind)) return false;
+  if (candidate.kind !== "hot_lead") return true;
   const calendar = candidate.owner?.trim().toLowerCase() ?? "";
-  return (
-    SALES_TASK_KINDS.includes(candidate.kind) &&
-    SALES_TASK_CALENDARS.some((name) => calendar.includes(name))
-  );
+  return SALES_TASK_CALENDARS.some((name) => calendar.includes(name));
 }
 
 // ---------------------------------------------------------------------------
@@ -406,6 +434,364 @@ export function psychiatryCandidates(
   return { candidates, resolutions };
 }
 
+const SHORT_DATE = new Intl.DateTimeFormat("en-IE", { timeZone: "Europe/Dublin", day: "numeric", month: "short" });
+
+/** "3 Oct", for a timestamp or a YYYY-MM-DD date. */
+function shortDate(value: string): string {
+  return SHORT_DATE.format(new Date(value.length === 10 ? `${value}T12:00:00Z` : value));
+}
+
+/** A YYYY-MM-DD date as the timestamp a task's dedupe key and trigger_at use. */
+function dateTrigger(date: string): string {
+  return `${date}T00:00:00.000Z`;
+}
+
+/** Email or phone from a customer key ("email:…" / "phone:…"). */
+export function contactFromKey(customerKey: string): { email: string | null; phone: string | null } {
+  if (customerKey.startsWith("email:")) return { email: customerKey.slice(6), phone: null };
+  if (customerKey.startsWith("phone:")) return { email: null, phone: customerKey.slice(6) };
+  return { email: null, phone: null };
+}
+
+/** Name, email and phone by customer key, from the Acuity appointments, for rows that only have a key. */
+export type ContactDirectory = ReadonlyMap<string, { name: string | null; email: string | null; phone: string | null }>;
+
+/**
+ * "Booked", "Not continuing" or "Continue later" logged by staff since the
+ * event behind a task: the customer has been dealt with (as on Hot leads).
+ */
+function closingOutcome(followup: LeadFollowup | undefined, since: string): string | null {
+  if (!followup?.outcome || !followup.outcome_at) return null;
+  const label = OUTCOME_LABELS[followup.outcome];
+  if (!label || Date.parse(followup.outcome_at) < Date.parse(since)) return null;
+  return `${label} recorded by staff`;
+}
+
+// --- Progressions ----------------------------------------------------------
+
+/** One "session N → N+1" view from admin-customer-insights. */
+export interface ProgressionStage {
+  fromSession: number;
+  rows: readonly ProgressionRow[];
+}
+
+/** A: session N 14+ days ago, B: 7–13 days ago, both with nothing booked. C (under a week) waits. */
+const PROGRESSION_GRADE_POINTS: Record<string, number> = { A: 60, B: 45 };
+/** Earlier stages first: the 1→2 drop-off loses the most clients. */
+const PROGRESSION_STAGE_POINTS: Record<number, number> = { 1: 20, 2: 15, 3: 10, 4: 5 };
+
+export function progressionStageLabel(fromSession: number): string {
+  return `Session ${fromSession} → ${fromSession + 1}`;
+}
+
+export function progressionTaskCandidates(
+  stages: readonly ProgressionStage[],
+  attempts: readonly RecentAttempt[],
+  followups: ReadonlyMap<string, LeadFollowup>,
+  now: number
+): CandidateSet {
+  const today = dublinDate(now);
+  const resolutions: Resolutions = new Map();
+  // The customer's latest stage waiting on a booking (one per customer).
+  const waiting = new Map<string, { stage: number; row: ProgressionRow }>();
+
+  for (const { fromSession, rows } of stages) {
+    for (const row of rows) {
+      const slot = taskSlot("progression", row.key);
+      if (row.nextSessionStatus !== "none") {
+        resolutions.set(slot, `Session ${fromSession + 1} ${row.nextSessionStatus === "booked" ? "booked" : "done"}`);
+        continue;
+      }
+      if (!row.grade || !(row.grade in PROGRESSION_GRADE_POINTS)) continue;
+      const current = waiting.get(row.key);
+      if (!current || row.fromSessionAt > current.row.fromSessionAt) waiting.set(row.key, { stage: fromSession, row });
+    }
+  }
+
+  const contacts = contactSinceLead(
+    [...waiting.values()].map(({ row }) => ({ key: row.key, leadAt: row.fromSessionAt })),
+    attempts
+  );
+  const candidates: TaskCandidate[] = [];
+  for (const { stage, row } of waiting.values()) {
+    const slot = taskSlot("progression", row.key);
+    const closed = closingOutcome(followups.get(row.key), row.fromSessionAt);
+    if (closed) {
+      resolutions.set(slot, closed);
+      continue;
+    }
+    const contact = contacts.get(row.key);
+    const next = stage + 1;
+    candidates.push({
+      kind: "progression",
+      customerKey: row.key,
+      dedupeKey: dedupeKey("progression", row.key, row.fromSessionAt),
+      name: row.name,
+      email: row.email,
+      phone: row.phone,
+      triggerAt: row.fromSessionAt,
+      serviceType: row.fromSessionType,
+      owner: null,
+      leadStatus: `session_${stage}`,
+      reason: `Session ${stage} on ${shortDate(row.fromSessionAt)} (${ago(row.daysSinceFromSession)}); session ${next} not booked`,
+      nextAction: retryAction(contact?.attempts ?? 0, `Call to book session ${next}`),
+      baseParts: keep([
+        { label: row.gradeReason ?? `Grade ${row.grade}`, points: PROGRESSION_GRADE_POINTS[row.grade!] },
+        { label: progressionStageLabel(stage), points: PROGRESSION_STAGE_POINTS[stage] ?? 0 },
+        attemptsPart(contact),
+        recentContactPart(contact, now),
+      ]),
+      dueOn: today,
+      canCreate: true,
+    });
+  }
+  return { candidates, resolutions };
+}
+
+// --- Bundles ---------------------------------------------------------------
+
+const BUNDLE_TASK_SEGMENTS: ReadonlySet<BundleSegment> = new Set(["stalled", "nearly_done"]);
+/** Expiry this close adds urgency (the Bundles page's "Expiring soon" is closer still). */
+const BUNDLE_EXPIRY_NEAR_DAYS = 90;
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+function bundleParts(row: BundleRow): ScorePart[] {
+  const parts: ScorePart[] = [];
+  const days = row.daysSinceLastSession;
+  if (row.segment === "stalled") {
+    parts.push({
+      label: days === null ? "Stalled: nothing booked" : `Stalled: no session in ${days} days, nothing booked`,
+      points: days === null || days < 45 ? 45 : days < 60 ? 55 : 65,
+    });
+    const left = row.remainingCredits;
+    parts.push({ label: `${plural(left, "credit")} left`, points: left >= 3 ? 15 : left === 2 ? 10 : 5 });
+  } else {
+    parts.push({ label: "1 credit left: time to renew", points: 45 });
+    if (days !== null && days <= 14) parts.push({ label: `Last session ${ago(days)}`, points: 10 });
+  }
+  if (row.daysToExpiry !== null && row.daysToExpiry >= 0 && row.daysToExpiry <= BUNDLE_EXPIRY_NEAR_DAYS) {
+    parts.push({ label: `Expires in ${plural(row.daysToExpiry, "day")}`, points: 10 });
+  }
+  return parts;
+}
+
+const sumPoints = (parts: readonly ScorePart[]) => parts.reduce((sum, part) => sum + part.points, 0);
+
+export function bundleTaskCandidates(
+  rows: readonly BundleRow[],
+  attempts: readonly RecentAttempt[],
+  followups: ReadonlyMap<string, LeadFollowup>,
+  now: number
+): CandidateSet {
+  const today = dublinDate(now);
+  const resolutions: Resolutions = new Map();
+  // The customer's most urgent stalled / nearly-done bundle.
+  const urgent = new Map<string, { row: BundleRow; triggerAt: string; parts: ScorePart[] }>();
+
+  for (const row of rows) {
+    if (!BUNDLE_TASK_SEGMENTS.has(row.segment)) {
+      resolutions.set(taskSlot("bundle", row.key), `Bundle now ${SEGMENT_LABELS[row.segment].label.toLowerCase()}`);
+      continue;
+    }
+    // The last session (or the purchase) is the event: a new session moves the task on.
+    const triggerAt = row.lastSessionAt ?? row.purchasedAt;
+    if (!triggerAt) continue;
+    const parts = bundleParts(row);
+    const current = urgent.get(row.key);
+    if (!current || sumPoints(parts) > sumPoints(current.parts)) urgent.set(row.key, { row, triggerAt, parts });
+  }
+
+  const contacts = contactSinceLead(
+    [...urgent.values()].map(({ row, triggerAt }) => ({ key: row.key, leadAt: triggerAt })),
+    attempts
+  );
+  const candidates: TaskCandidate[] = [];
+  for (const { row, triggerAt, parts } of urgent.values()) {
+    const slot = taskSlot("bundle", row.key);
+    // A customer with a bundle needing a call isn't closed by their other bundles.
+    resolutions.delete(slot);
+    const closed = closingOutcome(followups.get(row.key), triggerAt);
+    if (closed) {
+      resolutions.set(slot, closed);
+      continue;
+    }
+    const contact = contacts.get(row.key);
+    const stalled = row.segment === "stalled";
+    const last = row.lastSessionAt ? `last session ${shortDate(row.lastSessionAt)}` : "no session yet";
+    candidates.push({
+      kind: "bundle",
+      customerKey: row.key,
+      dedupeKey: dedupeKey("bundle", row.key, triggerAt),
+      name: row.name,
+      email: row.email,
+      phone: row.phone,
+      triggerAt,
+      serviceType: row.bundleName.slice(0, 200),
+      owner: null,
+      leadStatus: row.segment,
+      reason: stalled
+        ? `${row.bundleName}: ${plural(row.remainingCredits, "credit")} left, ${last}; nothing booked`
+        : `${row.bundleName}: 1 credit left (${last})`,
+      nextAction: retryAction(
+        contact?.attempts ?? 0,
+        stalled ? "Call to get them booked again" : "Call to offer a renewal before the last session"
+      ),
+      baseParts: keep([...parts, attemptsPart(contact), recentContactPart(contact, now)]),
+      dueOn: today,
+      canCreate: true,
+    });
+  }
+  return { candidates, resolutions };
+}
+
+// --- Follow-ups ------------------------------------------------------------
+
+/** customer_followups, as much as the follow-up tasks need. */
+export interface FollowupRow {
+  customer_key: string;
+  customer_name: string | null;
+  outcome: string | null;
+  outcome_at: string | null;
+  follow_up_due: string | null;
+}
+
+/** Overdue follow-ups older than this don't start a task (they stay on the Follow-ups report). */
+export const FOLLOWUP_TASK_MAX_OVERDUE_DAYS = 30;
+
+export function followupTaskCandidates(
+  rows: readonly FollowupRow[],
+  directory: ContactDirectory,
+  now: number
+): CandidateSet {
+  const today = dublinDate(now);
+  const candidates: TaskCandidate[] = [];
+  const resolutions: Resolutions = new Map();
+
+  for (const row of rows) {
+    const slot = taskSlot("followup", row.customer_key);
+    const due = row.follow_up_due;
+    if (row.outcome !== "follow_up_later" || !due) {
+      const label = row.outcome === "no_answer" ? "No answer" : OUTCOME_LABELS[row.outcome ?? ""];
+      resolutions.set(slot, label ? `${label} recorded by staff` : "Outcome cleared by staff");
+      continue;
+    }
+    if (due > today) {
+      resolutions.set(slot, `Follow-up moved to ${shortDate(due)}`);
+      continue;
+    }
+    const known = directory.get(row.customer_key);
+    const fromKey = contactFromKey(row.customer_key);
+    candidates.push({
+      kind: "followup",
+      customerKey: row.customer_key,
+      dedupeKey: dedupeKey("followup", row.customer_key, dateTrigger(due)),
+      name: row.customer_name ?? known?.name ?? null,
+      email: known?.email ?? fromKey.email,
+      phone: known?.phone ?? fromKey.phone,
+      triggerAt: dateTrigger(due),
+      serviceType: null,
+      owner: null,
+      leadStatus: "follow_up_later",
+      reason: row.outcome_at
+        ? `Said on ${shortDate(row.outcome_at)} they'd continue later; follow-up due ${shortDate(due)}`
+        : `Follow-up due ${shortDate(due)}`,
+      nextAction: "Call to follow up as agreed",
+      baseParts: [{ label: "Asked to be called back", points: 55 }],
+      dueOn: due,
+      canCreate: daysBetween(due, today) <= FOLLOWUP_TASK_MAX_OVERDUE_DAYS,
+    });
+  }
+  return { candidates, resolutions };
+}
+
+// --- No answers ------------------------------------------------------------
+
+/** no_answer_sequences, as much as the no-answer tasks need. */
+export interface SequenceRow {
+  customer_key: string;
+  customer_name: string | null;
+  customer_phone: string | null;
+  status: string;
+  attempts_done: number;
+  started_at: string;
+  next_due_on: string | null;
+  closed_at: string | null;
+  closed_reason: string | null;
+}
+
+export const NO_ANSWER_MAX_ATTEMPTS = 6;
+
+const SEQUENCE_END_LABELS: Record<string, string> = {
+  booked: "Booked",
+  not_continuing: "Not continuing",
+  follow_up_later: "Continue later",
+  exhausted: "No answer after 6 attempts",
+  closed: "Sequence closed",
+};
+
+/**
+ * `rows`: every active sequence plus recently ended ones (so open tasks for
+ * them close). Only an active sequence with an attempt due makes a task.
+ */
+export function noAnswerTaskCandidates(
+  rows: readonly SequenceRow[],
+  directory: ContactDirectory,
+  now: number
+): CandidateSet {
+  const today = dublinDate(now);
+  const candidates: TaskCandidate[] = [];
+  const resolutions: Resolutions = new Map();
+  const active = new Set(rows.filter((row) => row.status === "active").map((row) => row.customer_key));
+
+  for (const row of rows) {
+    const slot = taskSlot("no_answer", row.customer_key);
+    if (row.status !== "active") {
+      if (!active.has(row.customer_key)) {
+        resolutions.set(slot, row.closed_reason ?? SEQUENCE_END_LABELS[row.status] ?? "Sequence ended");
+      }
+      continue;
+    }
+    const attempt = Math.min(row.attempts_done + 1, NO_ANSWER_MAX_ATTEMPTS);
+    if (!row.next_due_on || row.next_due_on > today) {
+      resolutions.set(
+        slot,
+        row.next_due_on ? `Attempt logged; attempt ${attempt} due ${shortDate(row.next_due_on)}` : "Attempt logged"
+      );
+      continue;
+    }
+    const known = directory.get(row.customer_key);
+    const fromKey = contactFromKey(row.customer_key);
+    const due = row.next_due_on;
+    candidates.push({
+      kind: "no_answer",
+      customerKey: row.customer_key,
+      dedupeKey: dedupeKey("no_answer", row.customer_key, dateTrigger(due)),
+      name: row.customer_name ?? known?.name ?? null,
+      email: known?.email ?? fromKey.email,
+      phone: row.customer_phone ?? known?.phone ?? fromKey.phone,
+      triggerAt: dateTrigger(due),
+      serviceType: null,
+      owner: null,
+      leadStatus: `attempt_${attempt}`,
+      reason: `No answer ${row.attempts_done === 1 ? "once" : `${row.attempts_done} times`} since ${shortDate(
+        row.started_at
+      )}; attempt ${attempt} of ${NO_ANSWER_MAX_ATTEMPTS} due`,
+      nextAction: `Call (attempt ${attempt} of ${NO_ANSWER_MAX_ATTEMPTS}); if there's no answer, email or WhatsApp them`,
+      baseParts: [
+        { label: `Attempt ${attempt} of ${NO_ANSWER_MAX_ATTEMPTS} due`, points: attempt <= 2 ? 60 : attempt <= 4 ? 50 : 40 },
+      ],
+      dueOn: due,
+      canCreate: true,
+    });
+  }
+  return { candidates, resolutions };
+}
+
+// --- Putting the sections together -----------------------------------------
+
 export function mergeCandidateSets(...sets: CandidateSet[]): CandidateSet {
   return {
     candidates: sets.flatMap((set) => set.candidates),
@@ -413,9 +799,45 @@ export function mergeCandidateSets(...sets: CandidateSet[]): CandidateSet {
   };
 }
 
-/** Keeps only the candidates on Courtney's list (see inSalesScope). Resolutions are kept so her open tasks still close. */
-export function scopeCandidates(set: CandidateSet): CandidateSet {
-  return { candidates: set.candidates.filter(inSalesScope), resolutions: set.resolutions };
+const SECTION_RANK = new Map(SECTION_ORDER.map((kind, index) => [kind, index]));
+
+/**
+ * The final list:
+ *   1. only candidates in scope (see inSalesScope);
+ *   2. a customer in an active no-answer sequence is called on the
+ *      sequence's schedule, so their other tasks give way to it;
+ *   3. a customer is listed once, in the first section that has them.
+ * Tasks that give way are closed with the reason (unless the source already
+ * gave one); every other resolution is kept, so out-of-scope tasks still close.
+ */
+export function arrangeCandidates(set: CandidateSet, inNoAnswerSequence: ReadonlySet<string>): CandidateSet {
+  const resolutions: Resolutions = new Map(set.resolutions);
+  const giveWay = (candidate: TaskCandidate, reason: string) => {
+    const slot = taskSlot(candidate.kind, candidate.customerKey);
+    if (!resolutions.has(slot)) resolutions.set(slot, reason);
+  };
+
+  const ordered = set.candidates
+    .filter(inSalesScope)
+    .sort((a, b) => SECTION_RANK.get(a.kind)! - SECTION_RANK.get(b.kind)!);
+  const listedIn = new Map<string, SalesTaskKind>();
+  const candidates: TaskCandidate[] = [];
+  for (const candidate of ordered) {
+    if (candidate.kind !== "no_answer" && inNoAnswerSequence.has(candidate.customerKey)) {
+      giveWay(candidate, "In the no-answer call sequence");
+      continue;
+    }
+    const listed = listedIn.get(candidate.customerKey);
+    if (listed) {
+      giveWay(candidate, `Listed under ${KIND_LABELS[listed]}`);
+      continue;
+    }
+    // One too old to start a task (it only keeps an open one up to date)
+    // doesn't keep the customer out of later sections.
+    if (candidate.canCreate) listedIn.set(candidate.customerKey, candidate.kind);
+    candidates.push(candidate);
+  }
+  return { candidates, resolutions };
 }
 
 // ---------------------------------------------------------------------------

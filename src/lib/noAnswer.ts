@@ -61,6 +61,7 @@ export const SOURCE_LABELS: Record<AttemptSource, string> = {
   hot_lead: "Hot lead",
   followups: "Follow-ups",
   no_answer: "Restarted",
+  sales_tasks: "Sales tasks",
 };
 
 export const STATUS_LABELS: Record<SequenceStatus, string> = {

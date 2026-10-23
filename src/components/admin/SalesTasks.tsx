@@ -33,17 +33,24 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertCircle,
+  ArrowDown,
   CalendarClock,
+  ChevronLeft,
   CheckCircle2,
   ExternalLink,
   ListChecks,
   Loader2,
+  Mail,
+  MessageCircle,
+  PhoneMissed,
   RefreshCw,
   RotateCcw,
   Search,
   StickyNote,
+  type LucideIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useCustomerFollowups } from "@/hooks/useAdmin";
@@ -63,19 +70,26 @@ import {
   type SalesPriority,
   type SalesTask,
   type SalesTaskKind,
+  type TaskSection,
   HISTORY_DAYS,
   KIND_LABELS,
   PRIORITY_LABELS,
+  SECTION_LABELS,
+  SECTION_ORDER,
   STATE_LABELS,
   carriedOverLabel,
+  completionLabel,
   dueLabel,
+  groupSections,
   groupTasks,
   matchesTaskSearch,
   priorityReasons,
+  sectionFor,
   sourceHref,
   taskState,
   todayInIreland,
 } from "@/lib/salesTasks";
+import { SEGMENT_LABELS, type BundleSegment } from "../../../supabase/functions/admin-bundles/logic.ts";
 import { CustomerCell, StatTile } from "./CustomerInsightsShared";
 
 const PRIORITY_STYLES: Record<SalesPriority, string> = {
@@ -88,10 +102,10 @@ type TabId = "today" | "scheduled" | "history";
 type KindFilter = "all" | SalesTaskKind;
 
 /**
- * Sales Tasks page: Courtney's daily call list. The sales-tasks function
- * prepares it every morning from the hot leads on her calendar (assessment
- * and psychiatry tasks can be switched on there later); unfinished tasks
- * carry over until they're completed or the client books.
+ * Sales Tasks page: the daily call list, worked through in seven sections
+ * (Progressions, Bundles, Follow-ups, No answers, Hot leads, Psychiatry,
+ * Assessments). The sales-tasks function prepares it every morning;
+ * unfinished tasks carry over until they're completed or the client books.
  */
 export function SalesTasks() {
   const tasks = useSalesTasks();
@@ -136,7 +150,7 @@ export function SalesTasks() {
 
   const groups = groupTasks(tasks.data, today);
   const visible = (list: SalesTask[]) =>
-    list.filter((task) => (kind === "all" || task.kind === kind) && matchesTaskSearch(task, search));
+    list.filter((task) => (kind === "all" || sectionFor(task) === kind) && matchesTaskSearch(task, search));
   const overdue = groups.today.filter((task) => task.due_on < today).length;
   const high = groups.today.filter((task) => task.priority === "high").length;
   const completedToday = (history.data ?? []).filter(
@@ -172,9 +186,11 @@ export function SalesTasks() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All task types</SelectItem>
-            <SelectItem value="hot_lead">Hot leads</SelectItem>
-            <SelectItem value="assessment">Assessments</SelectItem>
-            <SelectItem value="psychiatry">Psychiatry</SelectItem>
+            {SECTION_ORDER.map((id) => (
+              <SelectItem key={id} value={id}>
+                {SECTION_LABELS[id].title}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -187,10 +203,8 @@ export function SalesTasks() {
         </TabsList>
 
         <TabsContent value="today">
-          <TaskList
-            title="Today"
-            description="Most important first: priority, then the longest overdue. Unfinished tasks carry over to tomorrow."
-            tasks={visible(groups.today)}
+          <TodaySections
+            sections={groupSections(visible(groups.today))}
             today={today}
             notesByKey={notesByKey}
             empty={filtered ? "No tasks match your search." : "Nothing left for today."}
@@ -306,6 +320,109 @@ function TaskList({
   );
 }
 
+const sectionId = (kind: SalesTaskKind) => `sales-section-${kind}`;
+
+/**
+ * Today's tasks in working order. A bar of counts sits on top; an empty
+ * section shrinks to one line pointing at the next one with tasks, so the
+ * list always starts where there's work (no follow-ups → No answers).
+ */
+function TodaySections({
+  sections,
+  today,
+  notesByKey,
+  empty,
+}: {
+  sections: TaskSection[];
+  today: string;
+  notesByKey: Map<string, string | null>;
+  empty: string;
+}) {
+  const total = sections.reduce((sum, section) => sum + section.tasks.length, 0);
+  if (total === 0) {
+    return (
+      <Card className="border-border/50">
+        <CardContent className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
+          <ListChecks className="h-8 w-8" />
+          <p className="text-sm">{empty}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const nextWithTasks = (index: number) => sections.slice(index + 1).find((s) => s.tasks.length > 0) ?? null;
+
+  return (
+    <div className="space-y-4">
+      <nav aria-label="Sections" className="flex flex-wrap gap-2">
+        {sections.map((section, index) => (
+          <a
+            key={section.kind}
+            href={`#${sectionId(section.kind)}`}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors hover:bg-muted ${
+              section.tasks.length ? "border-border bg-card font-medium" : "border-border/50 text-muted-foreground"
+            }`}
+          >
+            <span className="text-muted-foreground">{index + 1}.</span>
+            {SECTION_LABELS[section.kind].title}
+            <span className="tabular-nums">{section.tasks.length}</span>
+          </a>
+        ))}
+      </nav>
+
+      {sections.map((section, index) => {
+        const { title, description } = SECTION_LABELS[section.kind];
+        if (section.tasks.length === 0) {
+          const next = nextWithTasks(index);
+          return (
+            <div
+              key={section.kind}
+              id={sectionId(section.kind)}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border/60 px-4 py-2 text-sm text-muted-foreground"
+            >
+              <span>
+                {index + 1}. No {title.toLowerCase()} today
+              </span>
+              {next && (
+                <a href={`#${sectionId(next.kind)}`} className="inline-flex items-center gap-1 text-xs font-medium text-primary">
+                  Start with {SECTION_LABELS[next.kind].title}
+                  <ArrowDown className="h-3.5 w-3.5" />
+                </a>
+              )}
+            </div>
+          );
+        }
+        return (
+          <Card key={section.kind} id={sectionId(section.kind)} className="scroll-mt-4 border-border/50">
+            <CardHeader>
+              <CardTitle className="text-lg font-heading">
+                {index + 1}. {title} ({section.tasks.length})
+              </CardTitle>
+              <CardDescription>{description}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {(section.stages ?? [{ fromSession: 0, label: "", tasks: section.tasks }]).map((stage) => (
+                <div key={stage.fromSession} className="space-y-3">
+                  {stage.label && (
+                    <h3 className="text-sm font-medium text-muted-foreground">
+                      {stage.label} ({stage.tasks.length})
+                    </h3>
+                  )}
+                  <ul className="space-y-3">
+                    {stage.tasks.map((task) => (
+                      <TaskItem key={task.id} task={task} today={today} note={notesByKey.get(task.customer_key) ?? null} />
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
 function PriorityBadge({ priority }: { priority: string }) {
   const p = (priority as SalesPriority) in PRIORITY_LABELS ? (priority as SalesPriority) : "low";
   return (
@@ -316,22 +433,14 @@ function PriorityBadge({ priority }: { priority: string }) {
 }
 
 function TaskItem({ task, today, note }: { task: SalesTask; today: string; note: string | null }) {
-  const complete = useCompleteSalesTask();
-  const { toast } = useToast();
   const [noteOpen, setNoteOpen] = useState(false);
   const [dueOpen, setDueOpen] = useState(false);
+  const [completeOpen, setCompleteOpen] = useState(false);
   const state = taskState(task, today);
   const carried = carriedOverLabel(task);
   const reasons = priorityReasons(task);
-
-  const handleComplete = async () => {
-    try {
-      await complete.mutateAsync(task.id);
-      toast({ title: "Task completed", description: task.customer_name ?? undefined });
-    } catch (error) {
-      toast({ title: "Couldn't complete the task", description: followupErrorMessage(error), variant: "destructive" });
-    }
-  };
+  const segment = task.kind === "bundle" ? SEGMENT_LABELS[task.lead_status as BundleSegment]?.label : null;
+  const moved = sectionFor(task) !== task.kind;
 
   return (
     <li className="rounded-lg border border-border/60 p-4">
@@ -342,6 +451,16 @@ function TaskItem({ task, today, note }: { task: SalesTask; today: string; note:
             <Badge variant="outline" className="font-normal">
               {KIND_LABELS[task.kind as SalesTaskKind] ?? task.kind}
             </Badge>
+            {segment && (
+              <Badge variant="outline" className="border-amber-200 bg-amber-50 font-normal text-amber-700">
+                {segment}
+              </Badge>
+            )}
+            {moved && (
+              <Badge variant="outline" className="font-normal text-muted-foreground">
+                Follow-up set by staff
+              </Badge>
+            )}
             {state === "overdue" && (
               <Badge variant="outline" className="border-red-200 bg-red-50 font-normal text-red-700">
                 {STATE_LABELS.overdue}
@@ -409,8 +528,8 @@ function TaskItem({ task, today, note }: { task: SalesTask; today: string; note:
         </div>
 
         <div className="flex flex-wrap gap-2 lg:w-44 lg:flex-col">
-          <Button size="sm" onClick={handleComplete} disabled={complete.isPending}>
-            {complete.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+          <Button size="sm" onClick={() => setCompleteOpen(true)}>
+            <CheckCircle2 className="mr-2 h-4 w-4" />
             Complete
           </Button>
           <Button size="sm" variant="outline" onClick={() => setDueOpen(true)}>
@@ -424,15 +543,161 @@ function TaskItem({ task, today, note }: { task: SalesTask; today: string; note:
           <Button size="sm" variant="ghost" asChild>
             <Link to={sourceHref(task)}>
               <ExternalLink className="mr-2 h-4 w-4" />
-              Open lead
+              Open in {SECTION_LABELS[task.kind as SalesTaskKind]?.title ?? "Hot leads"}
             </Link>
           </Button>
         </div>
       </div>
 
+      <CompleteDialog
+        open={completeOpen}
+        onOpenChange={setCompleteOpen}
+        task={task}
+        onFollowUp={() => {
+          setCompleteOpen(false);
+          setDueOpen(true);
+        }}
+      />
       <NoteDialog open={noteOpen} onOpenChange={setNoteOpen} task={task} note={note} />
       <DueDialog open={dueOpen} onOpenChange={setDueOpen} task={task} today={today} />
     </li>
+  );
+}
+
+const COMPLETE_OPTIONS: { id: "completed" | "follow_up" | "no_answer"; label: string; hint: string; icon: LucideIcon }[] = [
+  { id: "completed", label: "Completed", hint: "Done; close the task", icon: CheckCircle2 },
+  { id: "follow_up", label: "Follow-up", hint: "Call again on a later date", icon: CalendarClock },
+  { id: "no_answer", label: "No answer", hint: "Didn't pick up; you emailed or WhatsApped instead", icon: PhoneMissed },
+];
+
+/**
+ * The Complete pop-up: Completed closes the task as before, Follow-up opens
+ * the existing "Follow up on…" date picker, and No answer asks how else the
+ * customer was contacted (Email, WhatsApp or both) before closing it.
+ */
+function CompleteDialog({
+  open,
+  onOpenChange,
+  task,
+  onFollowUp,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  task: SalesTask;
+  onFollowUp: () => void;
+}) {
+  const complete = useCompleteSalesTask();
+  const { toast } = useToast();
+  const [step, setStep] = useState<"choose" | "no_answer">("choose");
+  const [emailed, setEmailed] = useState(false);
+  const [whatsapped, setWhatsapped] = useState(false);
+  const name = task.customer_name ?? "this customer";
+
+  const handleOpenChange = (next: boolean) => {
+    if (next) {
+      setStep("choose");
+      setEmailed(false);
+      setWhatsapped(false);
+    }
+    onOpenChange(next);
+  };
+
+  const save = async (outcome: "completed" | "no_answer") => {
+    try {
+      await complete.mutateAsync({ taskId: task.id, outcome, emailed, whatsapped });
+      onOpenChange(false);
+      toast({
+        title: outcome === "no_answer" ? "No answer recorded" : "Task completed",
+        description: task.customer_name ?? undefined,
+      });
+    } catch (error) {
+      toast({ title: "Couldn't complete the task", description: followupErrorMessage(error), variant: "destructive" });
+    }
+  };
+
+  const choose = (id: (typeof COMPLETE_OPTIONS)[number]["id"]) => {
+    if (id === "completed") void save("completed");
+    else if (id === "follow_up") onFollowUp();
+    else setStep("no_answer");
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        {step === "choose" ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Complete task</DialogTitle>
+              <DialogDescription>How did it go with {name}?</DialogDescription>
+            </DialogHeader>
+            <p className="text-xs font-medium text-muted-foreground">Record outcome</p>
+            <div className="-mt-2 space-y-1">
+              {COMPLETE_OPTIONS.map(({ id, label, hint, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => choose(id)}
+                  disabled={complete.isPending}
+                  className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:outline-none disabled:opacity-50"
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span className="flex-1">
+                    <span className="block">{label}</span>
+                    <span className="block text-xs text-muted-foreground">{hint}</span>
+                  </span>
+                  {id === "completed" && complete.isPending && (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="Saving" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle>No answer</DialogTitle>
+              <DialogDescription>
+                Did you also contact {name} another way? Choose one or both to close the task.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              {[
+                { id: "emailed", label: "Email", icon: Mail, checked: emailed, set: setEmailed },
+                { id: "whatsapped", label: "WhatsApp", icon: MessageCircle, checked: whatsapped, set: setWhatsapped },
+              ].map(({ id, label, icon: Icon, checked, set }) => (
+                <Label
+                  key={id}
+                  htmlFor={`${id}-${task.id}`}
+                  className="flex cursor-pointer items-center gap-3 rounded-md border border-border/60 px-3 py-2.5 font-normal hover:bg-muted/50"
+                >
+                  <Checkbox
+                    id={`${id}-${task.id}`}
+                    checked={checked}
+                    onCheckedChange={(value) => set(value === true)}
+                    disabled={complete.isPending}
+                  />
+                  <Icon className="h-4 w-4 text-muted-foreground" />
+                  {label}
+                </Label>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              The missed call is also logged on the No answer page, so the next attempt comes up on schedule.
+            </p>
+            <DialogFooter className="gap-2 sm:justify-between">
+              <Button variant="ghost" onClick={() => setStep("choose")} disabled={complete.isPending}>
+                <ChevronLeft className="mr-1 h-4 w-4" />
+                Back
+              </Button>
+              <Button onClick={() => void save("no_answer")} disabled={!(emailed || whatsapped) || complete.isPending}>
+                {complete.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Complete task
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -620,7 +885,7 @@ function HistoryCard({
                       <p className="text-xs text-muted-foreground">{task.reason}</p>
                     </TableCell>
                     <TableCell className="whitespace-nowrap">
-                      <p className="text-sm">{STATE_LABELS[taskState(task, "")]}</p>
+                      <p className="text-sm">{completionLabel(task) ?? STATE_LABELS[taskState(task, "")]}</p>
                       <p className="text-xs text-muted-foreground">
                         {formatDateTime(task.completed_at)}
                         {task.completed_by_email && ` · ${task.completed_by_email}`}
@@ -652,10 +917,12 @@ function HistoryCard({
 function PriorityNote() {
   return (
     <p className="text-xs text-muted-foreground">
-      Priority is a points score shown on each task: hot leads use the same score as the Hot leads page; assessments
-      and psychiatry score the step reached, how recent it was and contact attempts so far. Each day overdue adds 10
-      points (up to 30). 70+ is high, 45–69 medium, below 45 low. The list is prepared every morning and tasks close
-      automatically once the client books.
+      Sections are worked top to bottom, and each customer is listed once, in their first section; customers in a
+      no-answer sequence are called on its schedule, under No answers. Within a section, priority is a points score
+      shown on each task: hot leads use the same score as the Hot leads page; the others score the stage or step
+      reached, how long it's been and contact attempts so far. Each day overdue adds 10 points (up to 30). 70+ is
+      high, 45–69 medium, below 45 low. The list is prepared every morning and tasks close automatically once the
+      client books.
     </p>
   );
 }
