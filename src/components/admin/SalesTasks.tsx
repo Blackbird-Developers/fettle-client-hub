@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { format, parseISO } from "date-fns";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -90,7 +90,9 @@ import {
   todayInIreland,
 } from "@/lib/salesTasks";
 import { SEGMENT_LABELS, type BundleSegment } from "../../../supabase/functions/admin-bundles/logic.ts";
+import { paginate } from "@/lib/pagination";
 import { CustomerCell, StatTile } from "./CustomerInsightsShared";
+import { TablePagination } from "./TablePagination";
 
 const PRIORITY_STYLES: Record<SalesPriority, string> = {
   high: "border-red-200 bg-red-50 text-red-700",
@@ -202,8 +204,10 @@ export function SalesTasks() {
           <TabsTrigger value="history">Completed</TabsTrigger>
         </TabsList>
 
+        {/* A new search or type filter starts every list again from its first page. */}
         <TabsContent value="today">
           <TodaySections
+            key={`${search}|${kind}`}
             sections={groupSections(visible(groups.today))}
             today={today}
             notesByKey={notesByKey}
@@ -212,6 +216,7 @@ export function SalesTasks() {
         </TabsContent>
         <TabsContent value="scheduled">
           <TaskList
+            key={`${search}|${kind}`}
             title="Scheduled"
             description="Tasks moved to a later date. Each comes back to Today on its date."
             tasks={visible(groups.upcoming)}
@@ -309,14 +314,82 @@ function TaskList({
             <p className="text-sm">{empty}</p>
           </div>
         ) : (
-          <ul className="space-y-3">
-            {tasks.map((task) => (
-              <TaskItem key={task.id} task={task} today={today} note={notesByKey.get(task.customer_key) ?? null} />
-            ))}
-          </ul>
+          <PagedTasks tasks={tasks} today={today} notesByKey={notesByKey} />
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/** Task cards are tall, so a page holds fewer than the admin tables' 25 rows. */
+const TASKS_PER_PAGE = 10;
+
+/**
+ * One page of a task list, with the same "Showing x–y of n" line and page
+ * controls as the admin tables. Progressions keep their stage headings: each
+ * stage on the page gets its heading, with the stage's full count.
+ */
+function PagedTasks({
+  tasks,
+  stages,
+  today,
+  notesByKey,
+}: {
+  tasks: SalesTask[];
+  stages?: TaskSection["stages"];
+  today: string;
+  notesByKey: Map<string, string | null>;
+}) {
+  const [page, setPage] = useState(1);
+  const listRef = useRef<HTMLDivElement>(null);
+  const shown = paginate(tasks, page, TASKS_PER_PAGE);
+
+  const stageOf = new Map(
+    (stages ?? []).flatMap((stage) => stage.tasks.map((task) => [task.id, stage] as const))
+  );
+  // Consecutive tasks of the same stage (just one group without stages).
+  const groups: { stage?: NonNullable<TaskSection["stages"]>[number]; tasks: SalesTask[] }[] = [];
+  for (const task of shown.rows) {
+    const stage = stageOf.get(task.id);
+    const last = groups[groups.length - 1];
+    if (last && last.stage === stage) last.tasks.push(task);
+    else groups.push({ stage, tasks: [task] });
+  }
+
+  // The controls sit under the list, so bring its top back into view.
+  const onPageChange = (next: number) => {
+    setPage(next);
+    const list = listRef.current;
+    if (list && list.getBoundingClientRect().top < 0) {
+      list.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  return (
+    <div ref={listRef} className="scroll-mt-4 space-y-4">
+      {groups.map((group) => (
+        <div key={`${group.stage?.fromSession ?? "all"}-${group.tasks[0].id}`} className="space-y-3">
+          {group.stage?.label && (
+            <h3 className="text-sm font-medium text-muted-foreground">
+              {group.stage.label} ({group.stage.tasks.length})
+            </h3>
+          )}
+          <ul className="space-y-3">
+            {group.tasks.map((task) => (
+              <TaskItem key={task.id} task={task} today={today} note={notesByKey.get(task.customer_key) ?? null} />
+            ))}
+          </ul>
+        </div>
+      ))}
+      {shown.pageCount > 1 && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-muted-foreground">
+            Showing {shown.start}–{shown.end} of {tasks.length} tasks
+          </p>
+          <TablePagination page={shown.page} pageCount={shown.pageCount} onPageChange={onPageChange} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -400,21 +473,8 @@ function TodaySections({
               </CardTitle>
               <CardDescription>{description}</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {(section.stages ?? [{ fromSession: 0, label: "", tasks: section.tasks }]).map((stage) => (
-                <div key={stage.fromSession} className="space-y-3">
-                  {stage.label && (
-                    <h3 className="text-sm font-medium text-muted-foreground">
-                      {stage.label} ({stage.tasks.length})
-                    </h3>
-                  )}
-                  <ul className="space-y-3">
-                    {stage.tasks.map((task) => (
-                      <TaskItem key={task.id} task={task} today={today} note={notesByKey.get(task.customer_key) ?? null} />
-                    ))}
-                  </ul>
-                </div>
-              ))}
+            <CardContent>
+              <PagedTasks tasks={section.tasks} stages={section.stages} today={today} notesByKey={notesByKey} />
             </CardContent>
           </Card>
         );

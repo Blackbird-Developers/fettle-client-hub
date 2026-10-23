@@ -147,6 +147,38 @@ describe("SalesTasks", () => {
     );
   });
 
+  it("shows each section ten tasks at a time, keeping stage headings across pages", async () => {
+    state.open = [
+      ...Array.from({ length: 8 }, (_, i) =>
+        salesTask({ customer_name: `Stage One ${i + 1}`, kind: "progression", lead_status: "session_1" })
+      ),
+      ...Array.from({ length: 4 }, (_, i) =>
+        salesTask({ customer_name: `Stage Two ${i + 1}`, kind: "progression", lead_status: "session_2" })
+      ),
+      salesTask({ customer_name: "Lead Person" }),
+    ];
+    const user = renderPage();
+
+    // Progressions: 12 tasks, 10 on page 1 (8 at stage 1, 2 at stage 2).
+    expect(screen.getAllByRole("button", { name: /^Complete$/ })).toHaveLength(11);
+    expect(screen.getByText("Showing 1–10 of 12 tasks")).toBeInTheDocument();
+    expect(screen.getByText("Session 1 → 2 (8)")).toBeInTheDocument();
+    expect(screen.getByText("Session 2 → 3 (4)")).toBeInTheDocument();
+    expect(screen.queryByText("Stage Two 3")).not.toBeInTheDocument();
+    // Hot leads has one task, so no page controls of its own.
+    expect(screen.getAllByRole("navigation", { name: "pagination" })).toHaveLength(1);
+
+    await user.click(screen.getByRole("link", { name: "Page 2" }));
+    expect(screen.getByText("Showing 11–12 of 12 tasks")).toBeInTheDocument();
+    expect(screen.getByText("Stage Two 3")).toBeInTheDocument();
+    expect(screen.queryByText("Session 1 → 2 (8)")).not.toBeInTheDocument();
+    expect(screen.getByText("Session 2 → 3 (4)")).toBeInTheDocument();
+
+    // A new search starts again from page 1.
+    await user.type(screen.getByRole("textbox", { name: "Search tasks" }), "Stage");
+    expect(screen.getByText("Showing 1–10 of 12 tasks")).toBeInTheDocument();
+  });
+
   it("points an empty section at the next one with tasks", () => {
     state.open = [salesTask({ customer_name: "Missed Call", kind: "no_answer" })];
     renderPage();
