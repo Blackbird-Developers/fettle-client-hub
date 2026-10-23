@@ -32,6 +32,7 @@ import { indexFollowups, isMissingTableError } from "@/lib/customerFollowups";
 import { BulkActionBar } from "./BulkActionBar";
 import { FollowupActions } from "./FollowupActions";
 import { daysAgoLabel, formatDate, formatDateTime, matchesSearch } from "@/lib/customerInsights";
+import { initialSearchFromUrl } from "@/lib/salesTasks";
 import {
   type ProgressionRow,
   GRADE_ORDER,
@@ -128,7 +129,7 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
       : null;
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("all");
   const [period, setPeriod] = useState(30);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearchFromUrl);
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
     key: "grade",
     direction: "asc",

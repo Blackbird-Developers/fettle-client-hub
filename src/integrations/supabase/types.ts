@@ -390,6 +390,9 @@ export type Database = {
           completed_at: string | null
           completed_by: string | null
           completed_by_email: string | null
+          completion_outcome: string | null
+          contacted_by_email: boolean
+          contacted_by_whatsapp: boolean
           created_at: string
           created_on: string
           customer_email: string | null
@@ -425,6 +428,9 @@ export type Database = {
           completed_at?: string | null
           completed_by?: string | null
           completed_by_email?: string | null
+          completion_outcome?: string | null
+          contacted_by_email?: boolean
+          contacted_by_whatsapp?: boolean
           created_at?: string
           created_on?: string
           customer_email?: string | null
@@ -460,6 +466,9 @@ export type Database = {
           completed_at?: string | null
           completed_by?: string | null
           completed_by_email?: string | null
+          completion_outcome?: string | null
+          contacted_by_email?: boolean
+          contacted_by_whatsapp?: boolean
           created_at?: string
           created_on?: string
           customer_email?: string | null
@@ -720,7 +729,12 @@ export type Database = {
         Returns: Database["public"]["Tables"]["no_answer_sequences"]["Row"]
       }
       complete_sales_task: {
-        Args: { p_task_id: string }
+        Args: {
+          p_emailed?: boolean
+          p_outcome?: string
+          p_task_id: string
+          p_whatsapped?: boolean
+        }
         Returns: Database["public"]["Tables"]["sales_tasks"]["Row"]
       }
       has_role: {

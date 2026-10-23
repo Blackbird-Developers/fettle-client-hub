@@ -16,6 +16,7 @@ import { AlertTriangle, Mail, Package, Phone, Search } from "lucide-react";
 import { useBundles, useContactOutcomesAvailable, useCustomerFollowups } from "@/hooks/useAdmin";
 import { indexFollowups, isMissingTableError } from "@/lib/customerFollowups";
 import { daysAgoLabel, formatDate, formatDateTime, matchesSearch } from "@/lib/customerInsights";
+import { initialSearchFromUrl } from "@/lib/salesTasks";
 import {
   type BundleRow,
   type BundleSegment,
@@ -67,7 +68,7 @@ export function Bundles() {
       : null;
 
   const [segment, setSegment] = useState<BundleSegment>("expiring");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearchFromUrl);
 
   const rows = useMemo(
     () =>

@@ -3,7 +3,13 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { useIsAdmin } from "@/hooks/useAdmin";
 import { isMissingTableError } from "@/lib/customerFollowups";
-import { type SalesTask, HISTORY_DAYS, countDueTasks, todayInIreland } from "@/lib/salesTasks";
+import {
+  type CompletionOutcome,
+  type SalesTask,
+  HISTORY_DAYS,
+  countDueTasks,
+  todayInIreland,
+} from "@/lib/salesTasks";
 
 // Data for the admin Sales Tasks page. Tasks are read straight from the
 // database (admin-only RLS); every change goes through a database function
@@ -11,6 +17,9 @@ import { type SalesTask, HISTORY_DAYS, countDueTasks, todayInIreland } from "@/l
 
 const TASKS_KEY = ["sales-tasks"];
 const FOLLOWUPS_KEY = ["customer-followups"];
+// Same keys as useAdmin, so the other admin pages pick up a No answer logged here.
+const NO_ANSWER_KEY = ["no-answer-sequences"];
+const CONTACT_HISTORY_KEY = ["customer-contact-history"];
 type DbError = { code?: string; message: string };
 
 const noRetryIfMissing = (failureCount: number, error: DbError) =>
@@ -139,27 +148,49 @@ export function usePrepareSalesTasks() {
   });
 }
 
+export interface CompleteTaskInput {
+  taskId: string;
+  outcome: CompletionOutcome;
+  /** No answer only: also emailed / WhatsApped (at least one). */
+  emailed?: boolean;
+  whatsapped?: boolean;
+}
+
+// A No answer is also logged as a contact attempt by the database function,
+// so the customer's no-answer sequence and follow-up summary move on too.
 export function useCompleteSalesTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (taskId: string) => {
-      const { data, error } = await supabase.rpc("complete_sales_task", { p_task_id: taskId });
+    mutationFn: async ({ taskId, outcome, emailed = false, whatsapped = false }: CompleteTaskInput) => {
+      const { data, error } = await supabase.rpc("complete_sales_task", {
+        p_task_id: taskId,
+        p_outcome: outcome,
+        p_emailed: emailed,
+        p_whatsapped: whatsapped,
+      });
       if (error) throw error;
       return data;
     },
     // Leaves the list straight away; back if the save fails.
-    onMutate: async (taskId) => {
+    onMutate: async ({ taskId }) => {
       const key = [...TASKS_KEY, "open"];
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<SalesTask[]>(key);
       queryClient.setQueryData<SalesTask[]>(key, (rows) => rows?.filter((row) => row.id !== taskId));
       return { previous };
     },
-    onError: (_error, _taskId, context) => {
+    onError: (_error, _input, context) => {
       queryClient.setQueryData([...TASKS_KEY, "open"], context?.previous);
     },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: TASKS_KEY }),
+    onSettled: (_data, _error, input) => {
+      void queryClient.invalidateQueries({ queryKey: TASKS_KEY });
+      if (input.outcome === "no_answer") {
+        void queryClient.invalidateQueries({ queryKey: FOLLOWUPS_KEY });
+        void queryClient.invalidateQueries({ queryKey: NO_ANSWER_KEY });
+        void queryClient.invalidateQueries({ queryKey: CONTACT_HISTORY_KEY });
+      }
+    },
   });
 }
 

@@ -31,6 +31,7 @@ import {
   reasonCounts,
 } from "@/lib/contactOutcomes";
 import { formatDate, matchesSearch } from "@/lib/customerInsights";
+import { initialSearchFromUrl } from "@/lib/salesTasks";
 import type { NextSessionStatus } from "../../../supabase/functions/admin-customer-insights/logic.ts";
 import { CustomerCell, StatTile } from "./CustomerInsightsShared";
 import { FollowupActions } from "./FollowupActions";
@@ -64,7 +65,7 @@ export function FollowUpsReport() {
   // Optional extras (contact details, Acuity booking hint); the report works without them.
   const insights = useCustomerInsights();
   const [dueFilter, setDueFilter] = useState<DueFilter>("all");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearchFromUrl);
 
   // Contact details from the most recent Progression view each customer is in.
   const detailsByKey = useMemo(() => {

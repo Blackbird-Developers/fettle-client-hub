@@ -74,7 +74,7 @@ beforeEach(() => {
 });
 
 describe("SalesTasks", () => {
-  it("lists today's tasks most important first, with why, next action and priority reasons", () => {
+  it("lists today's tasks by section, with why, next action and priority reasons", () => {
     state.open = [
       salesTask({ customer_name: "Low Lead", priority: "low", score: 30 }),
       salesTask({
@@ -97,31 +97,97 @@ describe("SalesTasks", () => {
     ];
     renderPage();
 
+    // Hot leads (section 5) come before Assessments (section 7).
     const items = screen.getAllByRole("listitem");
     expect(items).toHaveLength(2);
-    expect(within(items[0]).getByText("Carried Client")).toBeInTheDocument();
-    expect(within(items[1]).getByText("Low Lead")).toBeInTheDocument();
+    expect(within(items[0]).getByText("Low Lead")).toBeInTheDocument();
+    expect(within(items[1]).getByText("Carried Client")).toBeInTheDocument();
 
-    const first = within(items[0]);
-    expect(first.getByText("High priority")).toBeInTheDocument();
-    expect(first.getByText("Overdue")).toBeInTheDocument();
-    expect(first.getByText("Carried over 2 days")).toBeInTheDocument();
-    expect(first.getByText(/full clinical assessment not booked$/)).toBeInTheDocument();
-    expect(first.getByText("Call to book the full clinical assessment")).toBeInTheDocument();
-    expect(first.getByText(/Screening done, full assessment not booked \(\+35\)/)).toBeInTheDocument();
-    expect(first.getByText("Prefers calls after 5pm")).toBeInTheDocument();
-    expect(first.getByRole("link", { name: /Open lead/ })).toHaveAttribute(
+    const assessment = within(items[1]);
+    expect(assessment.getByText("High priority")).toBeInTheDocument();
+    expect(assessment.getByText("Overdue")).toBeInTheDocument();
+    expect(assessment.getByText("Carried over 2 days")).toBeInTheDocument();
+    expect(assessment.getByText(/full clinical assessment not booked$/)).toBeInTheDocument();
+    expect(assessment.getByText("Call to book the full clinical assessment")).toBeInTheDocument();
+    expect(assessment.getByText(/Screening done, full assessment not booked \(\+35\)/)).toBeInTheDocument();
+    expect(assessment.getByText("Prefers calls after 5pm")).toBeInTheDocument();
+    expect(assessment.getByRole("link", { name: /Open in Assessments/ })).toHaveAttribute(
       "href",
       "/admin/assessments?q=aoife%40example.com"
     );
     expect(screen.getByRole("tab", { name: "Scheduled (1)" })).toBeInTheDocument();
   });
 
-  it("completes a task", async () => {
+  it("works through the seven sections in order, with progressions split by stage", () => {
+    state.open = [
+      salesTask({ customer_name: "Psych Person", kind: "psychiatry" }),
+      salesTask({ customer_name: "Second Stage", kind: "progression", lead_status: "session_2" }),
+      salesTask({ customer_name: "Bundle Person", kind: "bundle", lead_status: "stalled" }),
+      salesTask({ customer_name: "First Stage", kind: "progression", lead_status: "session_1" }),
+      salesTask({ customer_name: "Missed Call", kind: "no_answer" }),
+      // Moved to today with "Follow up on…": listed under Follow-ups.
+      salesTask({ customer_name: "Moved Lead", due_on: TODAY, original_due_on: daysFromToday(-3) }),
+    ];
+    renderPage();
+
+    const expected = ["First Stage", "Second Stage", "Bundle Person", "Moved Lead", "Missed Call", "Psych Person"];
+    const order = screen
+      .getAllByRole("listitem")
+      .map((item) => expected.find((name) => within(item).queryByText(name)));
+    expect(order).toEqual(expected);
+
+    expect(screen.getByText("1. Progressions (2)")).toBeInTheDocument();
+    expect(screen.getByText("Session 1 → 2 (1)")).toBeInTheDocument();
+    expect(screen.getByText("Session 2 → 3 (1)")).toBeInTheDocument();
+    expect(screen.getByText("Stalled")).toBeInTheDocument();
+    expect(screen.getByText("Follow-up set by staff")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Open in Progressions/ })[0]).toHaveAttribute(
+      "href",
+      "/admin/progression/1-2?q=aoife%40example.com"
+    );
+  });
+
+  it("points an empty section at the next one with tasks", () => {
+    state.open = [salesTask({ customer_name: "Missed Call", kind: "no_answer" })];
+    renderPage();
+    expect(screen.getByText("3. No follow-ups today")).toBeInTheDocument();
+    const links = screen.getAllByRole("link", { name: /Start with No answers/ });
+    expect(links[0]).toHaveAttribute("href", "#sales-section-no_answer");
+  });
+
+  it("completes a task from the Complete pop-up", async () => {
     state.open = [salesTask({ id: "t1", customer_name: "Aoife Byrne" })];
     const user = renderPage();
-    await user.click(screen.getByRole("button", { name: /Complete/ }));
-    expect(state.complete).toHaveBeenCalledWith("t1");
+    await user.click(screen.getByRole("button", { name: /^Complete$/ }));
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("How did it go with Aoife Byrne?")).toBeInTheDocument();
+    await user.click(dialog.getByRole("button", { name: /^Completed/ }));
+    expect(state.complete).toHaveBeenCalledWith({ taskId: "t1", outcome: "completed", emailed: false, whatsapped: false });
+  });
+
+  it("opens the follow-up date picker from the pop-up", async () => {
+    state.open = [salesTask({ id: "t1" })];
+    const user = renderPage();
+    await user.click(screen.getByRole("button", { name: /^Complete$/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^Follow-up/ }));
+    expect(screen.getByRole("dialog", { name: "Follow up on…" })).toBeInTheDocument();
+    expect(state.complete).not.toHaveBeenCalled();
+  });
+
+  it("records a No answer only once Email, WhatsApp or both is chosen", async () => {
+    state.open = [salesTask({ id: "t1" })];
+    const user = renderPage();
+    await user.click(screen.getByRole("button", { name: /^Complete$/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^No answer/ }));
+
+    const dialog = within(screen.getByRole("dialog", { name: "No answer" }));
+    const save = dialog.getByRole("button", { name: "Complete task" });
+    expect(save).toBeDisabled();
+    await user.click(dialog.getByRole("checkbox", { name: "Email" }));
+    await user.click(dialog.getByRole("checkbox", { name: "WhatsApp" }));
+    expect(save).toBeEnabled();
+    await user.click(save);
+    expect(state.complete).toHaveBeenCalledWith({ taskId: "t1", outcome: "no_answer", emailed: true, whatsapped: true });
   });
 
   it("saves a note and a follow-up date", async () => {
@@ -166,6 +232,14 @@ describe("SalesTasks", () => {
         seconds_to_complete: 5400,
       }),
       salesTask({
+        id: "missed",
+        customer_name: "Missed Person",
+        status: "completed",
+        completed_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+        completion_outcome: "no_answer",
+        contacted_by_whatsapp: true,
+      }),
+      salesTask({
         id: "auto",
         customer_name: "Booked Person",
         status: "auto_closed",
@@ -181,8 +255,9 @@ describe("SalesTasks", () => {
     expect(screen.getByText("Done Person")).toBeInTheDocument();
     expect(screen.getByText("Booked: Individual Therapy")).toBeInTheDocument();
     expect(screen.getByText("2 h")).toBeInTheDocument();
+    expect(screen.getByText("No answer · WhatsApped")).toBeInTheDocument();
     const reopenButtons = screen.getAllByRole("button", { name: /Reopen/ });
-    expect(reopenButtons).toHaveLength(1);
+    expect(reopenButtons).toHaveLength(2);
     await user.click(reopenButtons[0]);
     expect(state.reopen).toHaveBeenCalledWith("done");
   });
