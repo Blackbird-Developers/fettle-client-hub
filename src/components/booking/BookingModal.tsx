@@ -172,6 +172,10 @@ export function BookingModal({
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [ignorePreselectedTherapist, setIgnorePreselectedTherapist] =
         useState(false);
+    // True when the therapist came from the "Book again with your therapist"
+    // shortcut, so Back on the date step returns to the session types.
+    const [bookedFromRebookShortcut, setBookedFromRebookShortcut] =
+        useState(false);
     const [formData, setFormData] = useState({
         firstName: '',
         lastName: '',
@@ -316,6 +320,16 @@ export function BookingModal({
             const trimmedCalendarName = preselectedCalendarName.trim();
             const therapistFirstName = trimmedCalendarName.split(' ')[0];
             return types.filter((type) => {
+                // The type must belong to this therapist's calendar. The name
+                // match below allows first names only ("...with Ken"), which
+                // on its own also matched other therapists sharing or starting
+                // with that first name (three Emmas, Lisa/Linda, Paul/Paula).
+                if (
+                    preselectedCalendarId &&
+                    !type.calendarIDs?.includes(preselectedCalendarId)
+                ) {
+                    return false;
+                }
                 const nameLower = type.name.toLowerCase();
                 const therapistNameLower = therapistFirstName.toLowerCase();
                 const fullNameLower = trimmedCalendarName.toLowerCase();
@@ -370,6 +384,7 @@ export function BookingModal({
         }
     }, [
         types,
+        preselectedCalendarId,
         preselectedCalendarName,
         ignorePreselectedTherapist,
         sessionCategory,
@@ -474,7 +489,9 @@ export function BookingModal({
                     .replace(/Individual Session with [^(]+/i, '')
                     .trim();
             }
-            return cleaned || 'Therapy Session';
+            // Fall back to the full type name ("Individual Session with Emma
+            // Keane") so the therapist is always visible on the card.
+            return cleaned || name.trim();
         }
 
         // Extract the focus area from parentheses
@@ -587,6 +604,37 @@ export function BookingModal({
             calendars.find((c) => c.id === lastAppointment.calendarID) || null
         );
     }, [appointments, calendars]);
+
+    // Therapists the client has seen before, most recent first, each paired
+    // with their own "Individual Session with <name>" type. Shown at the top
+    // of the individual session-type step so a returning client can rebook
+    // without having to find their therapist under a topic.
+    const rebookOptions = useMemo(() => {
+        if (!appointments.length || !types.length) return [];
+        const seen = new Set<number>();
+        const options: { calendar: AcuityCalendar; typeId: number }[] = [];
+        const sorted = [...appointments]
+            .filter((a) => !a.canceled)
+            .sort(
+                (a, b) =>
+                    new Date(b.datetime).getTime() -
+                    new Date(a.datetime).getTime()
+            );
+        for (const apt of sorted) {
+            if (seen.has(apt.calendarID)) continue;
+            seen.add(apt.calendarID);
+            const calendar = calendars.find((c) => c.id === apt.calendarID);
+            const type = types.find((t) => {
+                const nameLower = t.name.toLowerCase();
+                return (
+                    nameLower.startsWith('individual session with') &&
+                    !!t.calendarIDs?.includes(apt.calendarID)
+                );
+            });
+            if (calendar && type) options.push({ calendar, typeId: type.id });
+        }
+        return options;
+    }, [appointments, calendars, types]);
 
     const availableDateStrings = availableDates.map((d) => d.date);
 
@@ -1058,6 +1106,7 @@ export function BookingModal({
         setSelectedPackageId(null);
         setHasUserMadePaymentChoice(false);
         setIgnorePreselectedTherapist(false);
+        setBookedFromRebookShortcut(false);
         setAssigningTime(null);
     };
 
@@ -1079,6 +1128,7 @@ export function BookingModal({
     // For couples/youth sessions, the therapist is embedded in the type name, so extract calendar and skip to date
     const handleTypeSelection = (typeId: number) => {
         setSelectedType(typeId);
+        setBookedFromRebookShortcut(false);
 
         // Assessments and psychiatry don't require choosing a clinician:
         // availability is pooled across the type's calendars and Acuity
@@ -1117,6 +1167,21 @@ export function BookingModal({
 
     const handleSelectTherapist = (calendarId: number) => {
         setSelectedCalendar(calendarId);
+        setStep('date');
+    };
+
+    // "Book again with your therapist": book that therapist's own session
+    // type on their calendar, skipping the topic and therapist steps.
+    const showRebookShortcuts =
+        sessionCategory === 'individual' &&
+        !autoAssign &&
+        !(preselectedCalendarName && !ignorePreselectedTherapist) &&
+        rebookOptions.length > 0;
+
+    const handleRebookTherapist = (typeId: number, calendarId: number) => {
+        setSelectedType(typeId);
+        setSelectedCalendar(calendarId);
+        setBookedFromRebookShortcut(true);
         setStep('date');
     };
 
@@ -1744,6 +1809,65 @@ export function BookingModal({
                         ) : (
                             <ScrollArea className="h-[300px] pr-4">
                                 <div className="space-y-3">
+                                    {showRebookShortcuts && (
+                                        <>
+                                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                <Users className="h-4 w-4" />
+                                                <span>
+                                                    Book again with your
+                                                    therapist
+                                                </span>
+                                            </div>
+                                            {rebookOptions.map(
+                                                ({ calendar, typeId }) => (
+                                                    <button
+                                                        key={calendar.id}
+                                                        onClick={() =>
+                                                            handleRebookTherapist(
+                                                                typeId,
+                                                                calendar.id
+                                                            )
+                                                        }
+                                                        className="w-full p-3 rounded-xl border-2 border-primary/30 bg-primary/5 text-left transition-all hover:border-primary hover:bg-primary/10">
+                                                        <div className="flex items-center gap-3">
+                                                            <TherapistAvatar
+                                                                name={
+                                                                    calendar.name
+                                                                }
+                                                                calendarId={
+                                                                    calendar.id
+                                                                }
+                                                                imageUrl={therapistImages.get(
+                                                                    calendar.id
+                                                                )}
+                                                                size="sm"
+                                                            />
+                                                            <div className="flex-1 min-w-0">
+                                                                <h4 className="font-semibold text-foreground truncate">
+                                                                    {calendar.name.trim()}
+                                                                </h4>
+                                                                <p className="text-xs text-muted-foreground">
+                                                                    Individual
+                                                                    session
+                                                                </p>
+                                                            </div>
+                                                            <ArrowRight className="h-4 w-4 text-primary shrink-0" />
+                                                        </div>
+                                                    </button>
+                                                )
+                                            )}
+                                            <div className="relative py-2">
+                                                <div className="absolute inset-0 flex items-center">
+                                                    <span className="w-full border-t" />
+                                                </div>
+                                                <div className="relative flex justify-center text-xs uppercase">
+                                                    <span className="bg-background px-2 text-muted-foreground">
+                                                        Or choose a topic
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
                                     {filteredAppointmentTypes.map((type) => (
                                         <button
                                             key={type.id}
@@ -1761,7 +1885,8 @@ export function BookingModal({
                                                     <h4 className="font-semibold text-foreground">
                                                         {formatSessionDisplayName(
                                                             type.name,
-                                                            !!preselectedCalendarName
+                                                            !!preselectedCalendarName &&
+                                                                !ignorePreselectedTherapist
                                                         )}
                                                     </h4>
                                                     <NextAvailableTypeHint
@@ -2081,6 +2206,7 @@ export function BookingModal({
                                         sessionCategory === 'assessment'
                                             ? 'pricing'
                                             : autoAssign ||
+                                              bookedFromRebookShortcut ||
                                               sessionCategory === 'couples' ||
                                               sessionCategory === 'youth' ||
                                               sessionCategory === 'psychiatry'
@@ -2094,6 +2220,7 @@ export function BookingModal({
                                     : sessionCategory === 'psychiatry'
                                     ? 'Back to consultation details'
                                     : autoAssign ||
+                                      bookedFromRebookShortcut ||
                                       sessionCategory === 'couples' ||
                                       sessionCategory === 'youth'
                                     ? 'Back to session types'

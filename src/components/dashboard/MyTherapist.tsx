@@ -7,6 +7,7 @@ import { ExternalLink, CalendarPlus } from "lucide-react";
 import { useAcuityAppointments } from "@/hooks/useAcuity";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTherapistImages } from "@/hooks/useTherapistImages";
+import { useActivePackages } from "@/hooks/useUserPackages";
 import { BookingModal } from "@/components/booking/BookingModal";
 import {
   Carousel,
@@ -102,6 +103,7 @@ export function MyTherapist() {
   const { user } = useAuth();
   const { appointments, loading } = useAcuityAppointments(user?.email);
   const { images: therapistImages } = useTherapistImages();
+  const { totalRemainingSessions } = useActivePackages();
   const [bookingOpen, setBookingOpen] = useState(false);
   const [selectedTherapist, setSelectedTherapist] = useState<TherapistInfo | null>(null);
   const [api, setApi] = useState<CarouselApi>();
@@ -211,6 +213,15 @@ export function MyTherapist() {
             </a>
           </Button>
         </div>
+
+        {/* The profile is on fettle.ie, whose checkout can't see hub credits,
+            so clients with credits were paying again from there. */}
+        {totalRemainingSessions > 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            View Profile opens fettle.ie, where package credits can't be used.
+            To use your credits, tap Book Session.
+          </p>
+        )}
       </div>
     );
   };
