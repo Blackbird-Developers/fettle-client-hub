@@ -22,6 +22,7 @@ import {
   DEFAULT_CONVERSION_WINDOW,
   MAX_RANGE_DAYS,
   SESSION_CATEGORIES,
+  TRACKING_START,
   daysInRange,
   defaultGroupBy,
   dublinDate,
@@ -86,7 +87,7 @@ export interface AnalyticsCustomersResponse {
 export const RANGE_PRESETS = [
   { id: "last7", label: "Last 7 days" },
   { id: "last30", label: "Last 30 days" },
-  { id: "last90", label: "Last 90 days" },
+  { id: "last3Months", label: "Last 3 months" },
   { id: "thisMonth", label: "This month" },
   { id: "lastMonth", label: "Last month" },
   { id: "thisQuarter", label: "This quarter" },
@@ -97,7 +98,7 @@ export const RANGE_PRESETS = [
 
 export type RangePreset = (typeof RANGE_PRESETS)[number]["id"];
 
-export const DEFAULT_PRESET: RangePreset = "last90";
+export const DEFAULT_PRESET: RangePreset = "last3Months";
 
 /** Dublin date for "today". */
 export function todayInDublin(now = Date.now()): string {
@@ -110,15 +111,34 @@ function quarterStart(date: string): string {
   return `${date.slice(0, 4)}-${String(first).padStart(2, "0")}-01`;
 }
 
-/** The dates a preset covers, up to today. Null for "custom". */
+/** The same day `months` earlier; the 31st becomes the month's last day. */
+function monthsBefore(date: string, months: number): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const target = new Date(Date.UTC(year, month - 1 - months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  return `${target.toISOString().slice(0, 8)}${String(Math.min(day, lastDay)).padStart(2, "0")}`;
+}
+
+/** Moves a range's start up to TRACKING_START, the earliest the boards show. */
+export function fromTrackingStart(range: DateRange): DateRange {
+  if (range.from >= TRACKING_START) return range;
+  return { from: TRACKING_START, to: range.to < TRACKING_START ? TRACKING_START : range.to };
+}
+
+/** The dates a preset covers, up to today and from TRACKING_START. Null for "custom". */
 export function presetRange(preset: RangePreset, today: string): DateRange | null {
+  const range = presetDates(preset, today);
+  return range && fromTrackingStart(range);
+}
+
+function presetDates(preset: RangePreset, today: string): DateRange | null {
   switch (preset) {
     case "last7":
       return { from: addDays(today, -6), to: today };
     case "last30":
       return { from: addDays(today, -29), to: today };
-    case "last90":
-      return { from: addDays(today, -89), to: today };
+    case "last3Months":
+      return { from: monthsBefore(today, 3), to: today };
     case "thisMonth":
       return { from: monthStart(today), to: today };
     case "lastMonth": {
@@ -140,7 +160,16 @@ export function presetRange(preset: RangePreset, today: string): DateRange | nul
 // Board settings, kept in the URL so a view can be shared with a link
 // ---------------------------------------------------------------------------
 
+export const BOARDS = [
+  { id: "progression", label: "Progression" },
+  { id: "customers", label: "Customers" },
+] as const;
+
+export type Board = (typeof BOARDS)[number]["id"];
+
 export interface BoardSettings {
+  /** The tab on show. */
+  board: Board;
   preset: RangePreset;
   range: DateRange;
   groupBy: GroupBy;
@@ -163,12 +192,13 @@ export function readBoardSettings(search: URLSearchParams, today: string): Board
   if (preset === "custom") {
     const from = search.get("from");
     const to = search.get("to");
-    const custom = isDate(from) && isDate(to) && from <= to ? { from, to } : null;
+    const custom = isDate(from) && isDate(to) && from <= to ? fromTrackingStart({ from, to }) : null;
     if (custom && daysInRange(custom) <= MAX_RANGE_DAYS) range = custom;
     else preset = DEFAULT_PRESET;
   }
   range ??= presetRange(DEFAULT_PRESET, today)!;
 
+  const board = search.get("board");
   const group = search.get("group");
   const groupByChosen = group === "week" || group === "month";
   const compare = search.get("compare");
@@ -178,6 +208,7 @@ export function readBoardSettings(search: URLSearchParams, today: string): Board
   const calendar = search.get("calendar") ?? "";
 
   return {
+    board: BOARDS.some((b) => b.id === board) ? (board as Board) : "progression",
     preset,
     range,
     groupBy: groupByChosen ? (group as GroupBy) : defaultGroupBy(range),
@@ -200,6 +231,7 @@ function setFilters(search: URLSearchParams, filters: SessionFilters) {
 /** The URL query for the settings, leaving out defaults. */
 export function boardSettingsToSearch(settings: BoardSettings): URLSearchParams {
   const search = new URLSearchParams();
+  if (settings.board !== "progression") search.set("board", settings.board);
   if (settings.preset !== DEFAULT_PRESET) search.set("range", settings.preset);
   if (settings.preset === "custom") {
     search.set("from", settings.range.from);

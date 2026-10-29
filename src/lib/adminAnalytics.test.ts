@@ -23,17 +23,28 @@ describe("presetRange", () => {
     expect(presetRange("last7", TODAY)).toEqual({ from: "2026-10-22", to: TODAY });
     expect(presetRange("lastMonth", TODAY)).toEqual({ from: "2026-09-01", to: "2026-09-30" });
     expect(presetRange("thisQuarter", TODAY)).toEqual({ from: "2026-10-01", to: TODAY });
-    expect(presetRange("thisYear", TODAY)).toEqual({ from: "2026-01-01", to: TODAY });
     expect(presetRange("custom", TODAY)).toBeNull();
+  });
+
+  it("goes back three calendar months", () => {
+    expect(presetRange("last3Months", "2027-01-15")).toEqual({ from: "2026-10-15", to: "2027-01-15" });
+    expect(presetRange("last3Months", "2027-05-31")).toEqual({ from: "2027-02-28", to: "2027-05-31" });
+  });
+
+  it("starts no earlier than the tracking start", () => {
+    expect(presetRange("thisYear", TODAY)).toEqual({ from: "2026-07-29", to: TODAY });
+    expect(presetRange("last12Months", TODAY)).toEqual({ from: "2026-07-29", to: TODAY });
+    expect(presetRange("thisYear", "2027-03-01")).toEqual({ from: "2027-01-01", to: "2027-03-01" });
   });
 });
 
 describe("board settings in the URL", () => {
-  it("defaults to the last 90 days by week", () => {
+  it("defaults to the Progression tab and the last 3 months by week", () => {
     const settings = readBoardSettings(new URLSearchParams(), TODAY);
     expect(settings).toMatchObject({
-      preset: "last90",
-      range: { from: "2026-07-31", to: TODAY },
+      board: "progression",
+      preset: "last3Months",
+      range: { from: "2026-07-29", to: TODAY },
       groupBy: "week",
       groupByChosen: false,
       compareTo: "previous",
@@ -45,12 +56,13 @@ describe("board settings in the URL", () => {
 
   it("round-trips a shared link", () => {
     const search = new URLSearchParams(
-      "range=custom&from=2026-01-01&to=2026-06-30&group=week&compare=year&window=60&basis=booking&type=couples&calendar=42"
+      "board=customers&range=custom&from=2026-08-01&to=2026-09-30&group=week&compare=year&window=60&basis=booking&type=couples&calendar=42"
     );
     const settings = readBoardSettings(search, TODAY);
     expect(settings).toMatchObject({
+      board: "customers",
       preset: "custom",
-      range: { from: "2026-01-01", to: "2026-06-30" },
+      range: { from: "2026-08-01", to: "2026-09-30" },
       groupBy: "week",
       groupByChosen: true,
       compareTo: "year",
@@ -60,21 +72,31 @@ describe("board settings in the URL", () => {
     });
     expect(Object.fromEntries(boardSettingsToSearch(settings))).toEqual(Object.fromEntries(search));
     expect(analyticsQuery(settings)).toBe(
-      "from=2026-01-01&to=2026-06-30&group=week&compare=year&window=60&basis=booking&type=couples&calendar=42"
+      "from=2026-08-01&to=2026-09-30&group=week&compare=year&window=60&basis=booking&type=couples&calendar=42"
     );
   });
 
+  it("moves a custom start before the tracking start up to it", () => {
+    const settings = readBoardSettings(new URLSearchParams("range=custom&from=2026-01-01&to=2026-09-30"), TODAY);
+    expect(settings.range).toEqual({ from: "2026-07-29", to: "2026-09-30" });
+  });
+
   it("groups long ranges by month unless a grouping was picked", () => {
-    expect(readBoardSettings(new URLSearchParams("range=thisYear"), TODAY).groupBy).toBe("month");
+    expect(readBoardSettings(new URLSearchParams("range=custom&from=2026-08-01&to=2026-12-31"), TODAY).groupBy).toBe(
+      "month"
+    );
   });
 
   it("ignores invalid values", () => {
     const settings = readBoardSettings(
-      new URLSearchParams("range=custom&from=2026-06-30&to=2026-01-01&window=45&basis=nope&type=family&calendar="),
+      new URLSearchParams(
+        "board=nope&range=custom&from=2026-06-30&to=2026-01-01&window=45&basis=nope&type=family&calendar="
+      ),
       TODAY
     );
     expect(settings).toMatchObject({
-      preset: "last90",
+      board: "progression",
+      preset: "last3Months",
       windowDays: 30,
       basis: "session",
       filters: { category: null, calendarId: null },

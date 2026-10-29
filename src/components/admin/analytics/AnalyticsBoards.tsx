@@ -8,11 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAdminAnalytics } from "@/hooks/useAdmin";
 import {
+  type Board,
   type BoardSettings,
   type RangePreset,
+  BOARDS,
   CATEGORY_LABELS,
   RANGE_PRESETS,
   describeFilters,
@@ -29,6 +32,7 @@ import {
   type SessionCategory,
   MAX_RANGE_DAYS,
   SESSION_CATEGORIES,
+  TRACKING_START,
   daysInRange,
   defaultGroupBy,
   isDate,
@@ -36,7 +40,7 @@ import {
 import { CustomersBoard } from "./CustomersBoard";
 import { ProgressionBoard } from "./ProgressionBoard";
 
-const SETTINGS_KEYS = ["range", "from", "to", "group", "compare", "window", "basis", "type", "calendar"];
+const SETTINGS_KEYS = ["board", "range", "from", "to", "group", "compare", "window", "basis", "type", "calendar"];
 const ALL = "all";
 
 function formatUpdated(iso: string): string {
@@ -53,7 +57,8 @@ function formatUpdated(iso: string): string {
 function CustomRange({ range, onApply }: { range: DateRange; onApply: (range: DateRange) => void }) {
   const [from, setFrom] = useState(range.from);
   const [to, setTo] = useState(range.to);
-  const valid = isDate(from) && isDate(to) && from <= to && daysInRange({ from, to }) <= MAX_RANGE_DAYS;
+  const valid =
+    isDate(from) && isDate(to) && from >= TRACKING_START && from <= to && daysInRange({ from, to }) <= MAX_RANGE_DAYS;
   const changed = from !== range.from || to !== range.to;
 
   return (
@@ -62,7 +67,15 @@ function CustomRange({ range, onApply }: { range: DateRange; onApply: (range: Da
         <Label htmlFor="analytics-from" className="text-xs">
           From
         </Label>
-        <Input id="analytics-from" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
+        <Input
+          id="analytics-from"
+          type="date"
+          value={from}
+          min={TRACKING_START}
+          max={to}
+          onChange={(e) => setFrom(e.target.value)}
+          className="h-9 w-40"
+        />
       </div>
       <div className="space-y-1">
         <Label htmlFor="analytics-to" className="text-xs">
@@ -73,28 +86,28 @@ function CustomRange({ range, onApply }: { range: DateRange; onApply: (range: Da
       <Button size="sm" className="h-9" disabled={!valid || !changed} onClick={() => onApply({ from, to })}>
         Apply
       </Button>
-      {!valid && <p className="w-full text-xs text-destructive">Pick a start before the end, at most three years apart.</p>}
+      {!valid && (
+        <p className="w-full text-xs text-destructive">
+          Pick a start on or after {formatFullDay(TRACKING_START)} and before the end.
+        </p>
+      )}
     </div>
   );
 }
 
 function BoardsSkeleton() {
   return (
-    <div className="space-y-4" aria-label="Loading analytics">
-      {[1, 2].map((board) => (
-        <Card key={board} className="border-border/50">
-          <CardContent className="space-y-4 p-6">
-            <Skeleton className="h-5 w-48" />
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              {[1, 2, 3, 4].map((i) => (
-                <Skeleton key={i} className="h-24 w-full" />
-              ))}
-            </div>
-            <Skeleton className="h-64 w-full" />
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+    <Card className="border-border/50" aria-label="Loading analytics">
+      <CardContent className="space-y-4 p-6">
+        <Skeleton className="h-5 w-48" />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24 w-full" />
+          ))}
+        </div>
+        <Skeleton className="h-64 w-full" />
+      </CardContent>
+    </Card>
   );
 }
 
@@ -132,6 +145,9 @@ export function AnalyticsBoards() {
             Analytics
           </h3>
           <p className="text-sm text-foreground">{formatRange(settings.range)}</p>
+          {settings.range.from === TRACKING_START && (
+            <p className="text-xs text-muted-foreground">Figures start on {formatFullDay(TRACKING_START)}.</p>
+          )}
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
@@ -244,61 +260,75 @@ export function AnalyticsBoards() {
         <CustomRange key={`${settings.range.from}-${settings.range.to}`} range={settings.range} onApply={(range) => update({ range })} />
       )}
 
-      {isPending ? (
-        <BoardsSkeleton />
-      ) : error && !data ? (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Couldn't load the analytics</AlertTitle>
-          <AlertDescription className="mt-2 space-y-3">
-            <p>{error.message}</p>
-            {error.retryable && (
-              <Button variant="outline" size="sm" onClick={() => refetch()}>
-                <RefreshCw className="mr-2 h-3 w-3" />
-                Try again
-              </Button>
-            )}
-          </AlertDescription>
-        </Alert>
-      ) : data ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-live="polite">
-            <span>Data last updated: {formatUpdated(data.data.lastRefreshedAt)}</span>
-            <span>
-              Compared with {formatRange(data.params.compareRange)}
-            </span>
-            {describeFilters(data.params.filters, calendars) && (
-              <span>Only {describeFilters(data.params.filters, calendars)} sessions</span>
-            )}
-            {isFetching && (
-              <span className="flex items-center gap-1">
-                <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                Updating…
+      <Tabs value={settings.board} onValueChange={(value) => update({ board: value as Board })} className="space-y-4">
+        <TabsList>
+          {BOARDS.map((board) => (
+            <TabsTrigger key={board.id} value={board.id}>
+              {board.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        {isPending ? (
+          <BoardsSkeleton />
+        ) : error && !data ? (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Couldn't load the analytics</AlertTitle>
+            <AlertDescription className="mt-2 space-y-3">
+              <p>{error.message}</p>
+              {error.retryable && (
+                <Button variant="outline" size="sm" onClick={() => refetch()}>
+                  <RefreshCw className="mr-2 h-3 w-3" />
+                  Try again
+                </Button>
+              )}
+            </AlertDescription>
+          </Alert>
+        ) : data ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-live="polite">
+              <span>Data last updated: {formatUpdated(data.data.lastRefreshedAt)}</span>
+              <span>
+                Compared with {formatRange(data.params.compareRange)}
               </span>
+              {describeFilters(data.params.filters, calendars) && (
+                <span>Only {describeFilters(data.params.filters, calendars)} sessions</span>
+              )}
+              {isFetching && (
+                <span className="flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                  Updating…
+                </span>
+              )}
+            </div>
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  Couldn't load the new settings, so these are the previous numbers. {error.message}
+                </AlertDescription>
+              </Alert>
             )}
+            {!data.data.historyComplete && (
+              <Alert>
+                <Info className="h-4 w-4" />
+                <AlertTitle>Still copying older appointments from Acuity</AlertTitle>
+                <AlertDescription>
+                  History is in from {data.data.historyFrom ? formatFullDay(data.data.historyFrom) : "the last 60 days"}{" "}
+                  onwards. Until the rest arrives, some returning clients look new and some session numbers are too low.
+                </AlertDescription>
+              </Alert>
+            )}
+            <TabsContent value="progression" className="mt-0">
+              <ProgressionBoard data={data} onWindowChange={(windowDays) => update({ windowDays })} />
+            </TabsContent>
+            <TabsContent value="customers" className="mt-0">
+              <CustomersBoard data={data} onBasisChange={(basis) => update({ basis })} />
+            </TabsContent>
           </div>
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                Couldn't load the new settings, so these are the previous numbers. {error.message}
-              </AlertDescription>
-            </Alert>
-          )}
-          {!data.data.historyComplete && (
-            <Alert>
-              <Info className="h-4 w-4" />
-              <AlertTitle>Still copying older appointments from Acuity</AlertTitle>
-              <AlertDescription>
-                History is in from {data.data.historyFrom ? formatFullDay(data.data.historyFrom) : "the last 60 days"}{" "}
-                onwards. Until the rest arrives, some returning clients look new and some session numbers are too low.
-              </AlertDescription>
-            </Alert>
-          )}
-          <ProgressionBoard data={data} onWindowChange={(windowDays) => update({ windowDays })} />
-          <CustomersBoard data={data} onBasisChange={(basis) => update({ basis })} />
-        </div>
-      ) : null}
+        ) : null}
+      </Tabs>
     </section>
   );
 }

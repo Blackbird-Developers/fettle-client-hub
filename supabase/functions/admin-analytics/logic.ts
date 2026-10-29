@@ -30,10 +30,17 @@ export const DEFAULT_CONVERSION_WINDOW = 30;
  *  anyone with an earlier session (open question 5 in the brief). */
 export const RETURNING_MIN_GAP_DAYS = 0;
 
-/** Ranges longer than this group by month by default, otherwise by week. */
-export const WEEKLY_MAX_DAYS = 90;
+/** Ranges longer than this group by month by default, otherwise by week.
+ *  93 so that any three calendar months still groups by week. */
+export const WEEKLY_MAX_DAYS = 93;
 /** Longest range the boards accept. */
 export const MAX_RANGE_DAYS = 3 * 366;
+
+/** The boards show figures from this date onwards: three months before Art's
+ *  answer on 29 Oct 2026, growing from then. Older appointments stay in the
+ *  copy, because session numbers and "new customer" need each client's full
+ *  history. */
+export const TRACKING_START = "2026-07-29";
 
 export const TIME_ZONE = "Europe/Dublin";
 
