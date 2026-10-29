@@ -18,10 +18,12 @@ import {
   formatRate,
   isPartialPeriod,
 } from "@/lib/adminAnalytics";
-import type {
-  Basis,
-  CustomerPoint,
-  CustomerSegment,
+import {
+  type Basis,
+  type CustomerPoint,
+  type CustomerSegment,
+  type ReturningMode,
+  LAPSED_MIN_GAP_DAYS,
 } from "../../../../supabase/functions/admin-analytics/logic.ts";
 import { CustomerListDialog, type CustomerListRequest } from "./CustomerListDialog";
 import { NEUTRAL_COLOR, SERIES_COLORS, toneOf } from "./chartStyle";
@@ -108,12 +110,18 @@ function ShareTooltip({
 export function CustomersBoard({
   data,
   onBasisChange,
+  onReturningChange,
 }: {
   data: AnalyticsResponse;
   onBasisChange: (basis: Basis) => void;
+  onReturningChange: (returning: ReturningMode) => void;
 }) {
   const { totals, compare, series } = data.customers;
   const { groupBy, basis, range } = data.params;
+  // Null while admin-analytics predates the switch: it always counts everyone.
+  const returningMode = data.params.returning ?? null;
+  const returning = returningMode ?? "all";
+  const returningLabel = returning === "lapsed" ? `Back after ${LAPSED_MIN_GAP_DAYS}+ days` : "Returning customers";
   const [list, setList] = useState<CustomerListRequest | null>(null);
 
   const partial = series.map((point) => isPartialPeriod(point.period, groupBy));
@@ -134,7 +142,14 @@ export function CustomersBoard({
   const compareLabel = data.params.compareTo === "year" ? "same period last year" : "previous period";
 
   const open = (segment: CustomerSegment, from = range.from, to = range.to) =>
-    setList({ segment, range: { from, to }, basis, filters: data.params.filters, calendars: data.data.calendars });
+    setList({
+      segment,
+      range: { from, to },
+      basis,
+      returning,
+      filters: data.params.filters,
+      calendars: data.data.calendars,
+    });
 
   const tile = (label: string, segment: CustomerSegment, current: number, previous: number, detail?: string) => (
     <MetricTile
@@ -158,24 +173,45 @@ export function CustomersBoard({
           </CardTitle>
           <CardDescription>
             New customers had their first-ever session {basis === "booking" ? "booked" : ""} in the range; returning
-            customers had one before it. Click any number to see the customers.
+            customers had one before it
+            {returning === "lapsed" ? `, at least ${LAPSED_MIN_GAP_DAYS} days before their next` : ", however recently"}
+            . Click any number to see the customers.
           </CardDescription>
         </div>
-        <ToggleGroup
-          type="single"
-          size="sm"
-          variant="outline"
-          value={basis}
-          onValueChange={(value) => value && onBasisChange(value as Basis)}
-          aria-label="Count by"
-        >
-          <ToggleGroupItem value="session" className="text-xs">
-            By session date
-          </ToggleGroupItem>
-          <ToggleGroupItem value="booking" className="text-xs">
-            By booking date
-          </ToggleGroupItem>
-        </ToggleGroup>
+        <div className="flex flex-col items-start gap-2 sm:items-end">
+          <ToggleGroup
+            type="single"
+            size="sm"
+            variant="outline"
+            value={basis}
+            onValueChange={(value) => value && onBasisChange(value as Basis)}
+            aria-label="Count by"
+          >
+            <ToggleGroupItem value="session" className="text-xs">
+              By session date
+            </ToggleGroupItem>
+            <ToggleGroupItem value="booking" className="text-xs">
+              By booking date
+            </ToggleGroupItem>
+          </ToggleGroup>
+          {returningMode !== null && (
+            <ToggleGroup
+              type="single"
+              size="sm"
+              variant="outline"
+              value={returningMode}
+              onValueChange={(value) => value && onReturningChange(value as ReturningMode)}
+              aria-label="Who counts as returning"
+            >
+              <ToggleGroupItem value="all" className="text-xs">
+                All returning
+              </ToggleGroupItem>
+              <ToggleGroupItem value="lapsed" className="text-xs">
+                Back after {LAPSED_MIN_GAP_DAYS}+ days
+              </ToggleGroupItem>
+            </ToggleGroup>
+          )}
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-6">
@@ -188,7 +224,7 @@ export function CustomersBoard({
             compare.newSelf,
             totals.new > 0 ? `${formatRate(totals.newSelf / totals.new)} of new customers` : undefined
           )}
-          {tile("Returning customers", "returning", totals.returning, compare.returning)}
+          {tile(returningLabel, "returning", totals.returning, compare.returning)}
           {tile("Total active customers", "active", totals.active, compare.active)}
         </div>
         {totals.newUnknown > 0 && (

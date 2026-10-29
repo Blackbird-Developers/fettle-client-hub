@@ -40,7 +40,19 @@ import {
 import { CustomersBoard } from "./CustomersBoard";
 import { ProgressionBoard } from "./ProgressionBoard";
 
-const SETTINGS_KEYS = ["board", "range", "from", "to", "group", "compare", "window", "basis", "type", "calendar"];
+const SETTINGS_KEYS = [
+  "board",
+  "range",
+  "from",
+  "to",
+  "group",
+  "compare",
+  "window",
+  "basis",
+  "returning",
+  "type",
+  "calendar",
+];
 const ALL = "all";
 
 function formatUpdated(iso: string): string {
@@ -324,7 +336,11 @@ export function AnalyticsBoards() {
               <ProgressionBoard data={data} onWindowChange={(windowDays) => update({ windowDays })} />
             </TabsContent>
             <TabsContent value="customers" className="mt-0">
-              <CustomersBoard data={data} onBasisChange={(basis) => update({ basis })} />
+              <CustomersBoard
+                data={data}
+                onBasisChange={(basis) => update({ basis })}
+                onReturningChange={(returning) => update({ returning })}
+              />
             </TabsContent>
           </div>
         ) : null}

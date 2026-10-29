@@ -26,7 +26,9 @@ import {
   type CustomerSegment,
   type CalendarOption,
   type DateRange,
+  type ReturningMode,
   type SessionFilters,
+  LAPSED_MIN_GAP_DAYS,
   dublinDate,
 } from "../../../../supabase/functions/admin-analytics/logic.ts";
 
@@ -34,6 +36,7 @@ export interface CustomerListRequest {
   segment: CustomerSegment;
   range: DateRange;
   basis: Basis;
+  returning: ReturningMode;
   filters: SessionFilters;
   /** To name the calendar filter. */
   calendars: CalendarOption[];
@@ -60,7 +63,10 @@ export function CustomerListDialog({
   request: CustomerListRequest | null;
   onClose: () => void;
 }) {
-  const query = request ? customersQuery(request.segment, request.range, request.basis, request.filters) : null;
+  const query = request
+    ? customersQuery(request.segment, request.range, request.basis, request.filters, request.returning)
+    : null;
+  const lapsed = request?.segment === "returning" && request.returning === "lapsed";
   const { data, error, isPending, refetch } = useAnalyticsCustomers(query);
   const customers = data?.customers ?? [];
   const filterLabel = request ? describeFilters(request.filters, request.calendars) : null;
@@ -71,7 +77,10 @@ export function CustomerListDialog({
         {request && (
           <>
             <DialogHeader>
-              <DialogTitle>{SEGMENT_LABELS[request.segment]}</DialogTitle>
+              <DialogTitle>
+                {SEGMENT_LABELS[request.segment]}
+                {lapsed && ` (back after ${LAPSED_MIN_GAP_DAYS}+ days)`}
+              </DialogTitle>
               <DialogDescription>
                 {formatRange(request.range)} · by {request.basis === "session" ? "session date" : "booking date"}
                 {filterLabel && ` · ${filterLabel}`}

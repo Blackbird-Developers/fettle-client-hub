@@ -30,6 +30,17 @@ export const DEFAULT_CONVERSION_WINDOW = 30;
  *  anyone with an earlier session (open question 5 in the brief). */
 export const RETURNING_MIN_GAP_DAYS = 0;
 
+/** Who counts as returning on the Customers board (Art, 29 Oct 2026):
+ *  "all" = anyone back for any later session, however soon (the default);
+ *  "lapsed" = back after at least LAPSED_MIN_GAP_DAYS since their previous one. */
+export const RETURNING_MODES = ["all", "lapsed"] as const;
+export type ReturningMode = (typeof RETURNING_MODES)[number];
+export const LAPSED_MIN_GAP_DAYS = 60;
+
+export function returningMinGapDays(mode: ReturningMode): number {
+  return mode === "lapsed" ? LAPSED_MIN_GAP_DAYS : RETURNING_MIN_GAP_DAYS;
+}
+
 /** Ranges longer than this group by month by default, otherwise by week.
  *  93 so that any three calendar months still groups by week. */
 export const WEEKLY_MAX_DAYS = 93;
@@ -718,6 +729,7 @@ export interface AnalyticsParams {
   compareTo: CompareTo;
   windowDays: number;
   basis: Basis;
+  returning: ReturningMode;
   filters: SessionFilters;
 }
 
@@ -737,6 +749,8 @@ export function parseAnalyticsParams(search: URLSearchParams): AnalyticsParams |
   if (!(CONVERSION_WINDOWS as readonly number[]).includes(windowDays)) return "window must be 14, 30 or 60";
   const basis = search.get("basis") ?? "session";
   if (basis !== "session" && basis !== "booking") return "basis must be session or booking";
+  const returning = search.get("returning") ?? "all";
+  if (!(RETURNING_MODES as readonly string[]).includes(returning)) return "returning must be all or lapsed";
   const category = search.get("type");
   if (category !== null && !CATEGORIES.has(category)) return `type must be one of ${SESSION_CATEGORIES.join(", ")}`;
   const calendar = search.get("calendar");
@@ -749,6 +763,7 @@ export function parseAnalyticsParams(search: URLSearchParams): AnalyticsParams |
     compareTo,
     windowDays,
     basis,
+    returning: returning as ReturningMode,
     filters: { category: category as SessionCategory | null, calendarId },
   };
 }

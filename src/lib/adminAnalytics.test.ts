@@ -5,6 +5,7 @@ import {
   boardSettingsToSearch,
   customerHref,
   customersCsv,
+  customersQuery,
   dashedPoints,
   formatCountChange,
   formatPoints,
@@ -74,6 +75,17 @@ describe("board settings in the URL", () => {
     expect(analyticsQuery(settings)).toBe(
       "from=2026-08-01&to=2026-09-30&group=week&compare=year&window=60&basis=booking&type=couples&calendar=42"
     );
+  });
+
+  it("keeps the lapsed-client view in the link and the queries", () => {
+    const settings = readBoardSettings(new URLSearchParams("returning=lapsed"), TODAY);
+    expect(settings.returning).toBe("lapsed");
+    expect(boardSettingsToSearch(settings).toString()).toBe("returning=lapsed");
+    expect(analyticsQuery(settings)).toContain("returning=lapsed");
+    expect(customersQuery("returning", settings.range, "session", settings.filters, "lapsed")).toContain(
+      "returning=lapsed"
+    );
+    expect(readBoardSettings(new URLSearchParams(), TODAY).returning).toBe("all");
   });
 
   it("moves a custom start before the tracking start up to it", () => {

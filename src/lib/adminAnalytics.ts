@@ -15,6 +15,7 @@ import {
   type Period,
   type ProgressionPoint,
   type ProgressionTotals,
+  type ReturningMode,
   type SessionCategory,
   type SessionFilters,
   type Stage,
@@ -53,6 +54,9 @@ export interface AnalyticsResponse {
     compareTo: CompareTo;
     windowDays: number;
     basis: Basis;
+    /** Missing from admin-analytics deployed before the switch was added;
+     *  the board hides the switch until it's there. */
+    returning?: ReturningMode;
     filters: SessionFilters;
     returningMinGapDays: number;
   };
@@ -178,6 +182,7 @@ export interface BoardSettings {
   compareTo: CompareTo;
   windowDays: number;
   basis: Basis;
+  returning: ReturningMode;
   filters: SessionFilters;
 }
 
@@ -216,6 +221,7 @@ export function readBoardSettings(search: URLSearchParams, today: string): Board
     compareTo: compare === "year" ? "year" : "previous",
     windowDays: (CONVERSION_WINDOWS as readonly number[]).includes(window) ? window : DEFAULT_CONVERSION_WINDOW,
     basis: basis === "booking" ? "booking" : "session",
+    returning: search.get("returning") === "lapsed" ? "lapsed" : "all",
     filters: {
       category: (SESSION_CATEGORIES as readonly string[]).includes(category ?? "") ? (category as SessionCategory) : null,
       calendarId: /^\d+$/.test(calendar) ? Number(calendar) : null,
@@ -241,6 +247,7 @@ export function boardSettingsToSearch(settings: BoardSettings): URLSearchParams 
   if (settings.compareTo !== "previous") search.set("compare", settings.compareTo);
   if (settings.windowDays !== DEFAULT_CONVERSION_WINDOW) search.set("window", String(settings.windowDays));
   if (settings.basis !== "session") search.set("basis", settings.basis);
+  if (settings.returning !== "all") search.set("returning", settings.returning);
   setFilters(search, settings.filters);
   return search;
 }
@@ -255,6 +262,7 @@ export function analyticsQuery(settings: BoardSettings): string {
     window: String(settings.windowDays),
     basis: settings.basis,
   });
+  if (settings.returning !== "all") search.set("returning", settings.returning);
   setFilters(search, settings.filters);
   return search.toString();
 }
@@ -264,9 +272,11 @@ export function customersQuery(
   segment: CustomerSegment,
   range: DateRange,
   basis: Basis,
-  filters: SessionFilters
+  filters: SessionFilters,
+  returning: ReturningMode = "all"
 ): string {
   const search = new URLSearchParams({ action: "customers", segment, from: range.from, to: range.to, basis });
+  if (returning !== "all") search.set("returning", returning);
   setFilters(search, filters);
   return search.toString();
 }

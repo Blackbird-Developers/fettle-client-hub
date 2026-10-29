@@ -4,9 +4,9 @@
 // directly. Admin-only: the caller's JWT and admin role are checked before
 // any data is read.
 //
-//   GET ?from&to&group&compare&window&basis[&type][&calendar]
+//   GET ?from&to&group&compare&window&basis[&returning][&type][&calendar]
 //       → the numbers for both boards (no names or contact details)
-//   GET ?action=customers&segment=…&from&to&basis[&type][&calendar]
+//   GET ?action=customers&segment=…&from&to&basis[&returning][&type][&calendar]
 //       → the customers behind one number on the Customers board
 //
 // PRIVACY: the customers response holds client names, emails and phones for
@@ -22,7 +22,6 @@ import { API_BOOKED_BY } from "../acuity-appointments-mirror/logic.ts";
 import {
   type CustomerSegment,
   CUSTOMER_SEGMENTS,
-  RETURNING_MIN_GAP_DAYS,
   buildHistories,
   comparisonRange,
   customerSeries,
@@ -32,6 +31,7 @@ import {
   parseSessionRows,
   progressionSeries,
   progressionTotals,
+  returningMinGapDays,
   segmentMembers,
 } from "./logic.ts";
 
@@ -147,12 +147,13 @@ serve(async (req) => {
     const { data: raw, error: rowsError } = await db.rpc("admin_analytics_sessions");
     if (rowsError) throw new Error(`Failed to read sessions: ${rowsError.code}`);
     const histories = buildHistories(parseSessionRows(raw), params.filters);
+    const minGapDays = returningMinGapDays(params.returning);
 
     if (search.get("action") === "customers") {
       const segment = search.get("segment") as CustomerSegment;
       if (!CUSTOMER_SEGMENTS.includes(segment)) return json({ error: "Unknown segment" }, 400);
 
-      const members = segmentMembers(histories, params.range, params.basis, segment, now);
+      const members = segmentMembers(histories, params.range, params.basis, segment, now, minGapDays);
       const ids = [...new Set(members.flatMap((m) => [m.sessionId, m.firstSessionId]))];
       const [details, portalEmails] = await Promise.all([fetchAppointments(db, ids), fetchPortalEmails(db)]);
 
@@ -202,16 +203,16 @@ serve(async (req) => {
         pendingBookedByChecks: pendingChecks ?? 0,
         calendars: parseCalendars(rawCalendars),
       },
-      params: { ...params, compareRange: compare, returningMinGapDays: RETURNING_MIN_GAP_DAYS },
+      params: { ...params, compareRange: compare, returningMinGapDays: minGapDays },
       progression: {
         totals: progressionTotals(histories, params.range, now, params.windowDays),
         compare: progressionTotals(histories, compare, now, params.windowDays),
         series: progressionSeries(histories, params.range, params.groupBy, now, params.windowDays),
       },
       customers: {
-        totals: customerTotals(histories, params.range, params.basis),
-        compare: customerTotals(histories, compare, params.basis),
-        series: customerSeries(histories, params.range, params.groupBy, params.basis),
+        totals: customerTotals(histories, params.range, params.basis, minGapDays),
+        compare: customerTotals(histories, compare, params.basis, minGapDays),
+        series: customerSeries(histories, params.range, params.groupBy, params.basis, minGapDays),
       },
     };
 

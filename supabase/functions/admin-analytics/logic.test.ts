@@ -10,6 +10,7 @@ import {
   dublinDate,
   finalOn,
   parseAnalyticsParams,
+  returningMinGapDays,
   parseCalendars,
   parseSessionRows,
   periodsInRange,
@@ -320,11 +321,19 @@ describe("parseAnalyticsParams", () => {
       compareTo: "previous",
       windowDays: 30,
       basis: "session",
+      returning: "all",
       filters: { category: null, calendarId: null },
     });
     expect(
       parseAnalyticsParams(new URLSearchParams("from=2026-10-01&to=2026-10-31&type=couples&calendar=42"))
     ).toMatchObject({ filters: { category: "couples", calendarId: 42 } });
+  });
+
+  it("reads who counts as returning", () => {
+    const params = parseAnalyticsParams(new URLSearchParams("from=2026-10-01&to=2026-10-31&returning=lapsed"));
+    expect(params).toMatchObject({ returning: "lapsed" });
+    expect(returningMinGapDays("lapsed")).toBe(60);
+    expect(returningMinGapDays("all")).toBe(0);
   });
 
   it("rejects bad input", () => {
@@ -333,6 +342,9 @@ describe("parseAnalyticsParams", () => {
     expect(typeof parseAnalyticsParams(new URLSearchParams("from=2026-10-31&to=2026-10-01"))).toBe("string");
     expect(typeof parseAnalyticsParams(new URLSearchParams("from=2026-10-01&to=2026-10-31&window=45"))).toBe("string");
     expect(typeof parseAnalyticsParams(new URLSearchParams("from=2020-01-01&to=2026-10-31"))).toBe("string");
+    expect(typeof parseAnalyticsParams(new URLSearchParams("from=2026-10-01&to=2026-10-31&returning=x"))).toBe(
+      "string"
+    );
   });
 });
 
