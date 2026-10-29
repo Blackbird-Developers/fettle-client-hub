@@ -205,6 +205,9 @@ export function BookingWizard() {
         else if (serviceOptions.length === 1) s.who = serviceOptions[0];
         else if (s.who && !serviceOptions.includes(s.who as TherapyService)) s.who = null;
       }
+    } else if (mode === 'matching' && THERAPY_SERVICES.includes(serviceParam as TherapyService)) {
+      // "Book a session → Couples" etc. already answered who it's for.
+      s.who = serviceParam as TherapyService;
     }
     if (hasPastSessions && !s.history) s.history = 'past';
     if (slotParam && !s.slot) s.slot = slotParam;
@@ -224,7 +227,9 @@ export function BookingWizard() {
   }, [state, booked, entry]);
 
   // ---- Flow ----
-  const serviceFromLink = !!serviceParam && serviceOptions.includes(serviceParam as TherapyService);
+  const serviceFromLink =
+    !!serviceParam &&
+    (mode === 'matching' ? THERAPY_SERVICES : serviceOptions).includes(serviceParam as TherapyService);
   const steps: StepId[] = useMemo(() => {
     if (blocked) return ['intro'];
     const ctx: FlowContext = {

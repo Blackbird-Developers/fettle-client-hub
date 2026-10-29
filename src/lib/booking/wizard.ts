@@ -126,7 +126,8 @@ export interface FlowContext {
 export function flowSteps(ctx: FlowContext): StepId[] {
   const steps: StepId[] = ['intro'];
   if (ctx.mode === 'matching') {
-    steps.push('who', 'topics', 'matches');
+    if (!ctx.serviceFromLink) steps.push('who');
+    steps.push('topics', 'matches');
   } else if (ctx.psychologist) {
     if (ctx.consultationCount > 1) steps.push('consultation');
   } else if (ctx.serviceCount > 1 && !ctx.serviceFromLink) {
