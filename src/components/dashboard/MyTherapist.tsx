@@ -9,6 +9,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useTherapistImages } from "@/hooks/useTherapistImages";
 import { useActivePackages } from "@/hooks/useUserPackages";
 import { BookingModal } from "@/components/booking/BookingModal";
+import { useNavigate } from "react-router-dom";
+import { useTherapistRows } from "@/hooks/useTherapistDirectory";
+import { wizardLinkForCalendar } from "@/lib/booking/links";
 import {
   Carousel,
   CarouselContent,
@@ -106,6 +109,8 @@ export function MyTherapist() {
   const { totalRemainingSessions } = useActivePackages();
   const [bookingOpen, setBookingOpen] = useState(false);
   const [selectedTherapist, setSelectedTherapist] = useState<TherapistInfo | null>(null);
+  const navigate = useNavigate();
+  const { data: therapistRows = [] } = useTherapistRows();
   const [api, setApi] = useState<CarouselApi>();
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -146,6 +151,13 @@ export function MyTherapist() {
   }, [appointments]);
 
   const handleBookSession = (therapist: TherapistInfo) => {
+    // Therapists in the directory book in the /book wizard; anyone else
+    // (psychiatrists, assessment clinicians) keeps the booking modal.
+    const link = wizardLinkForCalendar(therapist.id, therapistRows);
+    if (link) {
+      navigate(link);
+      return;
+    }
     setSelectedTherapist(therapist);
     setBookingOpen(true);
   };

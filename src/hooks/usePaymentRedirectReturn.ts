@@ -3,6 +3,7 @@ import { loadStripe } from '@stripe/stripe-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { SETTLEMENT_RETURN_PARAM } from '@/hooks/useUnpaidSessions';
+import { WIZARD_RETURN_PARAM } from '@/lib/booking/payment';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
 
@@ -40,6 +41,9 @@ export function usePaymentRedirectReturn() {
     // which useSettlementRedirectReturn owns. Never route those into the
     // booking or package confirm endpoints.
     if (urlParams.has(SETTLEMENT_RETURN_PARAM)) return;
+    // The /book wizard finishes its own redirect returns (it restores its
+    // answers and books the chosen slot).
+    if (urlParams.has(WIZARD_RETURN_PARAM)) return;
 
     handleRedirectReturn(clientSecret, paymentIntentIdFromUrl);
   }, []);

@@ -29,6 +29,7 @@ import HelpCenter from "./pages/HelpCenter";
 import HelpArticle from "./pages/HelpArticle";
 import Unsubscribe from "./pages/Unsubscribe";
 import Feedback from "./pages/Feedback";
+import Book from "./pages/Book";
 
 const queryClient = new QueryClient();
 
@@ -51,6 +52,7 @@ const App = () => (
             <Route path="/referrals" element={<ProtectedRoute><CustomerOnly><Referrals /></CustomerOnly></ProtectedRoute>} />
             <Route path="/psychiatry" element={<ProtectedRoute><CustomerOnly><Psychiatry /></CustomerOnly></ProtectedRoute>} />
             <Route path="/feedback" element={<ProtectedRoute><CustomerOnly><Feedback /></CustomerOnly></ProtectedRoute>} />
+            <Route path="/book" element={<ProtectedRoute><CustomerOnly><Book /></CustomerOnly></ProtectedRoute>} />
             <Route path="/get-started" element={<ProtectedRoute><CustomerOnly><GetStarted /></CustomerOnly></ProtectedRoute>} />
             <Route path="/booking-success" element={<ProtectedRoute><CustomerOnly><BookingSuccess /></CustomerOnly></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
