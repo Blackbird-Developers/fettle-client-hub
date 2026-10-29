@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, XAxis, YAxis } from "recharts";
 import { ChevronDown, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,10 +10,13 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   type AnalyticsResponse,
   SEGMENT_LABELS,
+  dashedPoints,
+  describePartialPeriod,
   describePeriod,
   formatCountChange,
   formatPeriod,
   formatRate,
+  isPartialPeriod,
 } from "@/lib/adminAnalytics";
 import type {
   Basis,
@@ -33,11 +36,21 @@ const STACK: { key: "newSelf" | "newStaff" | "newUnknown" | "returning"; segment
 ];
 
 const barConfig: ChartConfig = Object.fromEntries(STACK.map((s) => [s.key, { label: s.label, color: s.color }]));
-const shareConfig: ChartConfig = { share: { label: "Booked by clients", color: SERIES_COLORS[0] } };
+const shareConfig: ChartConfig = {
+  share: { label: "Booked by clients", color: SERIES_COLORS[0] },
+  sharePartial: { label: "Booked by clients (part period)", color: SERIES_COLORS[0] },
+};
+
+/** Opacity of bars for a week or month only partly inside the range. */
+const PARTIAL_OPACITY = 0.4;
 
 interface BarRow extends CustomerPoint {
   label: string;
+  partial: boolean;
+  /** Share in %: `share` on whole periods (solid line), `sharePartial` on
+   *  partial ones plus their neighbours (dashed line). */
   share: number | null;
+  sharePartial: number | null;
 }
 
 function CustomersTooltip({
@@ -62,6 +75,7 @@ function CustomersTooltip({
           <span className="font-medium tabular-nums text-foreground">{row[s.key]}</span>
         </div>
       ))}
+      {row.partial && <p className="text-muted-foreground">{describePartialPeriod(row.period)}</p>}
       <p className="text-muted-foreground">Click a bar to see the customers</p>
     </TooltipBox>
   );
@@ -86,6 +100,7 @@ function ShareTooltip({
       {row.bookings > row.checkedBookings && (
         <p className="text-muted-foreground">{row.bookings - row.checkedBookings} bookings not checked yet</p>
       )}
+      {row.partial && <p className="text-muted-foreground">{describePartialPeriod(row.period)}</p>}
     </TooltipBox>
   );
 }
@@ -101,11 +116,19 @@ export function CustomersBoard({
   const { groupBy, basis, range } = data.params;
   const [list, setList] = useState<CustomerListRequest | null>(null);
 
-  const rows: BarRow[] = series.map((point) => ({
-    ...point,
-    label: formatPeriod(point.period.key, groupBy),
-    share: point.selfBookingShare === null ? null : Math.round(point.selfBookingShare * 1000) / 10,
-  }));
+  const partial = series.map((point) => isPartialPeriod(point.period, groupBy));
+  const dashed = dashedPoints(partial);
+  const rows: BarRow[] = series.map((point, i) => {
+    const share = point.selfBookingShare === null ? null : Math.round(point.selfBookingShare * 1000) / 10;
+    return {
+      ...point,
+      label: formatPeriod(point.period.key, groupBy),
+      partial: partial[i],
+      share: partial[i] ? null : share,
+      sharePartial: dashed[i] ? share : null,
+    };
+  });
+  const hasPartial = partial.some(Boolean);
   const hasCustomers = series.some((p) => p.active > 0);
   const hasBookings = series.some((p) => p.checkedBookings > 0);
   const compareLabel = data.params.compareTo === "year" ? "same period last year" : "previous period";
@@ -216,13 +239,22 @@ export function CustomersBoard({
                       const period = bar.payload?.period;
                       if (period) open(s.segment, period.from, period.to);
                     }}
-                  />
+                  >
+                    {rows.map((row) => (
+                      <Cell key={row.period.key} fillOpacity={row.partial ? PARTIAL_OPACITY : 1} />
+                    ))}
+                  </Bar>
                 ))}
               </BarChart>
             </ChartContainer>
           ) : (
             <p className="rounded-lg bg-muted/40 p-6 text-center text-sm text-muted-foreground">
               No customers in this range.
+            </p>
+          )}
+          {hasPartial && (
+            <p className="text-xs text-muted-foreground">
+              Faded bars and dashed lines cover a {groupBy} only partly inside the range, so they count fewer days.
             </p>
           )}
         </section>
@@ -247,7 +279,7 @@ export function CustomersBoard({
                   tickFormatter={(v) => `${v}%`}
                   tickLine={false}
                   axisLine={false}
-                  width={44}
+                  width={52}
                 />
                 <ChartTooltip content={<ShareTooltip groupBy={groupBy} />} />
                 <Line
@@ -255,6 +287,15 @@ export function CustomersBoard({
                   stroke="var(--color-share)"
                   strokeWidth={2}
                   dot={{ r: 4, strokeWidth: 2, fill: "hsl(var(--card))" }}
+                  isAnimationActive={false}
+                />
+                <Line
+                  dataKey="sharePartial"
+                  stroke="var(--color-sharePartial)"
+                  strokeWidth={2}
+                  strokeDasharray="5 4"
+                  strokeOpacity={0.7}
+                  dot={{ r: 4, strokeWidth: 2, fill: "hsl(var(--card))", strokeOpacity: 0.5 }}
                   isAnimationActive={false}
                 />
               </LineChart>

@@ -5,14 +5,16 @@ import {
   boardSettingsToSearch,
   customerHref,
   customersCsv,
+  dashedPoints,
   formatCountChange,
   formatPoints,
+  isPartialPeriod,
   pointsChange,
   presetRange,
   progressionChartRows,
   readBoardSettings,
 } from "./adminAnalytics";
-import type { ProgressionPoint } from "../../supabase/functions/admin-analytics/logic.ts";
+import { type ProgressionPoint, periodEnd } from "../../supabase/functions/admin-analytics/logic.ts";
 
 const TODAY = "2026-10-28";
 
@@ -92,8 +94,8 @@ describe("formatting", () => {
 });
 
 describe("progressionChartRows", () => {
-  const point = (key: string, rate: number, final: boolean): ProgressionPoint => ({
-    period: { key, from: key, to: key },
+  const point = (key: string, rate: number, final: boolean, from = key): ProgressionPoint => ({
+    period: { key, from, to: periodEnd(key, "month") },
     stages: [1, 2, 3, 4].map((stage) => ({
       stage: stage as 1,
       cohort: 10,
@@ -115,6 +117,34 @@ describe("progressionChartRows", () => {
       [60, 60],
       [null, 30],
     ]);
+  });
+
+  it("draws a partial first period dashed, joined to the first whole one", () => {
+    const rows = progressionChartRows(
+      [point("2026-08-01", 1, true, "2026-08-30"), point("2026-09-01", 0.6, true), point("2026-10-01", 0.5, true)],
+      "month"
+    );
+    expect(rows.map((r) => [r.s1, r.s1Maturing, r.partial])).toEqual([
+      [null, 100, true],
+      [60, 60, false],
+      [50, null, false],
+    ]);
+  });
+});
+
+describe("isPartialPeriod", () => {
+  it("spots a week or month cut off by the range", () => {
+    expect(isPartialPeriod({ key: "2026-07-27", from: "2026-07-31", to: "2026-08-02" }, "week")).toBe(true);
+    expect(isPartialPeriod({ key: "2026-10-26", from: "2026-10-26", to: "2026-10-28" }, "week")).toBe(true);
+    expect(isPartialPeriod({ key: "2026-08-03", from: "2026-08-03", to: "2026-08-09" }, "week")).toBe(false);
+    expect(isPartialPeriod({ key: "2026-09-01", from: "2026-09-01", to: "2026-09-30" }, "month")).toBe(false);
+  });
+});
+
+describe("dashedPoints", () => {
+  it("covers faded points and their neighbours", () => {
+    expect(dashedPoints([true, false, false, false, true])).toEqual([true, true, false, true, true]);
+    expect(dashedPoints([false, false])).toEqual([false, false]);
   });
 });
 

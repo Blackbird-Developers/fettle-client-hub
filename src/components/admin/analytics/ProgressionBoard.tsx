@@ -10,6 +10,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   type AnalyticsResponse,
   type ProgressionChartRow,
+  describePartialPeriod,
   describePeriod,
   formatFullDay,
   formatPoints,
@@ -51,7 +52,7 @@ function ProgressionTooltip({
   hidden: Set<string>;
 }) {
   if (!active || !payload?.length) return null;
-  const { point } = payload[0].payload;
+  const { point, partial } = payload[0].payload;
   return (
     <TooltipBox title={describePeriod(point.period.key, groupBy)}>
       {point.stages
@@ -71,6 +72,7 @@ function ProgressionTooltip({
             </span>
           </div>
         ))}
+      {partial && <p className="text-muted-foreground">{describePartialPeriod(point.period)}</p>}
       {!point.final && (
         <p className="text-muted-foreground">Still maturing: final figure on {formatFullDay(point.finalOn)}</p>
       )}
@@ -90,6 +92,7 @@ export function ProgressionBoard({
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const rows = useMemo(() => progressionChartRows(series, groupBy), [series, groupBy]);
   const hasData = series.some((point) => point.stages.some((s) => s.cohort > 0));
+  const hasPartial = rows.some((row) => row.partial);
 
   const toggle = (key: string) =>
     setHidden((current) => {
@@ -202,7 +205,7 @@ export function ProgressionBoard({
                   tickFormatter={(v) => `${v}%`}
                   tickLine={false}
                   axisLine={false}
-                  width={44}
+                  width={52}
                 />
                 <ChartTooltip content={<ProgressionTooltip groupBy={groupBy} hidden={hidden} />} />
                 {STAGES.filter((stage) => !hidden.has(`s${stage}`)).flatMap((stage) => [
@@ -237,6 +240,7 @@ export function ProgressionBoard({
           <p className="text-xs text-muted-foreground">
             Dashed lines and faded points are still maturing: clients there haven't had {windowDays} days to rebook
             yet.
+            {hasPartial && ` A ${groupBy} only partly inside the range is faded too, as it covers fewer days.`}
           </p>
         </section>
 
@@ -314,7 +318,7 @@ export function ProgressionBoard({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {series.map((point) => (
+                  {rows.map(({ point, partial }) => (
                     <TableRow key={point.period.key}>
                       <TableCell className="whitespace-nowrap">{describePeriod(point.period.key, groupBy)}</TableCell>
                       {point.stages.map((s) => (
@@ -324,6 +328,7 @@ export function ProgressionBoard({
                       ))}
                       <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                         {point.final ? "Final" : `Maturing, final ${formatFullDay(point.finalOn)}`}
+                        {partial && ` · part ${groupBy}`}
                       </TableCell>
                     </TableRow>
                   ))}

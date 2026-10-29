@@ -95,7 +95,7 @@ export function periodStart(date: string, groupBy: GroupBy): string {
   return groupBy === "week" ? weekStart(date) : monthStart(date);
 }
 
-function periodEnd(start: string, groupBy: GroupBy): string {
+export function periodEnd(start: string, groupBy: GroupBy): string {
   return groupBy === "week" ? addDays(start, 6) : monthEnd(start);
 }
 

@@ -12,6 +12,7 @@ import {
   type CustomerTotals,
   type DateRange,
   type GroupBy,
+  type Period,
   type ProgressionPoint,
   type ProgressionTotals,
   type SessionCategory,
@@ -26,6 +27,7 @@ import {
   dublinDate,
   isDate,
   monthStart,
+  periodEnd,
 } from "../../supabase/functions/admin-analytics/logic.ts";
 import { addDays } from "../../supabase/functions/admin-customer-insights/logic.ts";
 
@@ -325,24 +327,47 @@ export function stageLabel(stage: Stage): string {
 
 export type StageKey = "s1" | "s2" | "s3" | "s4";
 
+/** True when only part of the week or month is inside the range, as with the
+ *  first week of a range that starts on a Saturday. */
+export function isPartialPeriod(period: Period, groupBy: GroupBy): boolean {
+  return period.from !== period.key || period.to !== periodEnd(period.key, groupBy);
+}
+
+/** "Only 1 Aug – 2 Aug 2026 is in the range" */
+export function describePartialPeriod(period: Period): string {
+  return `Only ${formatRange(period)} is in the range`;
+}
+
+/** Points a dashed line runs through: the faded ones plus their solid
+ *  neighbours, so it joins on to the solid line. */
+export function dashedPoints(faded: boolean[]): boolean[] {
+  return faded.map((isFaded, i) => isFaded || faded[i - 1] === true || faded[i + 1] === true);
+}
+
 export interface ProgressionChartRow {
   point: ProgressionPoint;
   label: string;
-  /** Rates in % per stage: `s1` on final periods (solid line), `s1Maturing`
-   *  on maturing ones plus the last final point, so the dashed line joins on. */
+  partial: boolean;
+  /** Rates in % per stage: `s1` on final, whole periods (solid line);
+   *  `s1Maturing` on maturing or partial ones plus their neighbours, so the
+   *  dashed line joins on. */
   [series: string]: unknown;
 }
 
 export function progressionChartRows(series: ProgressionPoint[], groupBy: GroupBy): ProgressionChartRow[] {
-  const firstMaturing = series.findIndex((point) => !point.final);
+  const partial = series.map((point) => isPartialPeriod(point.period, groupBy));
+  const faded = series.map((point, i) => !point.final || partial[i]);
+  const dashed = dashedPoints(faded);
   return series.map((point, index) => {
-    const row: ProgressionChartRow = { point, label: formatPeriod(point.period.key, groupBy) };
+    const row: ProgressionChartRow = {
+      point,
+      label: formatPeriod(point.period.key, groupBy),
+      partial: partial[index],
+    };
     for (const stage of point.stages) {
       const value = stage.rate === null ? null : Math.round(stage.rate * 1000) / 10;
-      const solid = point.final;
-      const dashed = !point.final || (firstMaturing > 0 && index === firstMaturing - 1);
-      row[`s${stage.stage}`] = solid ? value : null;
-      row[`s${stage.stage}Maturing`] = dashed ? value : null;
+      row[`s${stage.stage}`] = faded[index] ? null : value;
+      row[`s${stage.stage}Maturing`] = dashed[index] ? value : null;
     }
     return row;
   });
