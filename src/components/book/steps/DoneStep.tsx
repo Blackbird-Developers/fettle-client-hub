@@ -48,6 +48,12 @@ export function DoneStep() {
           {remaining} {remaining === 1 ? 'session' : 'sessions'} left in your bundle
         </p>
       )}
+      {booked.unverified && (
+        <p className="bw-note is-orange" role="status">
+          Your payment was received and your booking is being finalised. If no confirmation email arrives within the hour,
+          please contact hello@fettle.ie. Please don’t book again.
+        </p>
+      )}
       {booked.paymentIssue && (
         <p className="bw-note is-orange" role="alert">
           Your session is booked, but we couldn’t finalise the payment. Our team will be in touch. Please don’t book again.

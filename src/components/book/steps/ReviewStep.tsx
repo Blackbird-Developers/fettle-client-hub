@@ -3,6 +3,7 @@ import { CalendarDays, CheckCircle2, Mail, Tag, User, Users } from 'lucide-react
 import { formatEuro } from '@/lib/sessionBundles';
 import { track } from '@/lib/booking/analytics';
 import { normaliseCouponCode } from '@/lib/booking/coupon';
+import { CREDIT_PLAN_ID } from '@/lib/booking/payment';
 import { formatSlot, formatSlotTime, slotDateKey } from '@/lib/booking/time';
 import { type Consents, type StepId, consentsComplete } from '@/lib/booking/wizard';
 import { useWizard } from '../context';
@@ -49,6 +50,7 @@ export function ReviewStep() {
   const psych = w.service === 'psychologist';
   const plan = w.selectedPlan;
   const isBundle = !!plan?.bundle;
+  const isCredit = s.planId === CREDIT_PLAN_ID;
   const [code, setCode] = useState(s.coupon);
   const [codeSaved, setCodeSaved] = useState(!!s.coupon);
   const [showConsentError, setShowConsentError] = useState(false);
@@ -87,6 +89,8 @@ export function ReviewStep() {
 
   const totalNote = psych
     ? '30-minute clinical consultation'
+    : isCredit
+      ? 'Uses 1 of your bundle sessions'
     : isBundle && plan
       ? `${formatEuro(plan.perSession)} per session · you save ${formatEuro(plan.save)}`
       : 'Pay per session, no commitment';
@@ -147,7 +151,7 @@ export function ReviewStep() {
           <p className="bw-option-desc">{totalNote}</p>
         </div>
 
-        {acceptsCoupon(w.service, isBundle) && (
+        {acceptsCoupon(w.service, isBundle || isCredit) && (
           <div className="bw-field mt-6">
             <label className="bw-label" htmlFor="bw-coupon">
               Have a discount code?

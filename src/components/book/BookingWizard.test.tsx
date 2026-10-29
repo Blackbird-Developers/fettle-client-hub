@@ -24,6 +24,10 @@ vi.mock("@/hooks/useAcuity", () => ({
   useAcuityAppointments: () => ({ appointments: data.appointments, loading: false, error: null, refetch: vi.fn() }),
 }));
 
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
+vi.mock("@/hooks/useUserPackages", () => ({ useActivePackages: () => ({ packages: [], isLoading: false }) }));
+vi.mock("@/hooks/useReferrals", () => ({ useReferrals: () => ({ data: { balance_cents: 0 } }) }));
+
 vi.mock("@/hooks/useTherapistDirectory", () => ({
   useTherapistDirectory: () => ({
     therapists: data.therapists,

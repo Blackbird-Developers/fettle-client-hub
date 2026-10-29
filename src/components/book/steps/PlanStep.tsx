@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Check, Tag } from 'lucide-react';
 import { formatEuro } from '@/lib/sessionBundles';
 import { track } from '@/lib/booking/analytics';
+import { CREDIT_PLAN_ID } from '@/lib/booking/payment';
 import { type BookingPlan, recommendationReason, recommendedPlan } from '@/lib/booking/plans';
 import type { TherapyService } from '@/lib/booking/therapists';
 import { formatLongDate, formatSlotTime, slotDateKey } from '@/lib/booking/time';
@@ -14,9 +15,11 @@ export function PlanStep() {
   const rec = recommendedPlan(service, w.state.history, w.plans);
   const selectedId = w.state.planId;
 
-  // The recommended plan starts selected.
+  const credits = w.credits && w.credits.remaining > 0 ? w.credits : null;
+
+  // Unused bundle credits start selected (§10.2), otherwise the recommended plan.
   useEffect(() => {
-    if (!selectedId) w.update((s) => ({ ...s, planId: rec.id }));
+    if (!selectedId) w.update((s) => ({ ...s, planId: credits ? CREDIT_PLAN_ID : rec.id }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -51,6 +54,33 @@ export function PlanStep() {
           </span>
         </div>
         <div className="grid gap-4" role="radiogroup" aria-label="Plans">
+          {credits && (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={selectedId === CREDIT_PLAN_ID}
+              aria-pressed={selectedId === CREDIT_PLAN_ID}
+              className="bw-plan"
+              onClick={() => {
+                w.update((s) => ({ ...s, planId: CREDIT_PLAN_ID }));
+                track('booking_plan_selected', w.therapistName || null, { package_id: CREDIT_PLAN_ID });
+              }}
+            >
+              <span className={`bw-tick${selectedId === CREDIT_PLAN_ID ? ' is-on' : ''}`} aria-hidden="true" style={{ marginTop: 2 }}>
+                <Check className="h-4 w-4" strokeWidth={3} />
+              </span>
+              <span className="bw-plan-main">
+                <span className="bw-option-title">
+                  Use 1 of your {credits.remaining} remaining session{credits.remaining === 1 ? '' : 's'}
+                </span>
+                <span className="bw-option-desc">From the bundle on your account</span>
+              </span>
+              <span className="bw-plan-price">
+                <span className="bw-plan-per">{formatEuro(0)}</span>
+                <span className="bw-option-desc">Nothing to pay</span>
+              </span>
+            </button>
+          )}
           {visible.map((plan) => (
             <PlanRow
               key={plan.id}
@@ -69,7 +99,7 @@ export function PlanStep() {
             </button>
           </p>
         )}
-        <p className="bw-note is-orange">{recommendationReason(service, rec, w.therapistFirst)}</p>
+        {!credits && <p className="bw-note is-orange">{recommendationReason(service, rec, w.therapistFirst)}</p>}
       </div>
       <ActionBar
         label="Continue →"

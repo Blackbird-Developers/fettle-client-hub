@@ -46,6 +46,8 @@ export interface Consents {
 
 export interface WizardState {
   started: boolean;
+  /** The client left a blocked/unavailable therapist for matching. */
+  switchedToMatching: boolean;
   /** therapists_duplicate id of the chosen therapist. */
   therapistId: string | null;
   who: WizardService | null;
@@ -60,6 +62,10 @@ export interface WizardState {
   planId: string | null;
   showMorePlans: boolean;
   coupon: string;
+  /** user_packages row used for "Use 1 of your N remaining sessions" (planId "credit"). */
+  creditPackageId: string | null;
+  /** Apply the client's referral credit to a single session (Q18). */
+  useReferral: boolean;
   consents: Consents;
   /** Set by Edit on the review step: Continue goes straight back to review. */
   returnToReview: boolean;
@@ -79,6 +85,7 @@ export const EMPTY_DETAILS: BookingDetails = {
 export function initialState(overrides: Partial<WizardState> = {}): WizardState {
   return {
     started: false,
+    switchedToMatching: false,
     therapistId: null,
     who: null,
     consultation: null,
@@ -91,6 +98,8 @@ export function initialState(overrides: Partial<WizardState> = {}): WizardState 
     planId: null,
     showMorePlans: false,
     coupon: '',
+    creditPackageId: null,
+    useReferral: false,
     consents: { first: false, contact: false, terms: false },
     returnToReview: false,
     matchCount: 3,

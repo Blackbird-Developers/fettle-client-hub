@@ -1,9 +1,11 @@
 import { type RefObject, createContext, useContext } from 'react';
 import type { AcuityAppointmentType } from '@/hooks/useAcuity';
 import type { SlotSource } from '@/lib/booking/availability';
+import type { PaymentKind } from '@/lib/booking/payment';
 import type { BookingPlan } from '@/lib/booking/plans';
 import type { BlockedReason, ConsultationKey, TherapistRow, TherapyService } from '@/lib/booking/therapists';
 import type { StepId, WizardService, WizardState } from '@/lib/booking/wizard';
+import type { BookingRequest } from './checkout';
 import type { WizardMessage } from './parts';
 
 /** What the Done step shows once the booking exists. */
@@ -18,6 +20,24 @@ export interface BookedInfo {
   bundleRemaining?: number;
   /** Payment taken but not finalised (§3.7). */
   paymentIssue?: boolean;
+  /** Paid, but the booking couldn't be confirmed yet (pending or network failure). */
+  unverified?: boolean;
+}
+
+/** What a payment path reports once the booking is made. */
+export interface BookingResult {
+  appointmentId: number | string | null;
+  remaining?: number;
+  unverified?: boolean;
+  amountCents: number;
+  paymentStatus: string;
+}
+
+/** A redirect payment method came back to finish (§7.4). */
+export interface PaymentResume {
+  kind: PaymentKind;
+  paymentIntentId: string;
+  clientSecret: string;
 }
 
 export interface WizardApi {
@@ -59,6 +79,20 @@ export interface WizardApi {
   hasPastSessions: boolean;
   /** Phone found on the client's latest Acuity appointment. */
   knownPhone: string;
+
+  /** Unused package credits for this service (§10.2), or null. */
+  credits: { packageId: string; remaining: number } | null;
+  /** Refresh credits after a bundle code was linked. */
+  markCreditsChanged: () => void;
+  referralBalanceCents: number;
+  /** Booking fields for the edge functions, or null if something is missing. */
+  bookingRequest: () => BookingRequest | null;
+  /** Records the booking: analytics, cache refresh, then the Done step. */
+  completeBooking: (result: BookingResult) => void;
+  /** The entry link (therapist/service/type params) for return URLs and saved state. */
+  entry: string;
+  resume: PaymentResume | null;
+  clearResume: () => void;
 
   showMessage: (message: WizardMessage | null) => void;
   booked: BookedInfo | null;

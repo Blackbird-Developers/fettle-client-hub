@@ -1,8 +1,16 @@
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAcuityAppointments } from '@/hooks/useAcuity';
+import { useReferrals } from '@/hooks/useReferrals';
 import { useTherapistDirectory } from '@/hooks/useTherapistDirectory';
+import { useActivePackages } from '@/hooks/useUserPackages';
+import { getPackageCategory } from '@/lib/packageCategory';
+import { intakeFieldsFor } from '@/lib/booking/intake';
+import { buildBookingNotes } from '@/lib/booking/notes';
+import { CREDIT_PLAN_ID, WIZARD_RETURN_PARAM, loadPendingPayment } from '@/lib/booking/payment';
+import { formatSlotTime, slotDateKey } from '@/lib/booking/time';
 import { track } from '@/lib/booking/analytics';
 import { CONSULTATION_OPTIONS, SESSION_MINUTES } from '@/lib/booking/content';
 import { type BookingPlan, DEFAULT_SINGLE_PRICE, PSYCHOLOGIST_PRICE, plansFor } from '@/lib/booking/plans';
@@ -32,7 +40,8 @@ import {
   resolveStep,
   saveWizard,
 } from '@/lib/booking/wizard';
-import { type BookedInfo, type WizardApi, WizardContext } from './context';
+import { type BookingRequest, completeSessionPayment, confirmBundlePayment } from './checkout';
+import { type BookedInfo, type BookingResult, type PaymentResume, type WizardApi, WizardContext } from './context';
 import { MessageDialog, ProgressBar, type WizardMessage, WizardAvatar } from './parts';
 import { SummaryCard } from './SummaryCard';
 import { DetailsStep } from './steps/DetailsStep';
@@ -92,8 +101,20 @@ export function BookingWizard() {
   const slotParam = params.get('slot');
   const entry = entryKey(params);
 
-  const [forceMatching, setForceMatching] = useState(false);
   const [state, setState] = useState<WizardState | null>(null);
+  const queryClient = useQueryClient();
+  const { packages: activePackages, isLoading: packagesLoading } = useActivePackages();
+  const { data: referralData } = useReferrals();
+
+  // A redirect payment method (Revolut Pay, PayPal…) came back here (§7.4).
+  const [resume, setResume] = useState<PaymentResume | null>(null);
+  const returnInfo = useRef(
+    params.has(WIZARD_RETURN_PARAM) && params.get('payment_intent') && params.get('payment_intent_client_secret')
+      ? { paymentIntentId: params.get('payment_intent')!, clientSecret: params.get('payment_intent_client_secret')! }
+      : null
+  );
+  const pendingReturn = useRef(returnInfo.current ? loadPendingPayment(returnInfo.current.paymentIntentId) : null);
+  const forceMatching = !!(state ?? pendingReturn.current?.state ?? loadWizard(entry))?.switchedToMatching;
   const [booked, setBookedState] = useState<BookedInfo | null>(null);
   const [message, setMessage] = useState<WizardMessage | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -133,11 +154,32 @@ export function BookingWizard() {
     [therapist, psych, dir.publicTypeIds]
   );
 
-  const ready = !dir.loading && !dir.error && !appointmentsLoading;
+  const ready = !dir.loading && !dir.error && !appointmentsLoading && !packagesLoading;
 
   // ---- Start (or restore) the flow once everything is loaded ----
   useEffect(() => {
     if (!ready || state) return;
+    const back = returnInfo.current;
+    const pending = pendingReturn.current;
+    if (back) {
+      // Drop Stripe's params so a refresh doesn't try to finish twice.
+      setParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          for (const k of ['payment_intent', 'payment_intent_client_secret', 'redirect_status', WIZARD_RETURN_PARAM]) p.delete(k);
+          return p;
+        },
+        { replace: true }
+      );
+    }
+    if (back && pending) {
+      setState(pending.state);
+      setResume({ kind: pending.kind, ...back });
+      return;
+    }
+    if (back) {
+      showLostReturn(back.paymentIntentId);
+    }
     let s = loadWizard(entry) ?? initialState();
     s = {
       ...s,
@@ -249,6 +291,21 @@ export function BookingWizard() {
   const appointmentType = typeId ? dir.typeById.get(String(typeId)) : undefined;
   const minutes = service ? SESSION_MINUTES[service] : 50;
   const livePrice = Number(appointmentType?.price);
+  // Unused bundle credits for this service (§10.2). Unknown bundle products
+  // count for any therapy session, as in BookingModal; never for psychologists.
+  const credits = useMemo(() => {
+    if (!service || service === 'psychologist') return null;
+    const usable = activePackages.filter((pkg) => {
+      const category = getPackageCategory(pkg.package_id);
+      return category ? category === service : true;
+    });
+    const linked = state?.creditPackageId ? activePackages.find((p) => p.id === state.creditPackageId) : undefined;
+    const first = linked ?? usable[0];
+    if (!first) return state?.creditPackageId ? { packageId: state.creditPackageId, remaining: 0 } : null;
+    const remaining = [first, ...usable.filter((p) => p.id !== first.id)].reduce((sum, p) => sum + p.remaining_sessions, 0);
+    return { packageId: first.id, remaining };
+  }, [service, activePackages, state?.creditPackageId]);
+
   const plans = useMemo(
     () =>
       service && service !== 'psychologist'
@@ -271,7 +328,49 @@ export function BookingWizard() {
             features: [],
           }
         : null
-      : (plans.find((p) => p.id === state?.planId) ?? null);
+      : state?.planId === CREDIT_PLAN_ID && credits
+        ? {
+            id: CREDIT_PLAN_ID,
+            service: service as TherapyService,
+            title: 'Bundle session',
+            sessions: 1,
+            total: 0,
+            perSession: 0,
+            save: 0,
+            tagLine:
+              credits.remaining > 0
+                ? `Use 1 of your ${credits.remaining} remaining sessions`
+                : 'Use 1 of your bundle sessions',
+            features: [],
+          }
+        : (plans.find((p) => p.id === state?.planId) ?? null);
+
+  const bookingRequest = (): BookingRequest | null => {
+    if (!state || !therapist || !typeId || !state.slot || !service) return null;
+    const d = state.details;
+    return {
+      appointmentTypeID: Number(typeId),
+      appointmentTypeName: appointmentType?.name ?? selectedPlan?.title ?? 'Session',
+      appointmentTypePrice: appointmentType?.price ?? String(selectedPlan?.total ?? ''),
+      datetime: state.slot,
+      calendarID: calendarId,
+      calendarName: therapist.name.trim(),
+      firstName: d.firstName.trim(),
+      lastName: d.lastName.trim(),
+      email: d.email.trim(),
+      phone: d.phone.trim(),
+      notes: buildBookingNotes({
+        service,
+        topicIds: mode === 'matching' ? state.topics : [],
+        history: state.history,
+        youngPersonName: d.youngPersonName,
+        partnerName: d.partnerName,
+        clientNote: d.note,
+      }),
+      intakeFormFields: intakeFieldsFor(service, d.partnerName),
+      timezone: profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+    };
+  };
 
   // ---- Navigation ----
   const goTo = useCallback((next: StepId) => setStepParam(next, false), [setStepParam]);
@@ -297,12 +396,107 @@ export function BookingWizard() {
     if (i > 0) setStepParam(steps[i - 1], true);
   };
   const startMatching = () => {
-    setForceMatching(true);
-    update((s) => ({
-      ...initialState({ started: true, details: s.details, history: s.history, timeOfDay: s.timeOfDay }),
-    }));
+    update((s) =>
+      initialState({
+        started: true,
+        switchedToMatching: true,
+        details: s.details,
+        history: s.history,
+        timeOfDay: s.timeOfDay,
+      })
+    );
     goTo('who');
   };
+  const completeBooking = (r: BookingResult) => {
+    if (!state?.slot) return;
+    const slot = state.slot;
+    const d = state.details;
+    const amount = r.amountCents / 100;
+    const bookingId = r.appointmentId;
+    const name = therapist?.name ?? null;
+    track('stripe-success-conversion', name, {
+      conversion: amount,
+      booking_id: bookingId,
+      appointment_type_id: typeId,
+      Email: d.email,
+      ID: bookingId,
+      Type: service,
+      AppointmentType: appointmentType?.name,
+      Calendar: name,
+      Price: amount,
+    });
+    track('consultation_reserved', name, {
+      client_name: `${d.firstName} ${d.lastName}`.trim(),
+      client_email: d.email,
+      payment_status: r.paymentStatus,
+      booking_id: bookingId,
+      plan: state.planId,
+      plan_price: selectedPlan?.total,
+      slot_day: slotDateKey(slot),
+      slot_time: formatSlotTime(slot),
+    });
+    track('booking_completed', name, {
+      booking_id: bookingId,
+      package_id: state.planId,
+      package_title: selectedPlan?.title,
+      package_price: selectedPlan?.total,
+      amount,
+      currency: 'EUR',
+      selected_date: slotDateKey(slot),
+      selected_time: formatSlotTime(slot),
+      appointment_type_id: typeId,
+      calendar_id: calendarId,
+      who: service,
+    });
+    for (const key of [['user-packages'], ['unpaid-sessions'], ['referral-overview'], ['book-month'], ['book-first-month']]) {
+      void queryClient.invalidateQueries({ queryKey: key });
+    }
+    const usedBundle = state.planId === CREDIT_PLAN_ID || !!selectedPlan?.bundle;
+    setBooked({
+      appointmentId: bookingId,
+      slot,
+      therapistName: therapist?.name?.trim() ?? '',
+      firstName: d.firstName.trim(),
+      email: d.email.trim(),
+      minutes,
+      bundleRemaining: usedBundle ? r.remaining : undefined,
+      unverified: r.unverified,
+    });
+  };
+
+  // The saved flow was lost during a redirect payment (rare): finish from the intent alone.
+  async function showLostReturn(paymentIntentId: string) {
+    const session = await completeSessionPayment(paymentIntentId);
+    if (session.status === 'booked') {
+      setMessage({
+        kind: 'success',
+        title: 'You’re booked',
+        text: 'Your payment went through and your session is booked. A confirmation is on its way to your email.',
+        buttons: [{ label: 'Go to my sessions', primary: true, onClick: () => navigate('/sessions') }],
+      });
+      return;
+    }
+    if (/not a session booking/i.test(session.failure.reason)) {
+      const bundle = await confirmBundlePayment(paymentIntentId);
+      void queryClient.invalidateQueries({ queryKey: ['user-packages'] });
+      setMessage(
+        bundle.ok
+          ? {
+              kind: 'success',
+              title: 'Your bundle is ready',
+              text: 'Your payment went through. Choose a time and book it with one of your bundle sessions.',
+            }
+          : {
+              kind: 'error',
+              title: 'Payment received, booking not confirmed',
+              text: 'Your payment went through but we couldn’t set up your bundle just now. Our team will contact you. Please don’t book again.',
+            }
+      );
+      return;
+    }
+    setMessage({ kind: 'error', title: 'Booking not completed', text: session.failure.reason });
+  }
+
   const setBooked = (info: BookedInfo) => {
     clearWizard();
     setBookedState(info);
@@ -383,6 +577,14 @@ export function BookingWizard() {
     clientFirstName: state.details.firstName.trim() || profile?.first_name?.trim() || '',
     hasPastSessions,
     knownPhone,
+    credits,
+    markCreditsChanged: () => void queryClient.invalidateQueries({ queryKey: ['user-packages'] }),
+    referralBalanceCents: referralData?.balance_cents ?? 0,
+    bookingRequest,
+    completeBooking,
+    entry,
+    resume,
+    clearResume: () => setResume(null),
     showMessage: setMessage,
     booked,
     setBooked,
