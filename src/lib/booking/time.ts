@@ -131,6 +131,15 @@ export const MIN_NOTICE_MINUTES = 30;
 /** Psychologist consultations start this many days after today. */
 export const PSYCHOLOGIST_LEAD_DAYS = 3;
 
+/** Day rules only: not before today (today + 3 and weekdays only for psychologists). */
+export function isDayAllowed(key: string, options: { psychologist?: boolean; now?: Date } = {}): boolean {
+  const today = dublinDateKey(options.now ?? new Date());
+  if (!options.psychologist) return key >= today;
+  if (key < addDaysToKey(today, PSYCHOLOGIST_LEAD_DAYS)) return false;
+  const wd = weekdayOfKey(key);
+  return wd !== 0 && wd !== 6;
+}
+
 /**
  * §5 cleaning: drops days before today (today + 3 and weekdays only for
  * psychologists), times less than 30 minutes away, and days left empty.
@@ -140,16 +149,9 @@ export function cleanDays(
   options: { psychologist?: boolean; now?: Date } = {}
 ): AvailableDay[] {
   const now = options.now ?? new Date();
-  const today = dublinDateKey(now);
-  const minKey = options.psychologist ? addDaysToKey(today, PSYCHOLOGIST_LEAD_DAYS) : today;
   const cutoff = now.getTime() + MIN_NOTICE_MINUTES * 60_000;
   return days
-    .filter((day) => day.date >= minKey)
-    .filter((day) => {
-      if (!options.psychologist) return true;
-      const wd = weekdayOfKey(day.date);
-      return wd !== 0 && wd !== 6;
-    })
+    .filter((day) => isDayAllowed(day.date, { psychologist: options.psychologist, now }))
     .map((day) => ({
       date: day.date,
       times: day.times.filter((t) => {
