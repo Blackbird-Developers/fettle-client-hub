@@ -12,9 +12,7 @@ import {
   UserPlus,
   CreditCard,
   Target,
-  ArrowRight,
   Package,
-  Repeat,
   AlertCircle,
   RefreshCw,
   WifiOff,
@@ -22,13 +20,13 @@ import {
   ServerCrash,
 } from "lucide-react";
 import {
-  useRetentionFunnel,
   useRevenueMetrics,
   useSessionMetrics,
   useEngagementStats,
 } from "@/hooks/useAdmin";
 import { ApiError, ApiErrorType } from "@/lib/api-errors";
 import { FollowUpsSummaryCard } from "./FollowUpsSummaryCard";
+import { AnalyticsBoards } from "./analytics/AnalyticsBoards";
 
 function StatCard({
   title,
@@ -109,98 +107,6 @@ function StatCard({
   );
 }
 
-function RetentionFunnelCard() {
-  const { funnel, loading } = useRetentionFunnel();
-
-  if (loading) {
-    return (
-      <Card className="border-border/50">
-        <CardHeader className="pb-2">
-          <Skeleton className="h-5 w-32" />
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {[1, 2, 3, 4].map((i) => (
-              <Skeleton key={i} className="h-8 w-full" />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const stages = [
-    { label: "1st Session", count: funnel.firstSession, color: "bg-blue-500" },
-    {
-      label: "2nd Session",
-      count: funnel.secondSession,
-      rate: funnel.firstToSecondRate,
-      color: "bg-indigo-500",
-    },
-    {
-      label: "3rd Session",
-      count: funnel.thirdSession,
-      rate: funnel.secondToThirdRate,
-      color: "bg-purple-500",
-    },
-    {
-      label: "4th+ Session",
-      count: funnel.fourthSession,
-      rate: funnel.thirdToFourthRate,
-      color: "bg-violet-500",
-    },
-  ];
-
-  const maxCount = Math.max(...stages.map((s) => s.count), 1);
-
-  return (
-    <Card className="border-border/50">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
-          <Repeat className="h-4 w-4 text-primary" />
-          Retention Funnel
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {stages.map((stage, index) => (
-            <div key={stage.label} className="space-y-1">
-              <div className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{stage.label}</span>
-                  {index > 0 && stage.rate !== undefined && (
-                    <span className="text-xs text-muted-foreground">
-                      ({stage.rate}% from previous)
-                    </span>
-                  )}
-                </div>
-                <span className="font-semibold">{stage.count}</span>
-              </div>
-              <div className="relative h-6 bg-muted rounded-full overflow-hidden">
-                <div
-                  className={`absolute inset-y-0 left-0 ${stage.color} rounded-full transition-all duration-500`}
-                  style={{ width: `${(stage.count / maxCount) * 100}%` }}
-                />
-                {index < stages.length - 1 && (
-                  <ArrowRight className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50" />
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 pt-3 border-t">
-          <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {funnel.totalClients}
-            </span>{" "}
-            total unique clients
-          </p>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 const ERROR_ICONS: Record<ApiErrorType, typeof AlertCircle> = {
   cors: ShieldAlert,
   network: WifiOff,
@@ -261,6 +167,8 @@ export function AdminDashboard() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <AnalyticsBoards />
+
       {/* Error Display */}
       {sessionsError && (
         <ErrorAlert
@@ -377,7 +285,7 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      {/* Engagement & Retention */}
+      {/* Engagement */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Engagement Stats */}
         <Card className="border-border/50">
@@ -431,9 +339,6 @@ export function AdminDashboard() {
             )}
           </CardContent>
         </Card>
-
-        {/* Retention Funnel */}
-        <RetentionFunnelCard />
       </div>
     </div>
   );
