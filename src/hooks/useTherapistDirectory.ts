@@ -28,6 +28,15 @@ async function fetchAppointmentTypes(): Promise<AcuityAppointmentType[]> {
   return Array.isArray(data) ? data : [];
 }
 
+/** Just the therapist rows (shares the wizard's cache), e.g. to link into /book. */
+export function useTherapistRows() {
+  return useQuery({
+    queryKey: ['therapist-directory'],
+    queryFn: fetchTherapistRows,
+    staleTime: 30 * 60_000,
+  });
+}
+
 /**
  * Everything the booking wizard needs to know about therapists: the full
  * therapists_duplicate rows, and the Acuity appointment types (for prices,
