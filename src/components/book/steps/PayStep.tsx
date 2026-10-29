@@ -240,28 +240,38 @@ export function PayStep() {
       if (checkoutWasCard.current) setBusy('Updating price…');
 
       if (isBundle && plan.bundle) {
-        const res = await createBundleIntent(plan.bundle.id, {
-          firstName: request.firstName,
-          lastName: request.lastName,
-          email: request.email,
-          phone: request.phone,
-        });
+        const res = await createBundleIntent(
+          plan.bundle.id,
+          { firstName: request.firstName, lastName: request.lastName, email: request.email, phone: request.phone },
+          { useReferralCredit: s.useReferral }
+        );
         if (cancelled) return;
         setBusy(null);
         if (!res.ok) {
           setCheckout({ mode: 'error', message: ('message' in res ? res.message : null) ?? 'Please check your connection and try again.' });
           return;
         }
+        if ('creditCoversAll' in res && res.creditCoversAll) {
+          // Unticking re-runs this effect, which sets up the full-price payment.
+          w.update((st) => ({ ...st, useReferral: false }));
+          w.showMessage({
+            kind: 'info',
+            title: 'Referral credit not used',
+            text: 'Your credit covers this whole bundle, and a bundle can’t be bought with credit alone yet. You can use it on a single session instead.',
+          });
+          return;
+        }
+        if (!('intent' in res)) return;
         setCheckout({
           mode: 'card',
           kind: 'bundle',
-          clientSecret: res.clientSecret,
-          paymentIntentId: res.paymentIntentId,
-          amountCents: res.amount,
-          originalCents: res.amount,
+          clientSecret: res.intent.clientSecret,
+          paymentIntentId: res.intent.paymentIntentId,
+          amountCents: res.intent.amount,
+          originalCents: res.intent.originalAmount,
           discount: null,
           rejected: null,
-          referralCents: 0,
+          referralCents: res.intent.referralCreditApplied,
         });
         return;
       }
@@ -391,7 +401,7 @@ export function PayStep() {
           </div>
         </div>
         {checkout.mode === 'card' && <DiscountBanner checkout={checkout} />}
-        {checkout.mode === 'card' && w.service !== 'psychologist' && !isBundle && w.referralBalanceCents > 0 && (
+        {checkout.mode === 'card' && w.service !== 'psychologist' && w.referralBalanceCents > 0 && (
           <label className="bw-check mt-4">
             <input
               type="checkbox"

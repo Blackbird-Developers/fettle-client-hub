@@ -19,6 +19,7 @@ const data = vi.hoisted(() => ({
   packages: [] as { id: string; package_id: string; remaining_sessions: number }[],
   slotFree: true,
   confirmStatus: "succeeded",
+  referralCents: 0,
 }));
 
 const checkout = vi.hoisted(() => ({
@@ -45,7 +46,7 @@ vi.mock("@/hooks/useAcuity", () => ({
   }),
 }));
 vi.mock("@/hooks/useUserPackages", () => ({ useActivePackages: () => ({ packages: data.packages, isLoading: false }) }));
-vi.mock("@/hooks/useReferrals", () => ({ useReferrals: () => ({ data: { balance_cents: 0 } }) }));
+vi.mock("@/hooks/useReferrals", () => ({ useReferrals: () => ({ data: { balance_cents: data.referralCents } }) }));
 vi.mock("@/hooks/useTherapistDirectory", () => ({
   useTherapistDirectory: () => ({
     therapists: [elaine],
@@ -101,6 +102,12 @@ const elaine: TherapistRow = {
   appointmentidindividual: "111",
 };
 
+const bundleIntent = (amount: number, referral = 0) => ({
+  ok: true,
+  creditCoversAll: false,
+  intent: { clientSecret: "pi_b_secret", paymentIntentId: "pi_b", amount: amount - referral, originalAmount: amount, referralCreditApplied: referral },
+});
+
 async function walkToPay(user: ReturnType<typeof userEvent.setup>, choosePlan: RegExp) {
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -125,6 +132,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   data.packages = [];
   data.slotFree = true;
+  data.referralCents = 0;
   data.confirmStatus = "succeeded";
   const day = addDaysToKey(dublinDateKey(new Date()), 2);
   data.days = [{ date: day, times: [`${day}T18:00:00+0000`] }];
@@ -211,7 +219,7 @@ describe("Pay step", () => {
 
   it("buys a bundle and books the chosen time with its first credit", async () => {
     const user = userEvent.setup();
-    checkout.createBundleIntent.mockResolvedValue({ ok: true, clientSecret: "pi_b_secret", paymentIntentId: "pi_b", amount: 52800 });
+    checkout.createBundleIntent.mockResolvedValue(bundleIntent(52800));
     checkout.confirmBundlePayment.mockResolvedValue({ ok: true, packageId: "pkg-new", remaining: 6 });
     checkout.bookWithPackageCredit.mockResolvedValue({ status: "booked", appointmentId: 888, remaining: 5 });
     await walkToPay(user, /6-session bundle/);
@@ -221,6 +229,35 @@ describe("Pay step", () => {
     expect(checkout.confirmBundlePayment).toHaveBeenCalledWith("pi_b");
     expect(checkout.bookWithPackageCredit.mock.calls[0][0]).toBe("pkg-new");
     expect(await screen.findByText("5 sessions left in your bundle")).toBeInTheDocument();
+  });
+
+  it("takes referral credit off a new bundle", async () => {
+    const user = userEvent.setup();
+    data.referralCents = 2000;
+    checkout.createBundleIntent.mockImplementation(async (_id: number, _c: unknown, o: { useReferralCredit?: boolean }) =>
+      bundleIntent(52800, o.useReferralCredit ? 2000 : 0)
+    );
+    await walkToPay(user, /6-session bundle/);
+
+    expect(checkout.createBundleIntent.mock.calls[0][2]).toEqual({ useReferralCredit: false });
+    await user.click(await screen.findByRole("checkbox", { name: "Use my €20.00 referral credit" }));
+    expect(await screen.findByText("Referral credit applied: you save €20.00.")).toBeInTheDocument();
+    expect(checkout.createBundleIntent.mock.calls.at(-1)[2]).toEqual({ useReferralCredit: true });
+    expect(await screen.findByRole("button", { name: /Pay €508\.00/ })).toBeInTheDocument();
+  });
+
+  it("charges the full bundle price when the credit would cover all of it", async () => {
+    const user = userEvent.setup();
+    data.referralCents = 60000;
+    checkout.createBundleIntent.mockImplementation(async (_id: number, _c: unknown, o: { useReferralCredit?: boolean }) =>
+      o.useReferralCredit ? { ok: true, creditCoversAll: true } : bundleIntent(52800)
+    );
+    await walkToPay(user, /6-session bundle/);
+    await user.click(await screen.findByRole("checkbox", { name: "Use my €600.00 referral credit" }));
+
+    expect(await screen.findByText("Referral credit not used")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Pay €528\.00/ })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Use my €600.00 referral credit" })).not.toBeChecked();
   });
 
   it("finishes the booking after a redirect payment method returns", async () => {
@@ -256,7 +293,7 @@ describe("Pay step", () => {
 
   it("keeps a new bundle when its first booking loses the slot", async () => {
     const user = userEvent.setup();
-    checkout.createBundleIntent.mockResolvedValue({ ok: true, clientSecret: "pi_b_secret", paymentIntentId: "pi_b", amount: 27150 });
+    checkout.createBundleIntent.mockResolvedValue(bundleIntent(27150));
     checkout.confirmBundlePayment.mockResolvedValue({ ok: true, packageId: "pkg-new", remaining: 3 });
     checkout.bookWithPackageCredit.mockResolvedValue({
       status: "failed",

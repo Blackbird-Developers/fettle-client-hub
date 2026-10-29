@@ -120,18 +120,46 @@ export async function bookWithPackageCredit(packageId: string, req: BookingReque
   };
 }
 
-/** New bundle: the PaymentIntent for the package (§10.4). */
+export interface BundleIntent {
+  clientSecret: string;
+  paymentIntentId: string;
+  amount: number;
+  originalAmount: number;
+  referralCreditApplied: number;
+}
+
+/**
+ * New bundle: the PaymentIntent for the package (§10.4). Referral credit is
+ * taken off by the function and redeemed by confirm-package-payment. A bundle
+ * has no no-charge purchase path, so `creditCoversAll` means "set it up again
+ * without the credit".
+ */
 export async function createBundleIntent(
   bundleId: number,
-  contact: { firstName: string; lastName: string; email: string; phone: string }
-): Promise<{ ok: true; clientSecret: string; paymentIntentId: string; amount: number } | { ok: false; message: string | null }> {
+  contact: { firstName: string; lastName: string; email: string; phone: string },
+  options: { useReferralCredit?: boolean } = {}
+): Promise<
+  { ok: true; creditCoversAll: true } | { ok: true; creditCoversAll: false; intent: BundleIntent } | { ok: false; message: string | null }
+> {
   const { data, error } = await supabase.functions.invoke('create-package-payment-intent', {
-    body: { packageId: bundleId, ...contact, phone: contact.phone || undefined },
+    body: { packageId: bundleId, ...contact, phone: contact.phone || undefined, useReferralCredit: !!options.useReferralCredit },
   });
+  if (!error && !hasError(data) && data?.fullyCovered) return { ok: true, creditCoversAll: true };
   if (error || hasError(data) || !data?.clientSecret) {
     return { ok: false, message: await functionErrorMessage(error, data) };
   }
-  return { ok: true, clientSecret: data.clientSecret, paymentIntentId: data.paymentIntentId, amount: data.amount };
+  const amount = Number(data.amount);
+  return {
+    ok: true,
+    creditCoversAll: false,
+    intent: {
+      clientSecret: data.clientSecret,
+      paymentIntentId: data.paymentIntentId,
+      amount,
+      originalAmount: Number(data.originalAmount ?? amount),
+      referralCreditApplied: Number(data.referralCreditApplied ?? 0),
+    },
+  };
 }
 
 /** After Stripe confirms a bundle: create the package; returns its user_packages id. */
