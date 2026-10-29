@@ -108,14 +108,27 @@ export async function findFirstOpenMonth(
   return null;
 }
 
-/** Earliest open time for a therapist (used to rank matches), or null. */
+/** Days probed per month for a first time before moving on, when ranking matches. */
+const EARLIEST_DAYS_PROBED = 3;
+
+/**
+ * Earliest open time for a therapist (used to rank matches), or null. Cheaper
+ * than findFirstOpenMonth: it only loads times for the first few open days.
+ */
 export async function findEarliestSlot(
   source: SlotSource,
   now: Date = new Date()
 ): Promise<{ date: string; time: string } | null> {
-  const first = await findFirstOpenMonth(source, now);
-  const day = first?.days[0];
-  return day ? { date: day.date, time: day.times[0] } : null;
+  const rules = { psychologist: source.psychologist, now };
+  const start = dublinDateKey(now).slice(0, 7);
+  for (let i = 0; i < MONTHS_AHEAD; i++) {
+    const dates = (await fetchMonthDates(source, addMonthsToKey(start, i))).filter((d) => isDayAllowed(d, rules));
+    for (const date of dates.slice(0, EARLIEST_DAYS_PROBED)) {
+      const [day] = cleanDays([{ date, times: await fetchDayTimes(source, date) }], rules);
+      if (day) return { date: day.date, time: day.times[0] };
+    }
+  }
+  return null;
 }
 
 /**
