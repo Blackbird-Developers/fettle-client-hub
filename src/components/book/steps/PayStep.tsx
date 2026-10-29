@@ -339,11 +339,13 @@ export function PayStep() {
       const stripe = await getStripe();
       const result = stripe ? await stripe.retrievePaymentIntent(resume.clientSecret) : null;
       const status = result?.paymentIntent?.status;
-      w.clearResume();
+      // Clear the resume flag only once finished, so no new payment is set up meanwhile.
       if (status === 'succeeded' || status === 'requires_capture' || status === 'processing') {
         await finishPaid(resume.kind, resume.paymentIntentId, result?.paymentIntent?.amount ?? 0, status);
+        w.clearResume();
         return;
       }
+      w.clearResume();
       setBusy(null);
       clearPendingPayment();
       fail('unexpected_payment_status', 'Payment not completed', 'Your payment wasn’t completed. Please try again.', status ?? 'unknown');

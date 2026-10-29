@@ -8,8 +8,11 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TherapistRow } from "@/lib/booking/therapists";
 import { addDaysToKey, dublinDateKey } from "@/lib/booking/time";
-import { clearWizard } from "@/lib/booking/wizard";
+import { savePendingPayment } from "@/lib/booking/payment";
+import { clearWizard, initialState } from "@/lib/booking/wizard";
 import { BookingWizard } from "./BookingWizard";
+
+vi.hoisted(() => vi.stubEnv("VITE_STRIPE_PUBLISHABLE_KEY", "pk_test_wizard"));
 
 const data = vi.hoisted(() => ({
   days: [] as { date: string; times: string[] }[],
@@ -75,7 +78,11 @@ vi.mock("@/lib/booking/availability", async (importOriginal) => ({
 vi.mock("./checkout", () => checkout);
 
 const confirmPayment = vi.fn(async () => ({ paymentIntent: { status: data.confirmStatus } }));
-vi.mock("@stripe/stripe-js", () => ({ loadStripe: vi.fn(async () => null) }));
+vi.mock("@stripe/stripe-js", () => ({
+  loadStripe: vi.fn(async () => ({
+    retrievePaymentIntent: async () => ({ paymentIntent: { status: data.confirmStatus, amount: 9500 } }),
+  })),
+}));
 vi.mock("@stripe/react-stripe-js", () => ({
   Elements: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   PaymentElement: ({ onReady }: { onReady?: () => void }) => {
@@ -214,6 +221,37 @@ describe("Pay step", () => {
     expect(checkout.confirmBundlePayment).toHaveBeenCalledWith("pi_b");
     expect(checkout.bookWithPackageCredit.mock.calls[0][0]).toBe("pkg-new");
     expect(await screen.findByText("5 sessions left in your bundle")).toBeInTheDocument();
+  });
+
+  it("finishes the booking after a redirect payment method returns", async () => {
+    const slot = data.days[0].times[0];
+    savePendingPayment({
+      kind: "session",
+      paymentIntentId: "pi_r",
+      entry: "therapist=7",
+      state: initialState({
+        started: true,
+        therapistId: "7",
+        who: "individual",
+        slot,
+        history: "past",
+        planId: "single-individual",
+        details: { firstName: "Sarah", lastName: "Byrne", email: "sarah@example.com", phone: "087 765 4321", partnerName: "", youngPersonName: "", note: "" },
+        consents: { first: true, contact: true, terms: true },
+      }),
+    });
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter
+          initialEntries={["/book?therapist=7&step=pay&wizard_return=1&payment_intent=pi_r&payment_intent_client_secret=pi_r_secret&redirect_status=succeeded"]}
+        >
+          <BookingWizard />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    expect(await screen.findByRole("heading", { name: "You’re booked, Sarah!" })).toBeInTheDocument();
+    expect(checkout.completeSessionPayment).toHaveBeenCalledWith("pi_r");
+    expect(checkout.createSessionIntent).not.toHaveBeenCalled();
   });
 
   it("keeps a new bundle when its first booking loses the slot", async () => {
