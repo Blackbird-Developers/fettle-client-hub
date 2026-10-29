@@ -8,7 +8,8 @@
 //   4. state    — mark the data as refreshed
 //   5. range    — per history range (until the full history is copied)
 //   6. details  — look up who made each new booking, a batch at a time
-//   7. state    — save this run's counts
+//   7. sources  — match main-account bookings to website / hub payments
+//   8. state    — save this run's counts
 //
 // Run by .github/workflows/admin-snapshots.yml with FUNCTION_URL and
 // CRON_SECRET set. PRIVACY: responses carry only counts, dates and
@@ -78,6 +79,8 @@ const summary = {
   detailsChecked: 0,
   detailsFailed: 0,
   detailsRemaining: null,
+  sourcesChecked: 0,
+  sourcesRemaining: null,
   incompleteDates: 0,
   acuityRequests: 0,
 };
@@ -148,7 +151,25 @@ try {
     if (part.remaining === 0 || part.checked + part.removed === 0) break;
   }
 
-  // 7. Save the counts.
+  // 7. Where main-account bookings came from. Skipped by a copy of the
+  // function deployed before this step (its plan doesn't offer it). A Stripe
+  // problem is recorded but doesn't fail the run: the copy itself is fine.
+  if (plan.sourcesPerStep) {
+    try {
+      for (let i = 0; i < plan.maxSourceSteps; i++) {
+        const part = await callStep(`sources batch ${i + 1}`, { step: "sources", limit: plan.sourcesPerStep });
+        summary.sourcesChecked += part.checked;
+        summary.sourcesRemaining = part.remaining;
+        console.log(`  ${part.checked} matched, ${part.paymentsRead ?? 0} payments read, more to do: ${part.remaining > 0}`);
+        if (part.remaining === 0 || part.checked === 0) break;
+      }
+    } catch (error) {
+      summary.sourcesError = String(error.message).slice(0, 200);
+      console.log(`  sources stopped: ${summary.sourcesError}`);
+    }
+  }
+
+  // 8. Save the counts.
   summary.durationMs = Date.now() - started;
   await callStep("save summary", { step: "state", summary });
   console.log(`Done in ${seconds(summary.durationMs)}: ${JSON.stringify(summary)}`);

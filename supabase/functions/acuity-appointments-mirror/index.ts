@@ -16,6 +16,8 @@
 //                                     Acuity no longer returns (deleted there)
 //   { step: "details", limit }      → looks up scheduledBy for up to `limit`
 //                                     sessions still waiting for it
+//   { step: "sources", limit }      → matches up to `limit` main-account
+//                                     bookings to website / hub Stripe payments
 //   { step: "state", refreshed?, summary?, error? }
 //                                   → records the run in acuity_sync_state
 //
@@ -24,27 +26,37 @@
 //
 // DEPLOY: imports ../admin-customer-insights/logic.ts, so deploy with the
 // Supabase CLI (`supabase functions deploy acuity-appointments-mirror`).
+// Reads Stripe with RESTRICTED_API_KEY (as unpaid-sessions does).
 // config.toml turns off the gateway JWT check so the workflow can call it;
 // the cron secret is checked here instead.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   fetchAppointmentsInWindows,
   mapWithConcurrency,
   toDateString,
 } from "../admin-customer-insights/logic.ts";
+import { TRACKING_START } from "../admin-analytics/logic.ts";
 import {
   type AcuityMirrorAppointment,
+  type BookingPayment,
   type MirrorRow,
+  type StripePaymentIntent,
   HISTORY_START_DATE,
+  PAYMENT_AFTER_BOOKING_MS,
+  PAYMENT_BEFORE_BOOKING_MS,
   RANGE_DAYS,
   backfillRanges,
+  bookingSourceFromPayments,
   dateRanges,
   idsToPrune,
   isBookedByClient,
   nextBackfilledFrom,
   refreshWindow,
+  sourceFromScheduledBy,
+  toBookingPayment,
   toMirrorRow,
 } from "./logic.ts";
 
@@ -65,6 +77,16 @@ const ACUITY_CONCURRENCY = 4;
 const MAX_DETAILS_PER_STEP = 200;
 /** Most "details" steps per run, so a run leaves Acuity room for the rest of the admin area. */
 const MAX_DETAIL_STEPS_PER_RUN = 25;
+/** Main-account bookings matched to Stripe per "sources" step. Taken in
+ *  booking order, so one step's payments span a few days at most. */
+const MAX_SOURCES_PER_STEP = 100;
+const MAX_SOURCE_STEPS_PER_RUN = 20;
+/** Longest stretch of bookings matched in one "sources" step. */
+const SOURCE_SPAN_MS = 3 * 24 * 60 * 60 * 1000;
+/** Most Stripe payments read per "sources" step. */
+const MAX_PAYMENTS_PER_STEP = 3000;
+/** Bookings this recent wait a run, so the hub has stamped its payment. */
+const SOURCE_SETTLE_MS = 60 * 60 * 1000;
 const UPSERT_BATCH = 500;
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -118,6 +140,10 @@ serve(async (req) => {
         backfillRanges: state?.backfill_complete ? [] : backfillRanges(state?.backfilled_from ?? null, today),
         detailsPerStep: MAX_DETAILS_PER_STEP,
         maxDetailSteps: MAX_DETAIL_STEPS_PER_RUN,
+        // The workflow runs "sources" only when these are here, so it keeps
+        // working against a copy of this function deployed before the step.
+        sourcesPerStep: MAX_SOURCES_PER_STEP,
+        maxSourceSteps: MAX_SOURCE_STEPS_PER_RUN,
       });
     }
 
@@ -158,6 +184,90 @@ serve(async (req) => {
         if (error) throw new Error(`Failed to remove appointments: ${error.code}`);
       }
       return json({ checked: stored.length, removed: ids.length, durationMs: Date.now() - startedAt });
+    }
+
+    if (step === "sources") {
+      const limit = Math.min(Math.max(Number(body.limit) || 0, 1), MAX_SOURCES_PER_STEP);
+      const stripeKey = Deno.env.get("RESTRICTED_API_KEY");
+      if (!stripeKey) return json({ error: "Stripe key not configured" }, 500);
+
+      const { data: queue, error: queueError } = await db.rpc("acuity_sources_queue", {
+        p_since: `${TRACKING_START}T00:00:00Z`,
+        p_settled_before: new Date(startedAt - SOURCE_SETTLE_MS).toISOString(),
+        p_limit: limit,
+      });
+      if (queueError) throw new Error(`Failed to read the sources queue: ${queueError.code}`);
+      const queued = ((queue ?? []) as { id: number; email: string | null; datetime_created: string | null }[]).map(
+        (row) => ({
+          id: Number(row.id),
+          email: row.email,
+          createdAt: row.datetime_created ? Date.parse(row.datetime_created) : null,
+        })
+      );
+      // Only bookings made within SOURCE_SPAN_MS of the first, so the payments
+      // read stay few; the rest wait for the next step.
+      const firstCreated = queued.find((b) => b.createdAt !== null)?.createdAt ?? null;
+      const bookings = queued.filter(
+        (b) => b.createdAt === null || firstCreated === null || b.createdAt <= firstCreated + SOURCE_SPAN_MS
+      );
+      if (bookings.length === 0) return json({ checked: 0, remaining: 0, durationMs: Date.now() - startedAt });
+
+      // Every website or hub payment made around these bookings.
+      const times = bookings.map((b) => b.createdAt).filter((t): t is number => t !== null);
+      const payments: BookingPayment[] = [];
+      let paymentsRead = 0;
+      if (times.length > 0) {
+        const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
+        const created = {
+          gte: Math.floor((Math.min(...times) - PAYMENT_BEFORE_BOOKING_MS) / 1000),
+          lte: Math.ceil((Math.max(...times) + PAYMENT_AFTER_BOOKING_MS) / 1000),
+        };
+        for await (const pi of stripe.paymentIntents.list({ created, limit: 100 })) {
+          paymentsRead++;
+          const payment = toBookingPayment(pi as unknown as StripePaymentIntent);
+          if (payment) payments.push(payment);
+          if (paymentsRead >= MAX_PAYMENTS_PER_STEP) {
+            // Too many to be sure of a match; try again next run rather than guess.
+            throw new Error(`More than ${MAX_PAYMENTS_PER_STEP} Stripe payments around one batch`);
+          }
+        }
+      }
+
+      const ids = bookings.map((b) => String(b.id));
+      const { data: redemptions, error: redemptionsError } = await db
+        .from("referral_redemptions")
+        .select("booking_ref")
+        .in("booking_ref", ids);
+      if (redemptionsError) throw new Error(`Failed to read referral redemptions: ${redemptionsError.code}`);
+      const referralIds = new Set((redemptions ?? []).map((r) => String(r.booking_ref)));
+
+      const counts: Record<string, number> = {};
+      const checkedAt = new Date().toISOString();
+      for (const booking of bookings) {
+        const source = bookingSourceFromPayments(booking, payments, referralIds);
+        counts[source] = (counts[source] ?? 0) + 1;
+        const { error } = await db
+          .from("acuity_appointments")
+          .update({ booking_source: source, source_checked_at: checkedAt })
+          .eq("id", booking.id);
+        if (error) throw new Error(`Failed to save a booking source: ${error.code}`);
+      }
+
+      const { data: rest, error: restError } = await db.rpc("acuity_sources_queue", {
+        p_since: `${TRACKING_START}T00:00:00Z`,
+        p_settled_before: new Date(startedAt - SOURCE_SETTLE_MS).toISOString(),
+        p_limit: 1,
+      });
+      if (restError) throw new Error(`Failed to read the sources queue: ${restError.code}`);
+
+      console.log("acuity-appointments-mirror sources", { checked: bookings.length, paymentsRead, ...counts });
+      return json({
+        checked: bookings.length,
+        sources: counts,
+        paymentsRead,
+        remaining: (rest ?? []).length,
+        durationMs: Date.now() - startedAt,
+      });
     }
 
     if (step !== "range" && step !== "details") {
@@ -211,12 +321,16 @@ serve(async (req) => {
             return;
           }
           const scheduledBy = (detail.scheduledBy ?? "").trim();
+          // Main-account bookings get their source from the "sources" step.
+          const source = sourceFromScheduledBy(scheduledBy);
+          const now = new Date().toISOString();
           const { error } = await db
             .from("acuity_appointments")
             .update({
               scheduled_by: scheduledBy || null,
               booked_by_client: isBookedByClient(scheduledBy),
-              details_fetched_at: new Date().toISOString(),
+              details_fetched_at: now,
+              ...(source ? { booking_source: source, source_checked_at: now } : {}),
             })
             .eq("id", id);
           if (error) throw new Error(error.code);

@@ -38,6 +38,7 @@ function session(customer: string, datetime: string, overrides: Partial<SessionR
     calendarId: 1,
     canceled: false,
     category: "individual",
+    bookingSource: null,
     ...overrides,
   };
 }
@@ -90,14 +91,14 @@ describe("dates", () => {
 describe("parseSessionRows", () => {
   it("reads the compact rows and skips free calls and malformed rows", () => {
     const rows = parseSessionRows([
-      [1, "email:a@example.com", 1000, 500, "therapy", true, 3, false, "couples"],
+      [1, "email:a@example.com", 1000, 500, "therapy", true, 3, false, "couples", "hub"],
       [2, "email:a@example.com", 900, null, "excluded", null, 3, false],
       ["bad"],
-      [3, "email:a@example.com", 2000, null, "intro", null, null, true, "nope"],
+      [3, "email:a@example.com", 2000, null, "intro", null, null, true, "nope", "nope"],
     ]);
     expect(rows).toEqual([
-      { id: 1, customerKey: "email:a@example.com", at: 1000, createdAt: 500, kind: "therapy", bookedByClient: true, calendarId: 3, canceled: false, category: "couples" },
-      { id: 3, customerKey: "email:a@example.com", at: 2000, createdAt: null, kind: "intro", bookedByClient: null, calendarId: null, canceled: true, category: null },
+      { id: 1, customerKey: "email:a@example.com", at: 1000, createdAt: 500, kind: "therapy", bookedByClient: true, calendarId: 3, canceled: false, category: "couples", bookingSource: "hub" },
+      { id: 3, customerKey: "email:a@example.com", at: 2000, createdAt: null, kind: "intro", bookedByClient: null, calendarId: null, canceled: true, category: null, bookingSource: null },
     ]);
   });
 });
@@ -245,7 +246,24 @@ describe("customers", () => {
       newStaff: 1,
       newUnknown: 1,
       returning: 1,
+      newSelfBySource: { website: 0, hub: 0, acuityPage: 0, mainAccount: 0, notMatched: 1 },
       excludedCustomers: 0,
+    });
+  });
+
+  it("splits new self-booked customers by where they booked", () => {
+    const histories = buildHistories([
+      session("aoife", "2026-10-05T10:00:00Z", { bookingSource: "website" }),
+      session("brian", "2026-10-06T10:00:00Z", { bookingSource: "hub" }),
+      session("ciara", "2026-10-07T10:00:00Z", { bookingSource: "acuity_page" }),
+      session("dara", "2026-10-08T10:00:00Z", { bookingSource: "main_account" }),
+      session("eoin", "2026-10-09T10:00:00Z", { bookingSource: "main_account" }),
+      session("fiona", "2026-10-10T10:00:00Z", { bookingSource: "team", bookedByClient: false }),
+    ]);
+    expect(customerTotals(histories, OCTOBER, "session")).toMatchObject({
+      newSelf: 5,
+      newStaff: 1,
+      newSelfBySource: { website: 1, hub: 1, acuityPage: 1, mainAccount: 2, notMatched: 0 },
     });
   });
 

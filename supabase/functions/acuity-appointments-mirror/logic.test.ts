@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  type StripePaymentIntent,
   API_BOOKED_BY,
   HISTORY_START_DATE,
   RANGE_DAYS,
   backfillRanges,
+  bookingSourceFromPayments,
   idsToPrune,
   isBookedByClient,
   nextBackfilledFrom,
   refreshWindow,
+  sourceFromScheduledBy,
+  toBookingPayment,
   toMirrorRow,
 } from "./logic.ts";
 
@@ -134,5 +138,56 @@ describe("idsToPrune", () => {
       { id: 2, datetime: "2026-12-31T09:00:00Z" },
     ];
     expect(idsToPrune(stored, new Set(), window)).toEqual([]);
+  });
+});
+
+describe("where a booking was made", () => {
+  const BOOKED = Date.parse("2026-10-20T10:00:00Z");
+  const pi = (overrides: Partial<StripePaymentIntent>): StripePaymentIntent => ({
+    status: "succeeded",
+    created: Math.floor((BOOKED - 60_000) / 1000),
+    description: "[MyFettleHub] Individual Session with Jane - Aoife Byrne - 20/10/2026",
+    receipt_email: null,
+    metadata: {},
+    ...overrides,
+  });
+
+  it("settles the Acuity page and team members from scheduledBy alone", () => {
+    expect(sourceFromScheduledBy("")).toBe("acuity_page");
+    expect(sourceFromScheduledBy("jane@fettle.ie")).toBe("team");
+    expect(sourceFromScheduledBy(` ${API_BOOKED_BY.toUpperCase()} `)).toBeNull();
+  });
+
+  it("reads website and hub payments, skipping unpaid-session settlements and others", () => {
+    expect(toBookingPayment(pi({ metadata: { acuity_appointment_id: "501", email: "Aoife@Example.com" } }))).toEqual({
+      origin: "hub",
+      createdAt: BOOKED - 60_000,
+      appointmentId: "501",
+      email: "aoife@example.com",
+    });
+    expect(toBookingPayment(pi({ description: "[WEBSITE] Session", receipt_email: "b@example.com" }))).toMatchObject({
+      origin: "website",
+      appointmentId: null,
+      email: "b@example.com",
+    });
+    expect(toBookingPayment(pi({ description: "[MyFettleHub] Settle unpaid session: x" }))).toBeNull();
+    expect(toBookingPayment(pi({ description: "Invoice 42" }))).toBeNull();
+    expect(toBookingPayment(pi({ status: "canceled" }))).toBeNull();
+  });
+
+  it("matches on the appointment id, then on email and time, else the main account", () => {
+    const hub = toBookingPayment(pi({ metadata: { acuity_appointment_id: "501" } }))!;
+    const website = toBookingPayment(pi({ description: "[WEBSITE] Session", metadata: { email: "b@example.com" } }))!;
+    const payments = [hub, website];
+    const booking = (id: number, email: string | null, createdAt = BOOKED) => ({ id, email, createdAt });
+
+    expect(bookingSourceFromPayments(booking(501, null), payments, new Set())).toBe("hub");
+    expect(bookingSourceFromPayments(booking(502, "B@example.com"), payments, new Set())).toBe("website");
+    // Same client, but booked a day later: not this payment.
+    expect(bookingSourceFromPayments(booking(503, "b@example.com", BOOKED + 86_400_000), payments, new Set())).toBe(
+      "main_account"
+    );
+    expect(bookingSourceFromPayments(booking(504, "c@example.com"), payments, new Set(["504"]))).toBe("hub");
+    expect(bookingSourceFromPayments(booking(505, "c@example.com"), payments, new Set())).toBe("main_account");
   });
 });

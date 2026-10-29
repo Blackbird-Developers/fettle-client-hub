@@ -22,6 +22,7 @@ import {
   type Basis,
   type CustomerPoint,
   type CustomerSegment,
+  type CustomerTotals,
   type ReturningMode,
   LAPSED_MIN_GAP_DAYS,
 } from "../../../../supabase/functions/admin-analytics/logic.ts";
@@ -104,6 +105,33 @@ function ShareTooltip({
       )}
       {row.partial && <p className="text-muted-foreground">{describePartialPeriod(row.period)}</p>}
     </TooltipBox>
+  );
+}
+
+/** Where the new self-booked customers booked, and what "self-booked" includes. */
+function SelfBookedNote({ totals }: { totals: CustomerTotals }) {
+  // Missing from admin-analytics deployed before the website / hub split.
+  const bySource = totals.newSelfBySource as CustomerTotals["newSelfBySource"] | undefined;
+  if (!bySource) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Self-booked includes bookings the team makes in Acuity under the main account (Art's own), which can't be told
+        apart yet.
+      </p>
+    );
+  }
+  const parts = [
+    [bySource.website, "on the website"],
+    [bySource.hub, "in the hub"],
+    [bySource.acuityPage, "on Acuity's booking page"],
+    [bySource.mainAccount, "under the main account with no online payment (Art's own bookings, or paid with a package)"],
+    [bySource.notMatched, "not matched yet"],
+  ].filter(([count]) => (count as number) > 0);
+  return (
+    <p className="text-xs text-muted-foreground">
+      Of the {totals.newSelf} new self-booked: {parts.map(([count, label]) => `${count} ${label}`).join(", ")}.
+      {bySource.mainAccount > 0 && " Main-account bookings count as self-booked for now."}
+    </p>
   );
 }
 
@@ -227,6 +255,7 @@ export function CustomersBoard({
           {tile(returningLabel, "returning", totals.returning, compare.returning)}
           {tile("Total active customers", "active", totals.active, compare.active)}
         </div>
+        {totals.newSelf > 0 && <SelfBookedNote totals={totals} />}
         {totals.newUnknown > 0 && (
           <p className="text-xs text-muted-foreground">
             Who booked isn't known yet for{" "}

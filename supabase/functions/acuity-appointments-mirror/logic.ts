@@ -9,8 +9,9 @@ import {
   addDays,
   classifyAppointmentType,
   customerKey,
+  normalizeEmail,
 } from "../admin-customer-insights/logic.ts";
-import { sessionCategory } from "../admin-analytics/logic.ts";
+import { type BookingSource, sessionCategory } from "../admin-analytics/logic.ts";
 
 /** Days of past appointments re-pulled every run (reschedules, cancellations). */
 export const REFRESH_PAST_DAYS = 60;
@@ -26,7 +27,8 @@ export const BACKFILL_RANGES_PER_RUN = 130;
 // Bookings made through our API (website checkout and the hub) carry the API
 // account's email in scheduledBy. Same constant as unpaid-sessions and
 // unpaid-session-reminders. Art books by hand from the same account, so his
-// bookings also read as client bookings (known edge case, in the brief).
+// bookings also read as client bookings; bookingSourceFromPayments tells
+// them apart where Stripe allows.
 export const API_BOOKED_BY = "art@blackbird.marketing";
 
 /** Fields of Acuity's appointment this sync reads, beyond the shared ones. */
@@ -104,6 +106,104 @@ export function toMirrorRow(appt: AcuityMirrorAppointment, syncedAt: number): Mi
 export function isBookedByClient(scheduledBy: string | null | undefined): boolean {
   const by = (scheduledBy ?? "").trim().toLowerCase();
   return by === "" || by === API_BOOKED_BY;
+}
+
+// ---------------------------------------------------------------------------
+// Where a booking was made (Art, 29 Oct 2026)
+// ---------------------------------------------------------------------------
+
+/** From scheduledBy alone: the client on Acuity's own page, or a team member.
+ *  Null for the main (API) account, which needs matching to Stripe
+ *  (bookingSourceFromPayments). */
+export function sourceFromScheduledBy(scheduledBy: string | null | undefined): BookingSource | null {
+  const by = (scheduledBy ?? "").trim().toLowerCase();
+  if (by === "") return "acuity_page";
+  if (by === API_BOOKED_BY) return null;
+  return "team";
+}
+
+/** A website or hub Stripe payment, as far as matching needs. */
+export interface BookingPayment {
+  origin: "website" | "hub";
+  /** When the payment was created (ms). */
+  createdAt: number;
+  /** The Acuity appointment it paid for, when the payment says. */
+  appointmentId: string | null;
+  email: string | null;
+}
+
+/** The fields of a Stripe PaymentIntent that matching reads. */
+export interface StripePaymentIntent {
+  status: string;
+  /** Seconds, as Stripe sends it. */
+  created: number;
+  description?: string | null;
+  receipt_email?: string | null;
+  metadata?: Record<string, string> | null;
+}
+
+// Where a payment may carry the Acuity appointment id. The hub writes
+// acuity_appointment_id; the others cover what the website might use.
+const APPOINTMENT_ID_KEYS = ["acuity_appointment_id", "appointmentId", "appointment_id", "acuityAppointmentId"];
+// Paid, being paid, or authorised to be taken.
+const PAID_STATUSES = new Set(["succeeded", "processing", "requires_capture"]);
+
+/** A Stripe payment as a BookingPayment; null unless it's a website or hub booking payment. */
+export function toBookingPayment(pi: StripePaymentIntent): BookingPayment | null {
+  if (!PAID_STATUSES.has(pi.status)) return null;
+  const description = (pi.description ?? "").trim().toLowerCase();
+  const metadata = pi.metadata ?? {};
+  let origin: BookingPayment["origin"];
+  if (description.startsWith("[myfettlehub]") || metadata.source === "myfettlehub") {
+    // Settling an unpaid session pays for a booking made earlier, by whoever made it.
+    if (description.startsWith("[myfettlehub] settle unpaid session")) return null;
+    origin = "hub";
+  } else if (description.startsWith("[website]")) {
+    origin = "website";
+  } else {
+    return null;
+  }
+  const idKey = APPOINTMENT_ID_KEYS.find((key) => text(metadata[key]) !== null);
+  return {
+    origin,
+    createdAt: pi.created * 1000,
+    appointmentId: idKey ? text(metadata[idKey]) : null,
+    email: normalizeEmail(metadata.email ?? pi.receipt_email ?? null),
+  };
+}
+
+/** How long before a booking its payment may have been made (checkout left open). */
+export const PAYMENT_BEFORE_BOOKING_MS = 2 * 60 * 60 * 1000;
+/** And after it (clocks a little apart). */
+export const PAYMENT_AFTER_BOOKING_MS = 15 * 60 * 1000;
+
+// Where a main-account booking came from. The hub stamps the Acuity
+// appointment id on its payments and records referral-credit bookings by id;
+// a payment without an id is matched on the client's email and the time.
+// No match = booked in Acuity under the main account by the team (Art), or
+// paid with a package or gift certificate, which leaves no payment then.
+export function bookingSourceFromPayments(
+  appointment: { id: number; email: string | null; createdAt: number | null },
+  payments: BookingPayment[],
+  referralBookingIds: Set<string>
+): BookingSource {
+  const id = String(appointment.id);
+  if (referralBookingIds.has(id)) return "hub";
+  const byId = payments.find((p) => p.appointmentId === id);
+  if (byId) return byId.origin;
+  const email = normalizeEmail(appointment.email);
+  const createdAt = appointment.createdAt;
+  if (email && createdAt !== null) {
+    const byEmail = payments.find(
+      (p) =>
+        p.appointmentId === null &&
+        p.email === email &&
+        p.createdAt >= createdAt - PAYMENT_BEFORE_BOOKING_MS &&
+        p.createdAt <= createdAt + PAYMENT_AFTER_BOOKING_MS
+    );
+    if (byEmail) return byEmail.origin;
+  }
+  return "main_account";
 }
 
 /** Splits [minDate, maxDate] into consecutive ranges of `days`. */

@@ -180,6 +180,14 @@ export function sessionCategory(type: string | null | undefined, kind: string): 
   return "individual";
 }
 
+/** Where a booking was made (acuity-appointments-mirror works it out):
+ *  the client on Acuity's own page, the website or the hub; a booking under
+ *  the main account with no website or hub payment (the team, i.e. Art, or a
+ *  package booking); or a team member's own Acuity login. */
+export const BOOKING_SOURCES = ["acuity_page", "website", "hub", "main_account", "team"] as const;
+export type BookingSource = (typeof BOOKING_SOURCES)[number];
+const BOOKING_SOURCE_SET = new Set<string>(BOOKING_SOURCES);
+
 /** One session from admin_analytics_sessions(). */
 export interface SessionRow {
   id: number;
@@ -195,6 +203,8 @@ export interface SessionRow {
   canceled: boolean;
   /** Null for rows copied before categories were added. */
   category: SessionCategory | null;
+  /** Null until worked out, or before the database had the column. */
+  bookingSource: BookingSource | null;
 }
 
 const SESSION_KINDS = new Set<string>(["therapy", "intro", "assessment"]);
@@ -206,7 +216,8 @@ export function parseSessionRows(raw: unknown): SessionRow[] {
   const rows: SessionRow[] = [];
   for (const item of raw) {
     if (!Array.isArray(item)) continue;
-    const [id, customerKey, at, createdAt, kind, bookedByClient, calendarId, canceled, category] = item;
+    const [id, customerKey, at, createdAt, kind, bookedByClient, calendarId, canceled, category, bookingSource] =
+      item;
     if (typeof id !== "number" || typeof customerKey !== "string" || typeof at !== "number") continue;
     if (typeof kind !== "string" || !SESSION_KINDS.has(kind)) continue;
     rows.push({
@@ -219,6 +230,10 @@ export function parseSessionRows(raw: unknown): SessionRow[] {
       calendarId: typeof calendarId === "number" ? calendarId : null,
       canceled: canceled === true,
       category: typeof category === "string" && CATEGORIES.has(category) ? (category as SessionCategory) : null,
+      bookingSource:
+        typeof bookingSource === "string" && BOOKING_SOURCE_SET.has(bookingSource)
+          ? (bookingSource as BookingSource)
+          : null,
     });
   }
   return rows;
@@ -576,6 +591,11 @@ export interface CustomerCounts {
   /** New customers whose "who booked it" lookup hasn't been done yet. */
   newUnknown: number;
   returning: number;
+  /** newSelf by where the booking was made. mainAccount = under the main
+   *  account with no website or hub payment found (Art's own bookings, or a
+   *  package booking), counted as self-booked for now (Art, 29 Oct 2026);
+   *  notMatched = not worked out yet, or booked before TRACKING_START. */
+  newSelfBySource: { website: number; hub: number; acuityPage: number; mainAccount: number; notMatched: number };
 }
 
 const emptyCounts = (): CustomerCounts => ({
@@ -585,14 +605,25 @@ const emptyCounts = (): CustomerCounts => ({
   newStaff: 0,
   newUnknown: 0,
   returning: 0,
+  newSelfBySource: { website: 0, hub: 0, acuityPage: 0, mainAccount: 0, notMatched: 0 },
 });
+
+const SELF_SOURCE_KEYS: Partial<Record<BookingSource, keyof CustomerCounts["newSelfBySource"]>> = {
+  website: "website",
+  hub: "hub",
+  acuity_page: "acuityPage",
+  main_account: "mainAccount",
+};
 
 function addActivity(counts: CustomerCounts, activity: Activity) {
   counts.active++;
   if (activity.isNew) {
     counts.new++;
-    if (activity.session.bookedByClient === true) counts.newSelf++;
-    else if (activity.session.bookedByClient === false) counts.newStaff++;
+    if (activity.session.bookedByClient === true) {
+      counts.newSelf++;
+      const source = activity.session.bookingSource;
+      counts.newSelfBySource[(source && SELF_SOURCE_KEYS[source]) ?? "notMatched"]++;
+    } else if (activity.session.bookedByClient === false) counts.newStaff++;
     else counts.newUnknown++;
   }
   if (activity.isReturning) counts.returning++;

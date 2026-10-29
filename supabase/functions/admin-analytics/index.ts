@@ -61,6 +61,7 @@ interface AppointmentDetail {
   datetime: string;
   scheduled_by: string | null;
   booked_by_client: boolean | null;
+  booking_source: string | null;
 }
 
 async function fetchAppointments(db: SupabaseClient, ids: number[]): Promise<Map<number, AppointmentDetail>> {
@@ -68,7 +69,7 @@ async function fetchAppointments(db: SupabaseClient, ids: number[]): Promise<Map
   for (let i = 0; i < ids.length; i += 500) {
     const { data, error } = await db
       .from("acuity_appointments")
-      .select("id, email, phone, first_name, last_name, type, datetime, scheduled_by, booked_by_client")
+      .select("id, email, phone, first_name, last_name, type, datetime, scheduled_by, booked_by_client, booking_source")
       .in("id", ids.slice(i, i + 500));
     if (error) throw new Error(`Failed to read appointments: ${error.code}`);
     for (const row of data ?? []) byId.set(row.id, row);
@@ -92,7 +93,12 @@ function bookedBy(row: AppointmentDetail | undefined): string | null {
   if (!row || row.booked_by_client === null) return null;
   const by = (row.scheduled_by ?? "").trim().toLowerCase();
   if (by === "") return "Client (Acuity booking page)";
-  if (by === API_BOOKED_BY) return "Client (website or hub)";
+  if (by === API_BOOKED_BY) {
+    if (row.booking_source === "website") return "Client (website)";
+    if (row.booking_source === "hub") return "Client (hub)";
+    if (row.booking_source === "main_account") return "Main account, no online payment (Art, or a package)";
+    return "Client (website or hub)";
+  }
   return `Team (${row.scheduled_by})`;
 }
 
