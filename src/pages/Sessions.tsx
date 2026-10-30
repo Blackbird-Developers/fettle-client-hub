@@ -33,6 +33,7 @@ import { useTherapistReviews, TherapistReview } from "@/hooks/useTherapistReview
 import { useUnpaidSessions, type UnpaidSession } from "@/hooks/useUnpaidSessions";
 import { useSettlementRedirectReturn } from "@/hooks/useSettlementRedirectReturn";
 import { PaySessionModal } from "@/components/booking/PaySessionModal";
+import { bundleUsedFor } from "@/lib/bundles";
 
 function AcuitySessionCard({
   appointment,
@@ -64,6 +65,7 @@ function AcuitySessionCard({
   const { toast } = useToast();
 
   const dateTime = parseISO(appointment.datetime);
+  const paidByBundle = bundleUsedFor(appointment.notes);
   // Stays upcoming (with Join available) until the end of the session's day,
   // so late or reconnecting clients can still get into the call.
   const isUpcoming = isSessionActive(appointment.datetime) && !appointment.canceled;
@@ -205,6 +207,11 @@ function AcuitySessionCard({
                 </div>
                 <div className="shrink-0 flex flex-col items-end gap-1">
                   {getStatusBadge()}
+                  {paidByBundle && !unpaidSession && (
+                    <Badge variant="outline" className="bg-success/10 text-success border-success/30" title={`Paid with your ${paidByBundle}`}>
+                      Paid with bundle
+                    </Badge>
+                  )}
                   {unpaidSession && (
                     <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-900">
                       Unpaid

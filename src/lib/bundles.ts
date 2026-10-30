@@ -136,6 +136,17 @@ export function balanceMessage(packageName: string | null | undefined, remaining
   return `You have ${remaining} session${remaining === 1 ? '' : 's'} left on your ${name}.`;
 }
 
+/**
+ * The bundle that paid for an appointment, from the note book-with-package
+ * adds ("[Bundle: 6 Session Bundle | Credits remaining: 3/6]"), or null.
+ * Acuity's own `certificate` field can't tell a bundle from a discount
+ * coupon, so sessions booked with a bundle outside the hub aren't marked.
+ */
+export function bundleUsedFor(notes: string | null | undefined): string | null {
+  const match = /\[Bundle: ([^|\]]+?)\s*(?:\||\])/.exec(notes ?? '');
+  return match ? match[1].trim() : null;
+}
+
 /** Where clients find their code; shown wherever a code can be entered. */
 export const BUNDLE_CODE_HELP =
   'Your bundle code is in the order confirmation email from fettle.ie, sent right after you bought the bundle (it looks like 704E3907).';

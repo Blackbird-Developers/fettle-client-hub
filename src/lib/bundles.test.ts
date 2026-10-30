@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   balanceMessage,
+  bundleUsedFor,
   bundleWarnings,
   deductionMessage,
   expiryLabel,
@@ -84,6 +85,13 @@ describe('messages', () => {
     expect(deductionMessage({ package_name: '6 Session Bundle', remaining_sessions: 4 })).toBe(
       "This booking will use 1 credit from your 6 Session Bundle. You'll have 3 left."
     );
+  });
+
+  it('finds the bundle that paid for a hub booking', () => {
+    expect(bundleUsedFor('Running late\n\n[Bundle: 6 Session Bundle | Credits remaining: 3/6]')).toBe('6 Session Bundle');
+    expect(bundleUsedFor('[Bundle: Couples 3 x 60 min | Credits remaining: 0/3]')).toBe('Couples 3 x 60 min');
+    expect(bundleUsedFor('Paid by card')).toBeNull();
+    expect(bundleUsedFor(undefined)).toBeNull();
   });
 
   it('gives the balance after booking', () => {

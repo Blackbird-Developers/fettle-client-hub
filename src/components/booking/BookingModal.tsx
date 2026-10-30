@@ -76,7 +76,7 @@ import {
     supportMailto,
     type CodeProblem,
 } from '@/lib/booking/codeProblem';
-import { BUNDLE_CODE_HELP, notUsableReason } from '@/lib/bundles';
+import { BUNDLE_CODE_HELP, balanceMessage, deductionMessage, notUsableReason } from '@/lib/bundles';
 import { BundleCard } from '@/components/bundles/BundleCard';
 import { normaliseBundleCode } from '@/hooks/useLinkBundleCode';
 import {
@@ -225,6 +225,8 @@ export function BookingModal({
     const [bookingResult, setBookingResult] = useState<{
         appointment: any;
         receiptUrl?: string;
+        /** Set when a bundle credit paid for the session. */
+        bundle?: { balance: string };
     } | null>(null);
     const [couponCode, setCouponCode] = useState('');
     // A code the client typed that couldn't be used. While set, the confirm
@@ -746,14 +748,17 @@ export function BookingModal({
             // Invalidate packages query to refresh the counter
             queryClient.invalidateQueries({ queryKey: ['user-packages'] });
 
-            setBookingResult({ appointment: data.appointment });
+            const bundleUsed = activePackages.find((pkg) => pkg.id === selectedPackageId);
+            const balance = balanceMessage(bundleUsed?.package_name, data.remainingSessions ?? 0);
+            setBookingResult({
+                appointment: data.appointment,
+                bundle: { balance },
+            });
             setStep('success');
 
             toast({
                 title: 'Session Booked!',
-                description: `You have ${data.remainingSessions} session${
-                    data.remainingSessions === 1 ? '' : 's'
-                } remaining in your package.`,
+                description: balance,
             });
         } catch (error) {
             console.error('Package booking error:', error);
@@ -3066,6 +3071,14 @@ export function BookingModal({
                                                 }
                                             />
                                         ))}
+                                        {(() => {
+                                            const chosen = categoryPackages.find((pkg) => pkg.id === selectedPackageId);
+                                            return chosen ? (
+                                                <p className="text-sm text-foreground bg-success/5 border border-success/20 rounded-lg p-3">
+                                                    {deductionMessage(chosen)}
+                                                </p>
+                                            ) : null;
+                                        })()}
                                     </div>
                                 )}
 
@@ -3415,6 +3428,20 @@ export function BookingModal({
                                         minute: '2-digit',
                                     })}
                                 </p>
+                            </div>
+                        )}
+
+                        {bookingResult?.bundle && (
+                            <div className="bg-success/10 border border-success/30 rounded-xl p-4 w-full flex gap-3">
+                                <Gift className="h-5 w-5 text-success shrink-0 mt-0.5" />
+                                <div className="space-y-1">
+                                    <p className="font-medium text-foreground">
+                                        Paid with 1 bundle credit
+                                    </p>
+                                    <p className="text-sm text-muted-foreground">
+                                        {bookingResult.bundle.balance}
+                                    </p>
+                                </div>
                             </div>
                         )}
 
