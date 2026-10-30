@@ -63,6 +63,9 @@ import {
     FileText,
     AlertCircle,
     Mail,
+    Ticket,
+    Link2,
+    ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getPackageCategory } from '@/lib/packageCategory';
@@ -73,6 +76,8 @@ import {
     supportMailto,
     type CodeProblem,
 } from '@/lib/booking/codeProblem';
+import { BUNDLE_CODE_HELP } from '@/lib/bundles';
+import { normaliseBundleCode } from '@/hooks/useLinkBundleCode';
 import {
     ASSESSMENTS,
     getAssessmentPriceOverride,
@@ -224,6 +229,12 @@ export function BookingModal({
     // A code the client typed that couldn't be used. While set, the confirm
     // step explains why and offers: try another code, pay, or contact us.
     const [codeProblem, setCodeProblem] = useState<CodeProblem | null>(null);
+    // "Have a bundle? Add your code", above the payment choice.
+    const [bundleCodeOpen, setBundleCodeOpen] = useState(false);
+    const [bundleCode, setBundleCode] = useState('');
+    const [isLinkingBundle, setIsLinkingBundle] = useState(false);
+    // Which field the refused code came from, for "Try another code".
+    const [codeProblemField, setCodeProblemField] = useState<'bundleCode' | 'couponCode'>('couponCode');
     const [usePackageCredits, setUsePackageCredits] = useState(false);
     const [applyReferralCredit, setApplyReferralCredit] = useState(false);
     const [selectedPackageId, setSelectedPackageId] = useState<string | null>(
@@ -840,6 +851,22 @@ export function BookingModal({
         }
     };
 
+    // "Have a bundle? Add your code": same checks as a bundle code typed in
+    // the discount field, without trying it as a discount first.
+    const handleAddBundleCode = async () => {
+        const code = normaliseBundleCode(bundleCode);
+        if (!code || isLinkingBundle) return;
+        setCodeProblem(null);
+        setCodeProblemField('bundleCode');
+        setIsLinkingBundle(true);
+        try {
+            await handleBundleCodeDetected(code);
+            setBundleCode('');
+        } finally {
+            setIsLinkingBundle(false);
+        }
+    };
+
     // `skipCode`: the client chose "Pay for this session" after their code
     // was refused, so charge the full price without it.
     const handleProceedToPayment = async (options?: { skipCode?: boolean }) => {
@@ -848,6 +875,7 @@ export function BookingModal({
             return handleBookWithPackage();
         }
         setCodeProblem(null);
+        setCodeProblemField('couponCode');
         const codeToSend = options?.skipCode ? '' : couponCode.trim();
 
         console.log('[Stripe Debug] handleProceedToPayment called');
@@ -1113,6 +1141,9 @@ export function BookingModal({
         setBookingResult(null);
         setCouponCode('');
         setCodeProblem(null);
+        setBundleCodeOpen(false);
+        setBundleCode('');
+        setCodeProblemField('couponCode');
         setUsePackageCredits(false);
         setApplyReferralCredit(false);
         setSelectedPackageId(null);
@@ -2746,7 +2777,66 @@ export function BookingModal({
                 );
             }
 
-            case 'confirm':
+            case 'confirm': {
+                // A refused code: shown under the field it was typed in.
+                const codeProblemBox = codeProblem && (
+                    <div
+                        role="alert"
+                        className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3">
+                        <div className="flex gap-3">
+                            <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                            <div className="space-y-1">
+                                <p className="font-semibold text-foreground">
+                                    {codeProblem.title}
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                    {codeProblem.message}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    Code: <span className="font-mono">{codeProblem.code}</span>
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    setCodeProblem(null);
+                                    if (codeProblemField === 'bundleCode') {
+                                        setBundleCode('');
+                                    } else {
+                                        setCouponCode('');
+                                    }
+                                    document.getElementById(codeProblemField)?.focus();
+                                }}>
+                                Try another code
+                            </Button>
+                            {/* With a credit already chosen there's nothing to pay. */}
+                            {!usePackageCredits && (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={isSubmitting}
+                                    onClick={() => {
+                                        setCouponCode('');
+                                        handleProceedToPayment({ skipCode: true });
+                                    }}>
+                                    <CreditCard className="h-4 w-4" />
+                                    Pay for this session
+                                </Button>
+                            )}
+                            <Button asChild variant="ghost" size="sm">
+                                <a href={supportMailto(codeProblem)}>
+                                    <Mail className="h-4 w-4" />
+                                    Email hello@fettle.ie
+                                </a>
+                            </Button>
+                        </div>
+                    </div>
+                );
                 return (
                     <div className="space-y-6">
                         <div className="bg-accent/50 rounded-xl p-4 space-y-3">
@@ -2821,6 +2911,73 @@ export function BookingModal({
                                 <p className="text-sm text-muted-foreground">
                                     Checking for available session credits...
                                 </p>
+                            </div>
+                        )}
+
+                        {/* "Have a bundle? Add your code" — above the payment
+                            choice, so a client who bought a bundle on
+                            fettle.ie links it here rather than paying.
+                            Bundles never cover assessments or psychiatry. */}
+                        {!packagesLoading && !isClinicalCategory && (
+                            <div className="rounded-xl border border-dashed border-border p-3 space-y-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setBundleCodeOpen((v) => !v)}
+                                    aria-expanded={bundleCodeOpen}
+                                    className="w-full flex items-center gap-2 text-left">
+                                    <Ticket className="h-4 w-4 text-primary" />
+                                    <span className="text-sm font-semibold text-foreground">
+                                        Have a bundle? Add your code
+                                    </span>
+                                    <ChevronDown
+                                        className={cn(
+                                            'h-4 w-4 ml-auto text-muted-foreground transition-transform',
+                                            bundleCodeOpen && 'rotate-180'
+                                        )}
+                                    />
+                                </button>
+                                {bundleCodeOpen && (
+                                    <div className="space-y-2">
+                                        <div className="flex gap-2">
+                                            <Input
+                                                id="bundleCode"
+                                                aria-label="Bundle code"
+                                                value={bundleCode}
+                                                onChange={(e) => {
+                                                    setBundleCode(e.target.value.toUpperCase());
+                                                    setCodeProblem(null);
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        handleAddBundleCode();
+                                                    }
+                                                }}
+                                                placeholder="e.g. 704E3907"
+                                                className="uppercase"
+                                                maxLength={32}
+                                                autoComplete="off"
+                                                disabled={isLinkingBundle}
+                                            />
+                                            <Button
+                                                type="button"
+                                                onClick={handleAddBundleCode}
+                                                disabled={!bundleCode.trim() || isLinkingBundle || isSubmitting}
+                                                className="gap-2 shrink-0">
+                                                {isLinkingBundle ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                ) : (
+                                                    <Link2 className="h-4 w-4" />
+                                                )}
+                                                Add code
+                                            </Button>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            {BUNDLE_CODE_HELP}
+                                        </p>
+                                    </div>
+                                )}
+                                {codeProblemField === 'bundleCode' && codeProblemBox}
                             </div>
                         )}
 
@@ -2935,20 +3092,21 @@ export function BookingModal({
                                 </div>
                             )}
 
-                        {/* Coupon / bundle code - only show when paying. Accepts
-                            loyalty rewards, Stripe promotion codes, Acuity
-                            coupons, and session-bundle certificate codes (which
-                            get linked to the account and booked as a package
-                            credit). Discounts and referral credits are
-                            therapy-session perks, so neither is offered on
-                            assessment or psychiatry bookings. */}
+                        {/* Discount code - only show when paying. Accepts
+                            loyalty rewards, Stripe promotion codes and Acuity
+                            coupons. A session-bundle code typed here still
+                            works (it's linked and booked as a package credit),
+                            though bundles have their own field above.
+                            Discounts and referral credits are therapy-session
+                            perks, so neither is offered on assessment or
+                            psychiatry bookings. */}
                         {!usePackageCredits &&
                             !isClinicalCategory &&
                             selectedTypeData?.price &&
                             parseFloat(selectedTypeData.price) > 0 && (
                                 <div className="space-y-2">
                                     <Label htmlFor="couponCode">
-                                        Coupon or bundle code (optional)
+                                        Discount code (optional)
                                     </Label>
                                     <Input
                                         id="couponCode"
@@ -2959,68 +3117,15 @@ export function BookingModal({
                                             );
                                             setCodeProblem(null);
                                         }}
-                                        placeholder="Enter coupon or bundle code"
+                                        placeholder="Enter a discount code"
                                         className="uppercase"
                                     />
-                                    <p className="text-xs text-muted-foreground">
-                                        Bought a session bundle on fettle.ie or been given a bundle code? Enter it here and we'll link it to your account and book with a credit.
-                                    </p>
                                 </div>
                             )}
 
-                        {/* A refused code: say why and let the client choose
-                            what to do — never move them to payment silently. */}
-                        {codeProblem && !usePackageCredits && (
-                            <div
-                                role="alert"
-                                className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3">
-                                <div className="flex gap-3">
-                                    <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
-                                    <div className="space-y-1">
-                                        <p className="font-semibold text-foreground">
-                                            {codeProblem.title}
-                                        </p>
-                                        <p className="text-sm text-muted-foreground">
-                                            {codeProblem.message}
-                                        </p>
-                                        <p className="text-xs text-muted-foreground">
-                                            Code: <span className="font-mono">{codeProblem.code}</span>
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="flex flex-col sm:flex-row gap-2">
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                            setCodeProblem(null);
-                                            setCouponCode('');
-                                            document.getElementById('couponCode')?.focus();
-                                        }}>
-                                        Try another code
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        disabled={isSubmitting}
-                                        onClick={() => {
-                                            setCouponCode('');
-                                            handleProceedToPayment({ skipCode: true });
-                                        }}>
-                                        <CreditCard className="h-4 w-4" />
-                                        Pay for this session
-                                    </Button>
-                                    <Button asChild variant="ghost" size="sm">
-                                        <a href={supportMailto(codeProblem)}>
-                                            <Mail className="h-4 w-4" />
-                                            Email hello@fettle.ie
-                                        </a>
-                                    </Button>
-                                </div>
-                            </div>
-                        )}
+                        {/* A refused discount code: say why and let the client
+                            choose what to do — never move them to payment silently. */}
+                        {codeProblemField === 'couponCode' && !usePackageCredits && codeProblemBox}
 
                         {/* Referral credit - only when paying by card and you have credit */}
                         {!usePackageCredits &&
@@ -3098,6 +3203,7 @@ export function BookingModal({
                         </div>
                     </div>
                 );
+            }
 
             case 'payment': {
                 console.log('[Stripe Debug] Rendering payment step');

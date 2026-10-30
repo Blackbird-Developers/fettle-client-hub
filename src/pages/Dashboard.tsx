@@ -6,6 +6,7 @@ import { RecentActivity } from "@/components/dashboard/RecentActivity";
 import { PackagesPromo } from "@/components/dashboard/PackagesPromo";
 import { ProgressDashboard } from "@/components/dashboard/ProgressDashboard";
 import { PackageSessionsCounter } from "@/components/dashboard/PackageSessionsCounter";
+import { AddBundleCodeCard } from "@/components/dashboard/AddBundleCodeCard";
 import { AchievementBadges } from "@/components/dashboard/AchievementBadges";
 import { MyTherapist } from "@/components/dashboard/MyTherapist";
 import { BookAgainPrompt } from "@/components/dashboard/BookAgainPrompt";
@@ -29,6 +30,7 @@ export default function Dashboard() {
         <div className="md:col-span-2 xl:col-span-1 space-y-4 lg:space-y-6 min-w-0 w-full">
           <MyTherapist />
           <PackageSessionsCounter />
+          <AddBundleCodeCard />
           <AchievementBadges />
           <PackagesPromo />
           <RecentActivity />
