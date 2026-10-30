@@ -135,7 +135,10 @@ serve(async (req) => {
       // Website bookings stamp their Stripe payment id into the notes. The
       // bulk listing omits scheduledBy, so the API-booked check happens via a
       // detail fetch further down.
-      !/stripe payment id:/i.test(a?.notes || "")
+      !/stripe payment id:/i.test(a?.notes || "") &&
+      // Paid with a bundle credit (book-with-package, or pay-session's
+      // use-credit for a session booked outside the hub).
+      !/\[Bundle: /.test(a?.notes || "")
     );
     candidates.sort(
       (a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime(),

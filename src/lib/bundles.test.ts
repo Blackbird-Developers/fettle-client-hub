@@ -3,6 +3,7 @@ import {
   balanceMessage,
   bundleUsedFor,
   bundleWarnings,
+  bundlesUsableFor,
   deductionMessage,
   expiryLabel,
   notUsableReason,
@@ -77,6 +78,26 @@ describe('notUsableReason', () => {
   it('explains expired and used-up bundles', () => {
     expect(notUsableReason(bundle({ expires_at: '2026-10-01T00:00:00Z' }), 'individual', NOW)).toBe('This bundle has expired.');
     expect(notUsableReason(bundle({ remaining_sessions: 0 }), 'individual', NOW)).toBe('All sessions on this bundle are used.');
+  });
+});
+
+describe('bundlesUsableFor', () => {
+  const individual = bundle();
+  const youth = bundle({ package_id: '1370588', package_name: 'Youth Bundle 3 x 60min' });
+  const usedUp = bundle({ remaining_sessions: 0 });
+
+  it('keeps bundles that match the session type', () => {
+    expect(bundlesUsableFor([individual, youth, usedUp], 'Individual Therapy Session with Aoife', NOW)).toEqual([individual]);
+    expect(bundlesUsableFor([individual, youth], 'Youth Therapy - Individual Session', NOW)).toEqual([youth]);
+  });
+
+  it('never offers bundles for psychiatry or assessments', () => {
+    expect(bundlesUsableFor([individual], 'Psychiatry Consultation', NOW)).toEqual([]);
+    expect(bundlesUsableFor([individual], 'ADHD Assessment', NOW)).toEqual([]);
+  });
+
+  it('offers any live bundle for a type it cannot place, as the server does', () => {
+    expect(bundlesUsableFor([individual, youth, usedUp], 'Therapy Session', NOW)).toEqual([individual, youth]);
   });
 });
 

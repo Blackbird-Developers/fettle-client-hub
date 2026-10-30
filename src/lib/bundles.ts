@@ -122,6 +122,35 @@ export function notUsableReason(pkg: BundleLike, booking: BookingCategory, now: 
   return null;
 }
 
+/**
+ * The session type of an Acuity appointment, from its type name (the same
+ * prefixes book-with-package and pay-session use), or undefined.
+ */
+export function bookingCategoryOfType(typeName: string): BookingCategory | undefined {
+  const name = typeName.trim();
+  if (/psychiatr/i.test(name)) return 'psychiatry';
+  if (/assessment|screening/i.test(name)) return 'assessment';
+  if (name.startsWith('Individual Therapy Session')) return 'individual';
+  if (name.startsWith('Youth Therapy - Individual Session')) return 'youth';
+  if (name.startsWith("Couple's Therapy Session")) return 'couples';
+  return undefined;
+}
+
+/**
+ * Bundles that can pay for a session of this Acuity type. An unknown type
+ * accepts any therapy bundle, as on the server.
+ */
+export function bundlesUsableFor<T extends BundleLike>(bundles: T[], typeName: string, now: Date = new Date()): T[] {
+  const category = bookingCategoryOfType(typeName);
+  return bundles.filter((pkg) => {
+    if (!category) {
+      const s = summariseBundle(pkg, now);
+      return !s.expired && !s.usedUp;
+    }
+    return notUsableReason(pkg, category, now) === null;
+  });
+}
+
 /** "This booking will use 1 credit from your 6 Session Bundle. You'll have 3 left." */
 export function deductionMessage(pkg: Pick<BundleLike, 'package_name' | 'remaining_sessions'>): string {
   const after = Math.max(0, pkg.remaining_sessions - 1);
