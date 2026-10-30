@@ -1,6 +1,7 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { AdminDashboard } from "@/components/admin/AdminDashboard";
 import { AdminInvite } from "@/components/admin/AdminInvite";
+import { AdminNotificationsBell } from "@/components/admin/AdminNotificationsBell";
 import { AssessmentPipeline } from "@/components/admin/AssessmentPipeline";
 import { Bundles } from "@/components/admin/Bundles";
 import { Feedback } from "@/components/admin/Feedback";
@@ -68,16 +69,19 @@ export default function Admin() {
   return (
     <DashboardLayout>
       <div className="space-y-6 w-full">
-        <div>
-          <h1 className="text-2xl font-heading font-bold">
-            {section.name}
-            {subsection && (
-              <span className="text-muted-foreground font-normal"> · {subsection.name}</span>
-            )}
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            {subsection?.description ?? section.description}
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-heading font-bold">
+              {section.name}
+              {subsection && (
+                <span className="text-muted-foreground font-normal"> · {subsection.name}</span>
+              )}
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              {subsection?.description ?? section.description}
+            </p>
+          </div>
+          <AdminNotificationsBell />
         </div>
         <Content key={subsection?.id} subsectionId={subsection?.id} />
       </div>

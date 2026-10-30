@@ -14,6 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_notifications: {
+        Row: {
+          body: string | null
+          client_email: string | null
+          client_name: string | null
+          created_at: string
+          dedupe_key: string | null
+          details: Json
+          id: string
+          kind: string
+          read_at: string | null
+          read_by_email: string | null
+          title: string
+          user_id: string | null
+        }
+        Insert: {
+          body?: string | null
+          client_email?: string | null
+          client_name?: string | null
+          created_at?: string
+          dedupe_key?: string | null
+          details?: Json
+          id?: string
+          kind: string
+          read_at?: string | null
+          read_by_email?: string | null
+          title: string
+          user_id?: string | null
+        }
+        Update: {
+          body?: string | null
+          client_email?: string | null
+          client_name?: string | null
+          created_at?: string
+          dedupe_key?: string | null
+          details?: Json
+          id?: string
+          kind?: string
+          read_at?: string | null
+          read_by_email?: string | null
+          title?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       customer_contact_attempts: {
         Row: {
           attempt_number: number | null

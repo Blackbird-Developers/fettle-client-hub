@@ -110,6 +110,146 @@ function fail(reason: string, message: string, status = 200): Response {
   return new Response(JSON.stringify({ ok: false, reason, message }), { headers: jsonHeaders, status });
 }
 
+// Short labels for the admin notification title.
+const REASON_LABEL: Record<string, string> = {
+  wrong_email: "registered to a different email",
+  used_up: "all sessions used",
+  not_applicable: "for a different session type",
+  expired: "bundle expired",
+  invalid_code: "code not found",
+  server_unavailable: "Acuity unavailable",
+  server_error: "hub error",
+  unsupported: "not a bundle the hub can link",
+  claimed: "linked to another hub account",
+};
+
+// Staff who are emailed when a client can't use a bundle code (as well as the
+// admin bell). Agreed with Fettle 2026-10-30.
+const STAFF_ALERT_EMAILS = ["hello@fettle.ie", "alex@fettle.ie"];
+const ADMIN_BUNDLES_URL = "https://my.fettle.ie/admin/bundles";
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Labels for the facts staff need, in the order they're shown.
+const DETAIL_LABELS: [string, string][] = [
+  ["certificateEmail", "Bundle email in Acuity"],
+  ["appointmentTypeID", "Acuity session type tried"],
+  ["expiration", "Expires"],
+  ["acuityErrors", "Acuity said"],
+];
+
+async function emailStaffAboutRefusal(
+  n: RefusalNotice,
+  who: string,
+  title: string,
+): Promise<void> {
+  const apiKey = Deno.env.get("RESEND_API_KEY");
+  if (!apiKey) {
+    logStep("RESEND_API_KEY not set — staff email skipped");
+    return;
+  }
+  const rows: [string, string][] = [
+    ["Client", who === n.userEmail ? n.userEmail : `${who} (${n.userEmail})`],
+    ["Code", n.code],
+    ["Problem", REASON_LABEL[n.reason] ?? n.reason],
+    ["What the hub told them", n.message],
+  ];
+  for (const [key, label] of DETAIL_LABELS) {
+    const value = n.details[key];
+    if (value === null || value === undefined || value === "") continue;
+    rows.push([label, Array.isArray(value) ? value.join(" · ") : String(value)]);
+  }
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #333; max-width: 600px;">
+      <p>A client couldn't use their bundle code in the hub. This is the first time for this client and code.</p>
+      <table style="border-collapse: collapse; width: 100%;">
+        ${rows
+          .map(
+            ([label, value]) =>
+              `<tr><td style="padding: 6px 12px 6px 0; color: #6b7280; vertical-align: top; white-space: nowrap;">${escapeHtml(label)}</td><td style="padding: 6px 0;">${escapeHtml(value)}</td></tr>`,
+          )
+          .join("")}
+      </table>
+      <p>It's also under the bell in the <a href="${ADMIN_BUNDLES_URL}">admin dashboard</a>.</p>
+    </div>`;
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: "Fettle Hub <noreply@notifications.fettle.ie>",
+      to: STAFF_ALERT_EMAILS,
+      reply_to: n.userEmail,
+      subject: title,
+      html,
+    }),
+  });
+  if (!resp.ok) {
+    logStep("Staff email failed", { status: resp.status, body: (await resp.text()).slice(0, 200) });
+  }
+}
+
+interface RefusalNotice {
+  supabaseAdmin: ReturnType<typeof createClient>;
+  userId: string;
+  userEmail: string;
+  code: string;
+  reason: string;
+  message: string;
+  details: Record<string, unknown>;
+}
+
+// Tell staff the first time a client can't use a bundle code: the admin
+// notifications bell plus an email to STAFF_ALERT_EMAILS. One notification
+// (and one email) per client and code, however many times they retry. Never
+// lets a notification problem affect the client.
+async function notifyAdminsOfRefusal(n: RefusalNotice): Promise<void> {
+  try {
+    const { data: profile } = await n.supabaseAdmin
+      .from("profiles")
+      .select("first_name, last_name")
+      .eq("user_id", n.userId)
+      .maybeSingle();
+    const p = profile as { first_name?: string | null; last_name?: string | null } | null;
+    const name = [p?.first_name, p?.last_name].filter(Boolean).join(" ").trim() || null;
+    const who = name || n.userEmail;
+    const title = `${who} couldn't use bundle code ${n.code} (${REASON_LABEL[n.reason] ?? n.reason})`;
+    const { data: inserted, error } = await n.supabaseAdmin
+      .from("admin_notifications")
+      .upsert(
+        {
+          kind: "bundle_code_refused",
+          dedupe_key: `bundle_code_refused:${n.userId}:${n.code}`,
+          user_id: n.userId,
+          client_email: n.userEmail,
+          client_name: name,
+          title,
+          body: `The hub told them: "${n.message}"`,
+          details: { code: n.code, reason: n.reason, ...n.details },
+        },
+        { onConflict: "dedupe_key", ignoreDuplicates: true },
+      )
+      .select("id");
+    if (error) {
+      // Without the saved row we can't tell a retry from a first time, so
+      // don't email (it would repeat on every retry).
+      logStep("Could not save admin notification", { error: error.message });
+      return;
+    }
+    // A repeat for this client and code inserts nothing: no second email.
+    if ((inserted ?? []).length === 0) return;
+    await emailStaffAboutRefusal(n, who, title);
+  } catch (e) {
+    logStep("Could not save admin notification", { error: e instanceof Error ? e.message : String(e) });
+  }
+}
+
 function categoryOfTypeName(name: string | undefined): PackageCategory | undefined {
   const trimmed = (name ?? "").trim();
   for (const [category, prefix] of Object.entries(CATEGORY_NAME_PREFIX)) {
@@ -235,6 +375,10 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Set once we know who is linking which code, so an unexpected error can
+  // still be reported to staff.
+  let notifyServerError: ((message: string) => Promise<void>) | null = null;
+
   try {
     logStep("Function started");
 
@@ -286,6 +430,31 @@ serve(async (req) => {
     }
     logStep("Linking code", { code, requestedTypeId });
 
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+    // Refuse the code and tell staff (first time per client and code).
+    const refuse = async (reason: string, message: string, extra: Record<string, unknown> = {}) => {
+      await notifyAdminsOfRefusal({
+        supabaseAdmin,
+        userId,
+        userEmail,
+        code,
+        reason,
+        message,
+        details: { appointmentTypeID: requestedTypeId, ...extra },
+      });
+      return fail(reason, message);
+    };
+    notifyServerError = (message) =>
+      notifyAdminsOfRefusal({
+        supabaseAdmin,
+        userId,
+        userEmail,
+        code,
+        reason: "server_error",
+        message,
+        details: { appointmentTypeID: requestedTypeId },
+      });
+
     const acuityAuth = btoa(`${acuityUserId}:${acuityApiKey}`);
 
     // ── Ask Acuity ────────────────────────────────────────────────────────
@@ -318,7 +487,7 @@ serve(async (req) => {
     if (!cert) {
       const types = await loadTherapyTypes();
       if (types.length === 0 && requestedTypeId === null) {
-        return fail(
+        return refuse(
           "server_unavailable",
           `We couldn't reach the scheduling system to check that code. Please try again in a moment, or email ${SUPPORT_EMAIL}.`,
         );
@@ -362,8 +531,18 @@ serve(async (req) => {
     if (!cert) {
       const { reason, message } = classifyFailures(failures);
       logStep("Acuity did not accept the code", { code, reason, tried: failures.length });
-      return fail(reason, message);
+      // Acuity's own wording, so staff can see exactly why (first few only).
+      const acuityErrors = [...new Set(failures.map((f) => `${f.status} ${f.code} ${f.message}`.trim()))].slice(0, 5);
+      return refuse(reason, message, { acuityErrors, typesTried: failures.length });
     }
+
+    const certDetails = {
+      certificateId: cert.id,
+      certificateEmail: cert.email ?? null,
+      certificateType: cert.type ?? null,
+      productID: cert.productID ?? null,
+      expiration: cert.expiration ?? null,
+    };
 
     logStep("Acuity certificate found", {
       certId: cert.id,
@@ -387,21 +566,23 @@ serve(async (req) => {
     const isMinutes = certType === "minutes";
     const isCounts = certType === "appointments" || certType === "counts";
     if (!isMinutes && !isCounts) {
-      return fail(
+      return refuse(
         "unsupported",
         `This code isn't a session bundle we can link automatically. Email ${SUPPORT_EMAIL} and we'll apply it for you.`,
+        certDetails,
       );
     }
 
     // Belt and braces — Acuity already applied these when we passed the email.
     if (cert.email && cert.email.trim().toLowerCase() !== userEmail.toLowerCase()) {
-      return fail(
+      return refuse(
         "wrong_email",
         `This bundle is registered to a different email address. Sign in with that email, or email ${SUPPORT_EMAIL} and we'll move it for you.`,
+        certDetails,
       );
     }
     if (cert.expiration && new Date(cert.expiration).getTime() < Date.now()) {
-      return fail("expired", `This bundle has expired. If you think that's wrong, email ${SUPPORT_EMAIL}.`);
+      return refuse("expired", `This bundle has expired. If you think that's wrong, email ${SUPPORT_EMAIL}.`, certDetails);
     }
 
     // ── Which bundle / category is it? ────────────────────────────────────
@@ -421,14 +602,14 @@ serve(async (req) => {
 
     const remainingSessions = remainingSessionsFor(cert, category, requestedTypeId, known);
     if (remainingSessions <= 0) {
-      return fail(
+      return refuse(
         "used_up",
         `All the sessions on this bundle have already been used. Email ${SUPPORT_EMAIL} if that doesn't look right.`,
+        certDetails,
       );
     }
 
     // ── Link it to the account ────────────────────────────────────────────
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
     const acuityCertId = `acuity-cert-${cert.id}`; // same key sync-acuity-packages uses
     // Hub-created certificates carry the CLIENT's name in `name`, so it is not
     // a usable package label — fall back to a category-based one instead.
@@ -482,9 +663,10 @@ serve(async (req) => {
     }
     if ((existingRows ?? []).length > 0) {
       logStep("Code linked to a different account — refusing", { certId: cert.id });
-      return fail(
+      return refuse(
         "claimed",
         `This bundle is already linked to another Fettle account. If it's yours, email ${SUPPORT_EMAIL} and we'll move it across.`,
+        { ...certDetails, linkedToUserIds: (existingRows ?? []).map((r: { user_id: string }) => r.user_id) },
       );
     }
 
@@ -533,6 +715,7 @@ serve(async (req) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logStep("ERROR", { message });
+    if (notifyServerError) await notifyServerError(message);
     return new Response(
       JSON.stringify({ ok: false, reason: "server_error", message }),
       { headers: jsonHeaders, status: 500 },
