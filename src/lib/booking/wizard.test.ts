@@ -49,6 +49,10 @@ describe("flowSteps", () => {
     expect(flowSteps({ ...chosen, mode: "matching" }).slice(0, 5)).toEqual(["intro", "who", "topics", "matches", "slot"]);
   });
 
+  it("skips who when matching from a service link", () => {
+    expect(flowSteps({ ...chosen, mode: "matching", serviceFromLink: true }).slice(0, 4)).toEqual(["intro", "topics", "matches", "slot"]);
+  });
+
   it("has no plan step for psychologists and asks the consultation only when there's a choice", () => {
     const psych = { ...chosen, psychologist: true, consultationCount: 3 };
     expect(flowSteps(psych)).toEqual(["intro", "consultation", "slot", "history", "details", "review", "pay", "done"]);

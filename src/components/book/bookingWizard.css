@@ -1,59 +1,40 @@
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
-
 /*
- * Booking wizard look (docs/QUIZ_BOOKING_FLOW.md §11): the fettle.ie booking
- * page's palette, Nunito and spacing, scoped to .booking-wizard so the rest of
- * the hub keeps its theme. Dark-mode values follow the hub's .dark class.
+ * Booking wizard look (docs/QUIZ_BOOKING_FLOW.md §11, Q10): the fettle.ie
+ * booking page's layout and spacing, drawn in the hub's own theme (DM Sans and
+ * Sora, the hub's orange and radius from src/index.css). Scoped to
+ * .booking-wizard. Light mode only, like the rest of the hub.
  */
 .booking-wizard {
-  --bw-orange: #ff7300;
-  --bw-orange-hover: #e86600;
-  --bw-orange-tint: #ffe4cc;
-  --bw-orange-soft: #fff5ec;
-  --bw-yellow: #ffce00;
-  --bw-green: #01a652;
-  --bw-green-tint: #e8f7ee;
-  --bw-blue: #0061ef;
-  --bw-page: #fdf5eb;
-  --bw-card: #ffffff;
-  --bw-ink: #2d2c2b;
-  --bw-ink-2: #4a4846;
-  --bw-muted: #6b6a68;
-  --bw-faint: #a9a39b;
-  --bw-line: #ebe2d6;
-  --bw-line-2: #f4eee6;
-  --bw-red: #d92d20;
-  --bw-red-tint: #fef3f2;
-  --bw-grey: #f7f3ee;
-  --bw-shadow: 0 1px 2px rgba(45, 44, 43, 0.05), 0 16px 48px -16px rgba(45, 44, 43, 0.16);
-  --bw-focus: 0 0 0 3px rgba(255, 115, 0, 0.45);
+  --bw-orange: hsl(var(--primary));
+  --bw-orange-hover: hsl(24 80% 48%);
+  --bw-orange-tint: hsl(var(--primary) / 0.2);
+  --bw-orange-soft: hsl(var(--primary) / 0.07);
+  --bw-yellow: hsl(var(--warning));
+  --bw-green: hsl(var(--success));
+  --bw-green-tint: hsl(var(--success) / 0.1);
+  --bw-blue: hsl(var(--info));
+  --bw-page: hsl(var(--background));
+  --bw-card: hsl(var(--card));
+  --bw-ink: hsl(var(--foreground));
+  --bw-ink-2: hsl(25 20% 25%);
+  --bw-muted: hsl(var(--muted-foreground));
+  --bw-faint: hsl(25 10% 62%);
+  --bw-line: hsl(var(--border));
+  --bw-line-2: hsl(var(--muted));
+  --bw-red: hsl(var(--destructive));
+  --bw-red-tint: hsl(var(--destructive) / 0.08);
+  --bw-grey: hsl(var(--muted));
+  --bw-shadow: 0 1px 2px hsl(25 30% 30% / 0.05), var(--shadow-elevated);
+  --bw-focus: 0 0 0 3px hsl(var(--ring) / 0.45);
+  --bw-radius: calc(var(--radius) * 1.5);
+  --bw-radius-sm: var(--radius);
+  --bw-radius-xs: calc(var(--radius) - 4px);
 
-  font-family: 'Nunito', system-ui, sans-serif;
+  font-family: var(--font-body);
   color: var(--bw-ink);
   background: var(--bw-page);
-  border-radius: 28px;
+  border-radius: var(--bw-radius);
   padding: 32px;
-}
-
-.dark .booking-wizard {
-  --bw-orange: #ff8a2b;
-  --bw-orange-hover: #ff9d4d;
-  --bw-orange-tint: #4a2a12;
-  --bw-orange-soft: #2e1e12;
-  --bw-green: #2fc173;
-  --bw-green-tint: #12301f;
-  --bw-page: #171513;
-  --bw-card: #221f1c;
-  --bw-ink: #f4efe9;
-  --bw-ink-2: #ddd6cd;
-  --bw-muted: #b3aca3;
-  --bw-faint: #847d74;
-  --bw-line: #3a352f;
-  --bw-line-2: #2d2925;
-  --bw-red: #ff6b5e;
-  --bw-red-tint: #3a1d1a;
-  --bw-grey: #2a2622;
-  --bw-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 48px -16px rgba(0, 0, 0, 0.6);
 }
 
 .booking-wizard *:focus-visible {
@@ -78,7 +59,7 @@
 
 .bw-card {
   background: var(--bw-card);
-  border-radius: 28px;
+  border-radius: var(--bw-radius);
   box-shadow: var(--bw-shadow);
   padding: 48px 56px;
   position: relative;
@@ -91,7 +72,7 @@
 }
 .bw-side-card {
   background: var(--bw-card);
-  border-radius: 24px;
+  border-radius: var(--bw-radius);
   box-shadow: var(--bw-shadow);
   padding: 24px;
 }
@@ -167,7 +148,8 @@
 }
 .bw-heading {
   font-size: clamp(26px, 3.1vw, 34px);
-  font-weight: 900;
+  font-family: var(--font-heading);
+  font-weight: 700;
   line-height: 1.15;
   margin: 0;
   color: var(--bw-ink);
@@ -261,7 +243,7 @@
   width: 100%;
   text-align: left;
   padding: 18px 22px;
-  border-radius: 18px;
+  border-radius: var(--bw-radius-sm);
   border: 1.5px solid var(--bw-line);
   background: var(--bw-card);
   color: var(--bw-ink);
@@ -280,7 +262,7 @@
 .bw-option-icon {
   width: 44px;
   height: 44px;
-  border-radius: 14px;
+  border-radius: var(--bw-radius-xs);
   background: var(--bw-grey);
   display: grid;
   place-items: center;
@@ -323,7 +305,7 @@
 .bw-note {
   margin-top: 16px;
   padding: 14px 18px;
-  border-radius: 16px;
+  border-radius: var(--bw-radius-sm);
   background: var(--bw-green-tint);
   color: var(--bw-ink);
   font-weight: 700;
@@ -416,7 +398,7 @@
   align-items: center;
   gap: 14px;
   padding: 16px 20px;
-  border-radius: 18px;
+  border-radius: var(--bw-radius-sm);
   border: 1.5px dashed var(--bw-orange);
   background: var(--bw-orange-soft);
   text-align: left;
@@ -446,7 +428,7 @@
 .bw-segment button[aria-pressed='true'] {
   background: var(--bw-card);
   color: var(--bw-ink);
-  box-shadow: 0 1px 3px rgba(45, 44, 43, 0.12);
+  box-shadow: 0 1px 3px hsl(25 30% 30% / 0.12);
 }
 .bw-slot-grid {
   display: grid;
@@ -460,7 +442,7 @@
 }
 .bw-cal {
   border: 1.5px solid var(--bw-line);
-  border-radius: 20px;
+  border-radius: var(--bw-radius-sm);
   padding: 16px;
 }
 .bw-cal-head {
@@ -572,7 +554,7 @@
   color: #fff;
 }
 .bw-skeleton {
-  border-radius: 12px;
+  border-radius: var(--bw-radius-xs);
   background: var(--bw-line-2);
   animation: bw-pulse 1.4s ease-in-out infinite;
 }
@@ -602,7 +584,7 @@
 }
 .bw-input {
   width: 100%;
-  border-radius: 14px;
+  border-radius: var(--bw-radius-xs);
   border: 1.5px solid var(--bw-line);
   background: var(--bw-card);
   color: var(--bw-ink);
@@ -655,7 +637,7 @@
   gap: 16px;
   align-items: flex-start;
   padding: 22px 24px;
-  border-radius: 20px;
+  border-radius: var(--bw-radius-sm);
   border: 1.5px solid var(--bw-line);
   background: var(--bw-card);
   color: var(--bw-ink);
@@ -729,7 +711,7 @@
   gap: 14px;
   align-items: center;
   padding: 14px 18px;
-  border-radius: 18px;
+  border-radius: var(--bw-radius-sm);
   background: var(--bw-grey);
   margin-bottom: 20px;
 }
@@ -754,7 +736,7 @@
 .bw-total {
   margin-top: 20px;
   padding: 18px 20px;
-  border-radius: 18px;
+  border-radius: var(--bw-radius-sm);
   background: var(--bw-grey);
 }
 .bw-total-line {
@@ -875,11 +857,11 @@
 @media (max-width: 760px) {
   .booking-wizard {
     padding: 16px 14px;
-    border-radius: 20px;
+    border-radius: var(--bw-radius-sm);
   }
   .bw-card {
     padding: 32px 20px 0;
-    border-radius: 22px;
+    border-radius: var(--bw-radius);
   }
   .bw-phase-labels {
     display: none;

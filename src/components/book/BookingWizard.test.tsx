@@ -24,7 +24,8 @@ vi.mock("@/hooks/useAcuity", () => ({
   useAcuityAppointments: () => ({ appointments: data.appointments, loading: false, error: null, refetch: vi.fn() }),
 }));
 
-vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
+// The Pay step sets up a payment on mount; keep it pending so nothing is called for real.
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { functions: { invoke: () => new Promise(() => {}) } } }));
 vi.mock("@/hooks/useUserPackages", () => ({ useActivePackages: () => ({ packages: [], isLoading: false }) }));
 vi.mock("@/hooks/useReferrals", () => ({ useReferrals: () => ({ data: { balance_cents: 0 } }) }));
 
