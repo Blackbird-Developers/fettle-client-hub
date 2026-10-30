@@ -61,9 +61,18 @@ import {
     Zap,
     Lock,
     FileText,
+    AlertCircle,
+    Mail,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getPackageCategory } from '@/lib/packageCategory';
+import {
+    bundleProblem,
+    couponProblem,
+    shouldCheckAsBundle,
+    supportMailto,
+    type CodeProblem,
+} from '@/lib/booking/codeProblem';
 import {
     ASSESSMENTS,
     getAssessmentPriceOverride,
@@ -212,6 +221,9 @@ export function BookingModal({
         receiptUrl?: string;
     } | null>(null);
     const [couponCode, setCouponCode] = useState('');
+    // A code the client typed that couldn't be used. While set, the confirm
+    // step explains why and offers: try another code, pay, or contact us.
+    const [codeProblem, setCodeProblem] = useState<CodeProblem | null>(null);
     const [usePackageCredits, setUsePackageCredits] = useState(false);
     const [applyReferralCredit, setApplyReferralCredit] = useState(false);
     const [selectedPackageId, setSelectedPackageId] = useState<string | null>(
@@ -744,11 +756,14 @@ export function BookingModal({
         }
     };
 
-    // The "coupon" the client typed is really a session-bundle certificate
-    // (create-payment-intent tells us via `packageCertificate`). Link it to the
-    // account and flip this booking over to a package credit — the client has
-    // already paid for these sessions, so we must not charge them again.
-    const handleBundleCodeDetected = async (code: string) => {
+    // The "coupon" the client typed is (or may be) a session-bundle
+    // certificate. Link it to the account and flip this booking over to a
+    // package credit — the client has already paid for these sessions, so we
+    // must not charge them again. If Acuity refuses it, keep the client on the
+    // confirm step with the reason (see codeProblem) rather than charging them.
+    // `couponRejected` is create-payment-intent's verdict on the same code, used
+    // for the wording when it turns out to be a discount code after all.
+    const handleBundleCodeDetected = async (code: string, couponRejected?: string | null) => {
         const categoryLabel: Record<string, string> = {
             individual: 'individual therapy',
             couples: 'couples therapy',
@@ -762,19 +777,25 @@ export function BookingModal({
                 { body: { code, appointmentTypeID: selectedType } }
             );
             if (linkError) {
-                // Non-2xx (e.g. expired session at the gateway) — surface the
-                // function's own message when there is one.
-                let message = "We couldn't link this bundle code right now. Please try again.";
+                // Non-2xx (e.g. expired session at the gateway) — use the
+                // function's own reason and message when there is one.
+                let body: { reason?: string; message?: string } | null = null;
                 try {
-                    const body = await (linkError as { context?: Response }).context?.json();
-                    if (body?.message) message = body.message;
+                    body = await (linkError as { context?: Response }).context?.json();
                 } catch {
                     /* keep the default message */
                 }
-                throw new Error(message);
+                setCodeProblem(
+                    bundleProblem(code, {
+                        reason: body?.reason || 'server_error',
+                        message: body?.message || "We couldn't check this bundle code right now. Please try again, or email hello@fettle.ie.",
+                    })
+                );
+                return;
             }
             if (!link?.ok) {
-                throw new Error(link?.message || "We couldn't link this bundle code to your account.");
+                setCodeProblem(bundleProblem(code, link, couponRejected));
+                return;
             }
 
             // Refresh credits so the confirm step shows the linked bundle.
@@ -787,14 +808,16 @@ export function BookingModal({
 
             if (link.applicable === false) {
                 // Linked, but restricted to another session type (e.g. a youth
-                // bundle typed on an individual booking). Leave this booking on
-                // card payment and explain.
+                // bundle typed on an individual booking). Keep this booking on
+                // the confirm step and explain.
                 setUsePackageCredits(false);
                 setSelectedPackageId(null);
                 const bundleFor = link.categoryLabel ? ` for ${link.categoryLabel}` : '';
-                toast({
-                    title: 'Bundle linked to your account',
-                    description: `${sessionsText} available${bundleFor}. It can't be used for this ${categoryLabel[sessionCategory] || ''} session — choose a matching session type to use it, or continue to pay for this one.`,
+                setCodeProblem({
+                    code,
+                    reason: 'not_applicable',
+                    title: 'This bundle is for a different session type',
+                    message: `We've linked it to your account: ${sessionsText} available${bundleFor}. It can't be used for this ${categoryLabel[sessionCategory] || ''} session. Go back and choose a matching session type to use it, or pay for this one.`,
                 });
                 return;
             }
@@ -805,23 +828,25 @@ export function BookingModal({
                 title: link.alreadyLinked ? 'Bundle found on your account' : 'Bundle linked to your account',
                 description: `${sessionsText} available. Press "Book Session" to use one for this booking — no payment needed.`,
             });
-        } catch (error) {
-            const message = error instanceof Error
-                ? error.message
-                : "We couldn't link this bundle code. Please try again or contact hello@fettle.ie for support.";
-            toast({
-                title: 'Bundle code not linked',
-                description: message,
-                variant: 'destructive',
-            });
+        } catch {
+            setCodeProblem(
+                bundleProblem(code, {
+                    reason: 'server_error',
+                    message: "We couldn't check this bundle code. Please try again or email hello@fettle.ie.",
+                })
+            );
         }
     };
 
-    const handleProceedToPayment = async () => {
+    // `skipCode`: the client chose "Pay for this session" after their code
+    // was refused, so charge the full price without it.
+    const handleProceedToPayment = async (options?: { skipCode?: boolean }) => {
         // If using package credits, book with package instead
         if (usePackageCredits && selectedPackageId) {
             return handleBookWithPackage();
         }
+        setCodeProblem(null);
+        const codeToSend = options?.skipCode ? '' : couponCode.trim();
 
         console.log('[Stripe Debug] handleProceedToPayment called');
         console.log('[Stripe Debug] selectedType:', selectedType);
@@ -903,7 +928,7 @@ export function BookingModal({
                 // options there).
                 couponCode: isClinicalCategory
                     ? undefined
-                    : couponCode.trim() || undefined,
+                    : codeToSend || undefined,
                 // Apply referral credit (server reduces the charge / may fully cover)
                 useReferralCredit: isClinicalCategory
                     ? false
@@ -973,7 +998,7 @@ export function BookingModal({
             }
 
             // Surface the discount-code outcome before charging.
-            if (couponCode.trim()) {
+            if (codeToSend) {
                 if (data.discountApplied) {
                     // Percentage codes report discountPercent; fixed-amount
                     // codes report only discountAmount (cents off).
@@ -985,32 +1010,16 @@ export function BookingModal({
                         description: `You're paying €${((data.amount || 0) / 100).toFixed(2)} instead of €${((data.originalAmount || 0) / 100).toFixed(2)}.`,
                     });
                 } else if (data.couponRejected) {
-                    const reasons: Record<string, string> = {
-                        unknown_code: "That coupon code isn't recognised.",
-                        not_signed_in: "We couldn't verify your account to apply this coupon.",
-                        server_unavailable: "We couldn't verify your coupon right now — please try again.",
-                        validation_error: "We couldn't verify your coupon right now — please try again.",
-                        not_earned: "This reward hasn't been unlocked on your account yet.",
-                        coupon_invalid: "This coupon is no longer valid.",
-                        coupon_not_found: "This coupon is no longer valid.",
-                        coupon_no_discount: "This coupon is no longer valid.",
-                        below_minimum: "This coupon can't be applied to this session.",
-                        promo_inactive: 'This discount code is no longer active.',
-                        promo_expired: 'This discount code has expired.',
-                        promo_restricted: "This discount code can't be used here.",
-                        promo_minimum: 'This discount code needs a higher order total.',
-                        promo_currency: "This discount code isn't valid for euro payments.",
-                        promo_no_discount: "This discount code doesn't reduce this payment.",
-                        acuity_expired: 'This coupon has expired.',
-                        acuity_not_applicable: "This coupon doesn't apply to this session type.",
-                        acuity_package_code: "This is a session-bundle code, but we couldn't link it to your account just now — please try again or email hello@fettle.ie.",
-                        acuity_unsupported: "This code can't be applied here. Email hello@fettle.ie and we'll apply it for you.",
-                    };
-                    toast({
-                        title: 'Coupon not applied',
-                        description: `${reasons[data.couponRejected] || 'This coupon could not be applied.'} Proceeding at full price.`,
-                        variant: 'destructive',
-                    });
+                    // Never fall through to card payment on a refused code.
+                    // Codes Stripe and the rewards didn't know may be bundles
+                    // Acuity refused — ask redeem-package-code for the real
+                    // reason (it also links the bundle if it is usable).
+                    if (shouldCheckAsBundle(data.couponRejected)) {
+                        await handleBundleCodeDetected(codeToSend, data.couponRejected);
+                    } else {
+                        setCodeProblem(couponProblem(codeToSend, data.couponRejected));
+                    }
+                    return;
                 }
             }
 
@@ -1101,6 +1110,7 @@ export function BookingModal({
         setPaymentLivemode(null);
         setBookingResult(null);
         setCouponCode('');
+        setCodeProblem(null);
         setUsePackageCredits(false);
         setApplyReferralCredit(false);
         setSelectedPackageId(null);
@@ -2941,11 +2951,12 @@ export function BookingModal({
                                     <Input
                                         id="couponCode"
                                         value={couponCode}
-                                        onChange={(e) =>
+                                        onChange={(e) => {
                                             setCouponCode(
                                                 e.target.value.toUpperCase()
-                                            )
-                                        }
+                                            );
+                                            setCodeProblem(null);
+                                        }}
                                         placeholder="Enter coupon or bundle code"
                                         className="uppercase"
                                     />
@@ -2954,6 +2965,60 @@ export function BookingModal({
                                     </p>
                                 </div>
                             )}
+
+                        {/* A refused code: say why and let the client choose
+                            what to do — never move them to payment silently. */}
+                        {codeProblem && !usePackageCredits && (
+                            <div
+                                role="alert"
+                                className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3">
+                                <div className="flex gap-3">
+                                    <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                                    <div className="space-y-1">
+                                        <p className="font-semibold text-foreground">
+                                            {codeProblem.title}
+                                        </p>
+                                        <p className="text-sm text-muted-foreground">
+                                            {codeProblem.message}
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">
+                                            Code: <span className="font-mono">{codeProblem.code}</span>
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex flex-col sm:flex-row gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            setCodeProblem(null);
+                                            setCouponCode('');
+                                            document.getElementById('couponCode')?.focus();
+                                        }}>
+                                        Try another code
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={isSubmitting}
+                                        onClick={() => {
+                                            setCouponCode('');
+                                            handleProceedToPayment({ skipCode: true });
+                                        }}>
+                                        <CreditCard className="h-4 w-4" />
+                                        Pay for this session
+                                    </Button>
+                                    <Button asChild variant="ghost" size="sm">
+                                        <a href={supportMailto(codeProblem)}>
+                                            <Mail className="h-4 w-4" />
+                                            Email hello@fettle.ie
+                                        </a>
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Referral credit - only when paying by card and you have credit */}
                         {!usePackageCredits &&
@@ -3006,7 +3071,7 @@ export function BookingModal({
                                 Back
                             </Button>
                             <Button
-                                onClick={handleProceedToPayment}
+                                onClick={() => handleProceedToPayment()}
                                 className="flex-1 gap-2"
                                 disabled={isSubmitting}>
                                 {isSubmitting ? (
