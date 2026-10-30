@@ -25,6 +25,12 @@ const LOYALTY_COUPONS: Record<string, { achievementId: string }> = {
   FETTLELOYALTY10: { achievementId: "twenty_sessions" },
 };
 
+// Codes that exist on the shared Stripe account for the fettle.ie website only.
+// TENOFF is the website's first-time-client welcome offer; it never applies in
+// the portal, for anyone. Refused before the Stripe lookup: full price, the
+// booking still goes ahead.
+const WEBSITE_ONLY_CODES = new Set(["TENOFF"]);
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -139,7 +145,12 @@ serve(async (req) => {
     const trimmedCoupon = (couponCode || "").toString().trim();
     const normalizedCoupon = trimmedCoupon.toUpperCase();
 
-    if (normalizedCoupon) {
+    if (WEBSITE_ONLY_CODES.has(normalizedCoupon)) {
+      couponRejected = "website_only";
+      logStep("Website-only code rejected in the portal", { normalizedCoupon });
+    }
+
+    if (normalizedCoupon && !couponRejected) {
       const loyalty = LOYALTY_COUPONS[normalizedCoupon];
       if (!loyalty) {
         // Not a loyalty reward — try it as a Stripe promotion code. Mirrors
