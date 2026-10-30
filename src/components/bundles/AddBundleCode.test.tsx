@@ -58,6 +58,7 @@ describe("AddBundleCode", () => {
         packageName: "3 Session Bundle",
         remainingSessions: 1,
         categoryLabel: null,
+        category: null,
         alreadyLinked: true,
       })
     );

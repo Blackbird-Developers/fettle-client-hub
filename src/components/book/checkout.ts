@@ -175,6 +175,8 @@ export async function confirmBundlePayment(
 
 export interface LinkedBundle {
   ok: boolean;
+  /** Why redeem-package-code refused it (wrong_email, used_up, discount_code…). */
+  reason?: string;
   message?: string;
   applicable?: boolean;
   alreadyLinked?: boolean;

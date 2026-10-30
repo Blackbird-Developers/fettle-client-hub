@@ -26,7 +26,10 @@ vi.mock("@/hooks/useAcuity", () => ({
 
 // The Pay step sets up a payment on mount; keep it pending so nothing is called for real.
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { functions: { invoke: () => new Promise(() => {}) } } }));
-vi.mock("@/hooks/useUserPackages", () => ({ useActivePackages: () => ({ packages: [], isLoading: false }) }));
+vi.mock("@/hooks/useUserPackages", () => ({
+  useActivePackages: () => ({ packages: [], isLoading: false }),
+  useRefreshBundlesOnOpen: () => {},
+}));
 vi.mock("@/hooks/useReferrals", () => ({ useReferrals: () => ({ data: { balance_cents: 0 } }) }));
 
 vi.mock("@/hooks/useTherapistDirectory", () => ({

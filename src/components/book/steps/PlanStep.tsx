@@ -1,5 +1,8 @@
-import { useEffect } from 'react';
-import { Check, Tag } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Check, Tag, Ticket } from 'lucide-react';
+import { AddBundleCode } from '@/components/bundles/AddBundleCode';
+import { BundleCard } from '@/components/bundles/BundleCard';
+import { notUsableReason } from '@/lib/bundles';
 import { formatEuro } from '@/lib/sessionBundles';
 import { track } from '@/lib/booking/analytics';
 import { CREDIT_PLAN_ID } from '@/lib/booking/payment';
@@ -16,6 +19,15 @@ export function PlanStep() {
   const selectedId = w.state.planId;
 
   const credits = w.credits && w.credits.remaining > 0 ? w.credits : null;
+  const [showCodeForm, setShowCodeForm] = useState(false);
+
+  // The client's bundles: those that can pay for this session, and the rest
+  // with the reason they can't (shown rather than hidden).
+  const usable = w.activeBundles.filter((pkg) => notUsableReason(pkg, service) === null);
+  const others = w.activeBundles
+    .map((pkg) => ({ pkg, reason: notUsableReason(pkg, service) }))
+    .filter((b): b is { pkg: (typeof b)['pkg']; reason: string } => b.reason !== null);
+  const chosenBundleId = w.state.creditPackageId ?? w.credits?.packageId ?? null;
 
   // Unused bundle credits start selected (§10.2), otherwise the recommended plan.
   useEffect(() => {
@@ -92,6 +104,68 @@ export function PlanStep() {
             />
           ))}
         </div>
+        {/* Which bundle the session comes from, and bundles that don't fit. */}
+        {credits && selectedId === CREDIT_PLAN_ID && usable.length > 0 && (
+          <div className="mt-4 grid gap-2">
+            {usable.length > 1 && <p className="bw-option-desc">Choose which bundle to use</p>}
+            {usable.map((pkg) => (
+              <BundleCard
+                key={pkg.id}
+                bundle={pkg}
+                selected={pkg.id === chosenBundleId}
+                onSelect={
+                  usable.length > 1 ? () => w.update((s) => ({ ...s, creditPackageId: pkg.id })) : undefined
+                }
+              />
+            ))}
+          </div>
+        )}
+        {others.length > 0 && (
+          <div className="mt-4 grid gap-2">
+            <p className="bw-option-desc">Can’t be used for this session</p>
+            {others.map(({ pkg, reason }) => (
+              <BundleCard key={pkg.id} bundle={pkg} unusableReason={reason} />
+            ))}
+          </div>
+        )}
+
+        {/* "Have a bundle? Add your code" (bought on fettle.ie, or from the clinic). */}
+        <div className="mt-4">
+          <button
+            type="button"
+            className="bw-link inline-flex items-center gap-1.5"
+            aria-expanded={showCodeForm}
+            onClick={() => setShowCodeForm((v) => !v)}
+          >
+            <Ticket className="h-4 w-4" /> Have a bundle? Add your code
+          </button>
+          {showCodeForm && (
+            <AddBundleCode
+              inputId="bw-bundle-code"
+              className="mt-3"
+              onLinked={(bundle) => {
+                setShowCodeForm(false);
+                w.markCreditsChanged();
+                const sessionsText = `${bundle.remainingSessions} session${bundle.remainingSessions === 1 ? '' : 's'}`;
+                if (!bundle.category || bundle.category === service) {
+                  w.update((s) => ({ ...s, planId: CREDIT_PLAN_ID, creditPackageId: bundle.packageId ?? s.creditPackageId }));
+                  w.showMessage({
+                    kind: 'success',
+                    title: bundle.alreadyLinked ? 'Bundle found on your account' : 'Bundle added to your account',
+                    text: `${bundle.packageName}: ${sessionsText} left. We’ll use one for this booking, with nothing to pay.`,
+                  });
+                } else {
+                  w.showMessage({
+                    kind: 'info',
+                    title: bundle.alreadyLinked ? 'Bundle found on your account' : 'Bundle added to your account',
+                    text: `${bundle.packageName} is for ${bundle.categoryLabel ?? 'another session type'}, so it can’t be used for this session. You can use it when you book one of those.`,
+                  });
+                }
+              }}
+            />
+          )}
+        </div>
+
         {!w.state.showMorePlans && hidden.length > 0 && (
           <p className="mt-4">
             <button type="button" className="bw-link" onClick={() => w.update((s) => ({ ...s, showMorePlans: true }))}>

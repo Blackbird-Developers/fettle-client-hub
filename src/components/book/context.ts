@@ -1,5 +1,6 @@
 import { type RefObject, createContext, useContext } from 'react';
 import type { AcuityAppointmentType } from '@/hooks/useAcuity';
+import type { UserPackage } from '@/hooks/useUserPackages';
 import type { SlotSource } from '@/lib/booking/availability';
 import type { PaymentKind } from '@/lib/booking/payment';
 import type { BookingPlan } from '@/lib/booking/plans';
@@ -82,6 +83,8 @@ export interface WizardApi {
 
   /** Unused package credits for this service (§10.2), or null. */
   credits: { packageId: string; remaining: number } | null;
+  /** All the client's bundles with sessions left (for the bundle cards). */
+  activeBundles: UserPackage[];
   /** Refresh credits after a bundle code was linked. */
   markCreditsChanged: () => void;
   referralBalanceCents: number;

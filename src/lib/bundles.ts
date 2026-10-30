@@ -44,7 +44,7 @@ export interface BundleSummary {
 export function summariseBundle(pkg: BundleLike, now: Date = new Date()): BundleSummary {
   const category = getPackageCategory(pkg.package_id);
   const remaining = Math.max(0, pkg.remaining_sessions);
-  const total = Math.max(pkg.total_sessions, remaining);
+  const total = Math.max(pkg.total_sessions || 0, remaining);
   const expiresAt = pkg.expires_at ? new Date(pkg.expires_at) : null;
   const validExpiry = expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null;
   const daysToExpiry = validExpiry ? differenceInCalendarDays(validExpiry, now) : null;

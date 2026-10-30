@@ -6,6 +6,7 @@ import { useInvalidateSlots } from '@/hooks/useTherapistSlots';
 import { recheckSlot } from '@/lib/booking/availability';
 import { track } from '@/lib/booking/analytics';
 import { couponRejectionMessage, euroWithCents } from '@/lib/booking/coupon';
+import { type CodeProblem, SUPPORT_EMAIL, bundleProblem, shouldCheckAsBundle, supportMailto } from '@/lib/booking/codeProblem';
 import {
   CREDIT_PLAN_ID,
   type PaymentKind,
@@ -68,7 +69,8 @@ type Checkout =
       amountCents: number;
       originalCents: number;
       discount: { code: string; savedCents: number } | null;
-      rejected: string | null;
+      /** A refused code: the reason, with "Try another code" and "Email us". */
+      rejected: { text: string; problem: CodeProblem } | null;
       referralCents: number;
     };
 
@@ -317,6 +319,43 @@ export function PayStep() {
         }
         return;
       }
+      // A refused code that may be a session bundle: ask redeem-package-code,
+      // which links a usable bundle (book with a credit instead) or says why
+      // Acuity refused it, rather than just "not recognised".
+      let rejected: { text: string; problem: CodeProblem } | null = null;
+      if (s.coupon && !intent.discountApplied && intent.couponRejected) {
+        rejected = {
+          text: couponRejectionMessage(intent.couponRejected),
+          problem: { code: s.coupon, reason: intent.couponRejected, title: '', message: '' },
+        };
+        if (shouldCheckAsBundle(intent.couponRejected)) {
+          const link = await redeemBundleCode(s.coupon, request.appointmentTypeID);
+          if (cancelled) return;
+          if (link.ok && link.applicable !== false && link.package?.id) {
+            w.markCreditsChanged();
+            w.update((st) => ({ ...st, coupon: '', planId: CREDIT_PLAN_ID, creditPackageId: String(link.package!.id) }));
+            w.showMessage({
+              kind: 'success',
+              title: link.alreadyLinked ? 'Bundle found on your account' : 'Bundle linked to your account',
+              text: `${link.remainingSessions ?? 0} session${link.remainingSessions === 1 ? '' : 's'} available. You can use one for this booking, with nothing to pay.`,
+            });
+            return;
+          }
+          if (link.ok) w.markCreditsChanged();
+          const problem: CodeProblem = link.ok
+            ? {
+                code: s.coupon,
+                reason: 'not_applicable',
+                title: 'This bundle is for a different session type',
+                message: `We’ve added it to your account${link.categoryLabel ? ` (it’s for ${link.categoryLabel})` : ''}, but it can’t pay for this session.`,
+              }
+            : bundleProblem(s.coupon, link, intent.couponRejected);
+          // A plain discount code Acuity doesn't know keeps the coupon wording.
+          if (link.ok || link.reason !== 'discount_code') {
+            rejected = { text: `${problem.title}. ${problem.message} You can pay the full price below.`, problem };
+          }
+        }
+      }
       if (!intent.clientSecret || !intent.paymentIntentId) {
         setCheckout({ mode: 'error', message: 'Payment couldn’t be set up. Please try again.' });
         return;
@@ -331,7 +370,7 @@ export function PayStep() {
         amountCents: amount,
         originalCents: original,
         discount: intent.discountApplied && s.coupon ? { code: s.coupon, savedCents: original - amount - (intent.referralCreditApplied ?? 0) } : null,
-        rejected: s.coupon && !intent.discountApplied && intent.couponRejected ? couponRejectionMessage(intent.couponRejected) : null,
+        rejected,
         referralCents: intent.referralCreditApplied ?? 0,
       });
     })();
@@ -402,7 +441,7 @@ export function PayStep() {
             <span>{amountLabel}</span>
           </div>
         </div>
-        {checkout.mode === 'card' && <DiscountBanner checkout={checkout} />}
+        {checkout.mode === 'card' && <DiscountBanner checkout={checkout} onTryAnotherCode={() => w.goTo('review')} />}
         {checkout.mode === 'card' && w.service !== 'psychologist' && w.referralBalanceCents > 0 && (
           <label className="bw-check mt-4">
             <input
@@ -482,7 +521,13 @@ export function PayStep() {
   );
 }
 
-function DiscountBanner({ checkout }: { checkout: Extract<Checkout, { mode: 'card' }> }) {
+function DiscountBanner({
+  checkout,
+  onTryAnotherCode,
+}: {
+  checkout: Extract<Checkout, { mode: 'card' }>;
+  onTryAnotherCode: () => void;
+}) {
   if (checkout.discount) {
     return (
       <div className="bw-note mt-4" role="status">
@@ -499,9 +544,23 @@ function DiscountBanner({ checkout }: { checkout: Extract<Checkout, { mode: 'car
   return (
     <>
       {checkout.rejected && (
-        <p className="bw-note is-orange mt-4" role="status">
-          {checkout.rejected}
-        </p>
+        <div className="bw-note is-orange mt-4" role="status">
+          <p>{checkout.rejected.text}</p>
+          <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            <button type="button" className="bw-link" onClick={onTryAnotherCode}>
+              Try another code
+            </button>
+            <a
+              className="bw-link"
+              href={supportMailto({
+                ...checkout.rejected.problem,
+                title: checkout.rejected.problem.title || checkout.rejected.text,
+              })}
+            >
+              Email {SUPPORT_EMAIL}
+            </a>
+          </p>
+        </div>
       )}
       {checkout.referralCents > 0 && (
         <p className="bw-note mt-4" role="status">

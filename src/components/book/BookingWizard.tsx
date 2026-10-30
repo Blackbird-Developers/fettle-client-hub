@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useAcuityAppointments } from '@/hooks/useAcuity';
 import { useReferrals } from '@/hooks/useReferrals';
 import { useTherapistDirectory } from '@/hooks/useTherapistDirectory';
-import { useActivePackages } from '@/hooks/useUserPackages';
+import { useActivePackages, useRefreshBundlesOnOpen } from '@/hooks/useUserPackages';
 import { getPackageCategory } from '@/lib/packageCategory';
 import { intakeFieldsFor } from '@/lib/booking/intake';
 import { buildBookingNotes } from '@/lib/booking/notes';
@@ -104,6 +104,8 @@ export function BookingWizard() {
   const [state, setState] = useState<WizardState | null>(null);
   const queryClient = useQueryClient();
   const { packages: activePackages, isLoading: packagesLoading } = useActivePackages();
+  // Re-check Acuity for bundles bought while signed in (e.g. on fettle.ie).
+  useRefreshBundlesOnOpen(true);
   const { data: referralData } = useReferrals();
 
   // A redirect payment method (Revolut Pay, PayPal…) came back here (§7.4).
@@ -583,6 +585,7 @@ export function BookingWizard() {
     hasPastSessions,
     knownPhone,
     credits,
+    activeBundles: activePackages,
     markCreditsChanged: () => void queryClient.invalidateQueries({ queryKey: ['user-packages'] }),
     referralBalanceCents: referralData?.balance_cents ?? 0,
     bookingRequest,

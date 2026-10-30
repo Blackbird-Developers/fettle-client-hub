@@ -3,6 +3,7 @@ import { CalendarDays, CheckCircle2, Mail, Tag, User, Users } from 'lucide-react
 import { formatEuro } from '@/lib/sessionBundles';
 import { track } from '@/lib/booking/analytics';
 import { normaliseCouponCode } from '@/lib/booking/coupon';
+import { deductionMessage } from '@/lib/bundles';
 import { CREDIT_PLAN_ID } from '@/lib/booking/payment';
 import { formatSlot, formatSlotTime, slotDateKey } from '@/lib/booking/time';
 import { type Consents, type StepId, consentsComplete } from '@/lib/booking/wizard';
@@ -87,10 +88,15 @@ export function ReviewStep() {
     w.goNext();
   };
 
+  const creditBundle = isCredit
+    ? w.activeBundles.find((pkg) => pkg.id === (s.creditPackageId ?? w.credits?.packageId))
+    : undefined;
   const totalNote = psych
     ? '30-minute clinical consultation'
     : isCredit
-      ? 'Uses 1 of your bundle sessions'
+      ? creditBundle
+        ? deductionMessage(creditBundle)
+        : 'Uses 1 of your bundle sessions'
     : isBundle && plan
       ? `${formatEuro(plan.perSession)} per session · you save ${formatEuro(plan.save)}`
       : 'Pay per session, no commitment';
@@ -156,6 +162,13 @@ export function ReviewStep() {
             <label className="bw-label" htmlFor="bw-coupon">
               Have a discount code?
             </label>
+            <span className="bw-option-desc">
+              Got a bundle code instead? Add it on the{' '}
+              <button type="button" className="bw-link" onClick={() => w.editFromReview('plan')}>
+                Plan step
+              </button>
+              .
+            </span>
             <div className="flex gap-2">
               <input
                 id="bw-coupon"

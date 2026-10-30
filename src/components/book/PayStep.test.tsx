@@ -16,7 +16,14 @@ vi.hoisted(() => vi.stubEnv("VITE_STRIPE_PUBLISHABLE_KEY", "pk_test_wizard"));
 
 const data = vi.hoisted(() => ({
   days: [] as { date: string; times: string[] }[],
-  packages: [] as { id: string; package_id: string; remaining_sessions: number }[],
+  packages: [] as {
+    id: string;
+    package_id: string;
+    remaining_sessions: number;
+    package_name?: string;
+    total_sessions?: number;
+    expires_at?: string | null;
+  }[],
   slotFree: true,
   confirmStatus: "succeeded",
   referralCents: 0,
@@ -45,7 +52,10 @@ vi.mock("@/hooks/useAcuity", () => ({
     refetch: vi.fn(),
   }),
 }));
-vi.mock("@/hooks/useUserPackages", () => ({ useActivePackages: () => ({ packages: data.packages, isLoading: false }) }));
+vi.mock("@/hooks/useUserPackages", () => ({
+  useActivePackages: () => ({ packages: data.packages, isLoading: false }),
+  useRefreshBundlesOnOpen: () => {},
+}));
 vi.mock("@/hooks/useReferrals", () => ({ useReferrals: () => ({ data: { balance_cents: data.referralCents } }) }));
 vi.mock("@/hooks/useTherapistDirectory", () => ({
   useTherapistDirectory: () => ({
@@ -202,6 +212,66 @@ describe("Pay step", () => {
 
     expect(await screen.findByText("This discount code has expired. Proceeding at full price.")).toBeInTheDocument();
     expect(checkout.createSessionIntent.mock.calls[0][1]).toEqual({ couponCode: "OLDCODE", useReferralCredit: false });
+  });
+
+  it("re-checks a refused code as a bundle and says why it can't be used", async () => {
+    const user = userEvent.setup();
+    checkout.createSessionIntent.mockResolvedValue({
+      ok: true,
+      intent: { clientSecret: "pi_3_secret", paymentIntentId: "pi_3", amount: 9500, originalAmount: 9500, couponRejected: "unknown_code" },
+    });
+    checkout.redeemBundleCode.mockResolvedValue({ ok: false, reason: "used_up", message: "All 6 sessions on this bundle have been used." });
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/book?therapist=7"]}>
+          <BookingWizard />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    await user.click(await screen.findByRole("button", { name: "Let’s begin →" }));
+    await user.click(await screen.findByRole("button", { name: /Earliest time/ }));
+    await user.click(screen.getByRole("button", { name: "Continue →" }));
+    await user.click(await screen.findByRole("button", { name: "Continue to payment →" }));
+    await user.click(await screen.findByRole("radio", { name: /Single session/ }));
+    await user.click(screen.getByRole("button", { name: "Continue →" }));
+    await user.type(await screen.findByLabelText("Have a discount code?"), "704E3907{Enter}");
+    for (const box of screen.getAllByRole("checkbox")) await user.click(box);
+    await user.click(screen.getByRole("button", { name: "Continue to payment →" }));
+
+    expect(
+      await screen.findByText(
+        "All sessions on this bundle are used. All 6 sessions on this bundle have been used. You can pay the full price below."
+      )
+    ).toBeInTheDocument();
+    expect(checkout.redeemBundleCode).toHaveBeenCalledWith("704E3907", expect.any(Number));
+    expect(screen.getByRole("link", { name: "Email hello@fettle.ie" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Try another code" }));
+    expect(await screen.findByRole("heading", { name: "Everything look right?" })).toBeInTheDocument();
+  });
+
+  it("shows bundles that can't pay for this session, and the add-code option", async () => {
+    const user = userEvent.setup();
+    data.packages = [
+      { id: "pkg-y", package_id: "1370588", remaining_sessions: 2, package_name: "Youth Bundle 3 x 60min", total_sessions: 3, expires_at: null },
+    ];
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/book?therapist=7"]}>
+          <BookingWizard />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    await user.click(await screen.findByRole("button", { name: "Let’s begin →" }));
+    await user.click(await screen.findByRole("button", { name: /Earliest time/ }));
+    await user.click(screen.getByRole("button", { name: "Continue →" }));
+    await user.click(await screen.findByRole("button", { name: "Continue to payment →" }));
+
+    expect(await screen.findByText("Can’t be used for this session")).toBeInTheDocument();
+    expect(
+      screen.getByText("This bundle is for youth therapy, so it can't be used for individual therapy sessions.")
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Have a bundle\? Add your code/ }));
+    expect(screen.getByLabelText("Bundle code")).toBeInTheDocument();
   });
 
   it("books with an unused bundle credit, with no card", async () => {

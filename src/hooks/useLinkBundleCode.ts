@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { bundleProblem, type CodeProblem } from '@/lib/booking/codeProblem';
+import type { PackageCategory } from '@/lib/packageCategory';
 
 /** A bundle redeem-package-code linked (or found already linked) to the account. */
 export interface LinkedBundle {
@@ -9,6 +10,8 @@ export interface LinkedBundle {
   packageName: string;
   remainingSessions: number;
   categoryLabel: string | null;
+  /** null for bundles the hub doesn't know (they cover any therapy session). */
+  category: PackageCategory | null;
   alreadyLinked: boolean;
 }
 
@@ -58,6 +61,7 @@ export function useLinkBundleCode() {
           packageName: data.packageName || 'Session bundle',
           remainingSessions: data.remainingSessions ?? 0,
           categoryLabel: data.categoryLabel ?? null,
+          category: data.category ?? null,
           alreadyLinked: !!data.alreadyLinked,
         },
       };
