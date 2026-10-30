@@ -200,7 +200,7 @@ describe("Pay step", () => {
     for (const box of screen.getAllByRole("checkbox")) await user.click(box);
     await user.click(screen.getByRole("button", { name: "Continue to payment →" }));
 
-    expect(await screen.findByText("That code has expired, so the full price applies.")).toBeInTheDocument();
+    expect(await screen.findByText("This discount code has expired. Proceeding at full price.")).toBeInTheDocument();
     expect(checkout.createSessionIntent.mock.calls[0][1]).toEqual({ couponCode: "OLDCODE", useReferralCredit: false });
   });
 

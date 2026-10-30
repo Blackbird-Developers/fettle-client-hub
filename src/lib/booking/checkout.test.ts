@@ -61,17 +61,19 @@ describe("intakeFieldsFor", () => {
 });
 
 describe("coupon messages", () => {
-  it("maps rejection reasons onto the website copy", () => {
-    expect(couponRejectionMessage("promo_expired")).toBe("That code has expired, so the full price applies.");
-    expect(couponRejectionMessage("acuity_expired")).toBe("That code has expired, so the full price applies.");
+  it("maps rejection reasons onto the same copy as BookingModal", () => {
+    expect(couponRejectionMessage("promo_expired")).toBe("This discount code has expired. Proceeding at full price.");
+    expect(couponRejectionMessage("acuity_expired")).toBe("This coupon has expired. Proceeding at full price.");
     expect(couponRejectionMessage("promo_restricted")).toBe(
-      "This code is for new clients only, so the full price applies."
+      "This discount code can't be used here. Proceeding at full price."
     );
     expect(couponRejectionMessage("below_minimum")).toBe(
-      "This code can’t be used for this session, so the full price applies."
+      "This coupon can't be applied to this session. Proceeding at full price."
     );
-    expect(couponRejectionMessage("unknown_code")).toBe("That code couldn’t be applied, so the full price applies.");
-    expect(couponRejectionMessage(undefined)).toBe("That code couldn’t be applied, so the full price applies.");
+    expect(couponRejectionMessage("unknown_code")).toBe(
+      "That coupon code isn't recognised. Proceeding at full price."
+    );
+    expect(couponRejectionMessage(undefined)).toBe("This coupon could not be applied. Proceeding at full price.");
   });
 
   it("formats the applied message and codes", () => {

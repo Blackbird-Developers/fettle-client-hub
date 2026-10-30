@@ -1025,6 +1025,18 @@ New folder `src/lib/booking/` (each with a `*.test.ts` using Vitest):
 | Q22 | Stripe test mode: is there a test environment (test publishable key + Supabase functions with test secrets)? The local `.env` is live. | Needed before the §14 test-card checks; until then test up to the Pay button only. |
 | Q23 | Exact formula for the "earliest time" bonus (§6). | Copy it from the website code when building matching. |
 
+### 17.1 Fettle's answers (30 Oct 2026)
+These replace the suggested defaults above where they differ.
+
+| # | Answer |
+|---|---|
+| Q10 | Use the hub's own theme: DM Sans and Sora, the hub's orange and radius. Keep the website brief's layout and spacing. Light mode only, like the rest of the hub (this replaces the §11 colours, font and Stripe appearance). |
+| Q11 | Build `track()` with every §9 event (`booking_flow: 'hub_quiz'`). The hub has no GTM, so nothing is tracked until someone adds a GTM ID later. Booking is not affected. |
+| Q12 | No TENOFF and no welcome modal. Keep the hub's discount field (loyalty codes, Stripe promotion codes, Acuity coupons, bundle codes) with the same messages as `BookingModal`. |
+| Q13 | Keep the hub's behaviour: a new PaymentIntent when the price changes; the old one is never confirmed, so nobody is charged twice. The backend already blocks double bookings and refunds automatically. No backend change. |
+| Q15 | Youth consent 1 uses Acuity's text: `I acknowledge and agree that I have completed the mandatory consent form for Fettle Youth Therapy.` It sends 13686405 = yes. |
+| Q21 | Every couples booking adds `Partner: {name}.` to the booking notes. Lisa Kelly's type still has no forms, but the therapist always gets the partner's name in the notes. |
+
 ## 18. Verification log
 How each hub fact in this brief was checked (2026-10-29, read-only; no code or data was changed):
 - **Code:** a clean copy of `origin/main` at `a410b0c` (69 commits newer than the local checkout), read file by file: `src/App.tsx`, `CustomerOnly.tsx`, `BookingModal.tsx`, `PackageBookingModal.tsx`, `PaymentForm.tsx`, `PackagePaymentForm.tsx`, `usePaymentRedirectReturn.ts`, `useAcuity.ts`, `useNextAvailable.ts`, `usePooledAvailability.ts`, `useTherapistImages.ts`, `useUserPackages.ts`, `AuthContext.tsx`, `BookingSuccess.tsx`, `sessionBundles.ts`, `packageCategory.ts`, `assessments.ts`, `psychiatry.ts`, `bundleFunnel.ts`, `index.css`, `tailwind.config.ts`, `index.html`, `package.json`, `src/integrations/supabase/types.ts`; edge functions `create-payment-intent`, `confirm-payment-and-book`, `create-package-payment-intent`, `confirm-package-payment`, `book-with-package`, `book-with-credit`, `verify-*`, `acuity`; commit `37f09c4`.
