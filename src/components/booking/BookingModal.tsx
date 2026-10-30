@@ -38,7 +38,7 @@ import {
     usePrefetchCalendarDay,
     type PoolOwner,
 } from '@/hooks/usePooledAvailability';
-import { useActivePackages } from '@/hooks/useUserPackages';
+import { useActivePackages, useRefreshBundlesOnOpen } from '@/hooks/useUserPackages';
 import { useReferrals } from '@/hooks/useReferrals';
 import { useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
@@ -254,9 +254,11 @@ export function BookingModal({
     // Slot whose therapist is being looked up after the client picked it.
     const [assigningTime, setAssigningTime] = useState<string | null>(null);
 
-    // Fetch user's active packages
+    // Fetch user's active packages, re-checking Acuity for new bundles
+    // (e.g. bought on fettle.ie while signed in) each time the modal opens.
     const { packages: activePackages, isLoading: packagesLoading } =
         useActivePackages();
+    useRefreshBundlesOnOpen(open);
 
     // Only credits whose bundle category matches the session being booked may
     // be redeemed — a youth/couples bundle can't pay for an individual session

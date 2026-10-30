@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -17,7 +18,8 @@ export interface UserPackage {
   updated_at: string;
 }
 
-// Note: Acuity sync is now handled in AuthContext (once per browser session)
+// Note: Acuity sync runs in AuthContext once per browser session, and again
+// when a booking screen opens (useRefreshBundlesOnOpen below).
 
 export function useUserPackages() {
   const { user } = useAuth();
@@ -132,4 +134,36 @@ export function usePackageStats() {
     allCreditsDepleted,
     ...rest,
   };
+}
+
+// Bundles bought on fettle.ie while already signed in to the hub only reach
+// the account through sync-acuity-packages, which AuthContext runs once per
+// browser session. Booking screens re-run it when they open (at most every
+// couple of minutes) so a new bundle shows up without signing out and in.
+const BUNDLE_REFRESH_MIN_GAP_MS = 2 * 60 * 1000;
+let lastBundleRefreshAt = 0;
+let bundleRefreshInFlight: Promise<void> | null = null;
+
+export function useRefreshBundlesOnOpen(open: boolean) {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const userId = user?.id;
+
+  useEffect(() => {
+    if (!open || !userId) return;
+    if (bundleRefreshInFlight || Date.now() - lastBundleRefreshAt < BUNDLE_REFRESH_MIN_GAP_MS) return;
+    lastBundleRefreshAt = Date.now();
+    bundleRefreshInFlight = (async () => {
+      try {
+        const { error } = await supabase.functions.invoke('sync-acuity-packages');
+        if (!error) {
+          await queryClient.invalidateQueries({ queryKey: ['user-packages', userId] });
+        }
+      } catch {
+        // Best effort: the bundles already on the account still show.
+      } finally {
+        bundleRefreshInFlight = null;
+      }
+    })();
+  }, [open, userId, queryClient]);
 }

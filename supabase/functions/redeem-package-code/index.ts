@@ -16,9 +16,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 // book-with-package path redeems it (and Acuity deducts the certificate).
 //
 // Security: caller must be signed in (JWT verified at the gateway and read
-// again here). Acuity's /certificates/check is asked with the caller's email,
-// so an email-restricted certificate can only be linked by that email. A
-// certificate already linked to another hub account is refused.
+// again here). Acuity redeems a bundle by its code alone — the email on it
+// only decides whose Acuity account lists it — so whoever holds the code may
+// link it, as on Acuity's own checkout (Fettle, 2026-10-30). We ask Acuity
+// with the caller's email first and without it only if the email was the
+// sole objection. A certificate already linked to another hub account is
+// refused, and staff are told about every refusal (admin_notifications).
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -125,7 +128,7 @@ const REASON_LABEL: Record<string, string> = {
 
 // Staff who are emailed when a client can't use a bundle code (as well as the
 // admin bell). Agreed with Fettle 2026-10-30.
-const STAFF_ALERT_EMAILS = ["hello@fettle.ie", "alex@fettle.ie"];
+const STAFF_ALERT_EMAILS = ["operations@fettle.ie", "alex@fettle.ie"];
 const ADMIN_BUNDLES_URL = "https://my.fettle.ie/admin/bundles";
 
 function escapeHtml(value: string): string {
@@ -274,13 +277,13 @@ async function checkCertificate(
   authHeader: string,
   code: string,
   appointmentTypeID: number,
-  email: string,
+  email: string | null,
 ): Promise<{ cert?: AcuityCertificate; failure?: CheckFailure }> {
   const url =
     `${ACUITY_API_BASE}/certificates/check` +
     `?certificate=${encodeURIComponent(code)}` +
     `&appointmentTypeID=${encodeURIComponent(String(appointmentTypeID))}` +
-    `&email=${encodeURIComponent(email)}`;
+    (email ? `&email=${encodeURIComponent(email)}` : "");
   const resp = await fetch(url, {
     headers: { Authorization: `Basic ${authHeader}`, "Content-Type": "application/json" },
   });
@@ -470,63 +473,90 @@ serve(async (req) => {
       return therapyTypes;
     };
 
-    let cert: AcuityCertificate | undefined;
-    let applicable = false; // matched the requested appointment type
-    const failures: CheckFailure[] = [];
+    // One pass over the appointment types, asking Acuity with `email` (or
+    // without one). Returns null when the therapy types couldn't be loaded.
+    const scan = async (email: string | null) => {
+      let cert: AcuityCertificate | undefined;
+      let applicable = false; // matched the requested appointment type
+      const failures: CheckFailure[] = [];
 
-    if (requestedTypeId !== null) {
-      const first = await checkCertificate(acuityAuth, code, requestedTypeId, userEmail);
-      if (first.cert) {
-        cert = first.cert;
-        applicable = true;
-      } else if (first.failure) {
-        failures.push(first.failure);
-      }
-    }
-
-    if (!cert) {
-      const types = await loadTherapyTypes();
-      if (types.length === 0 && requestedTypeId === null) {
-        return refuse(
-          "server_unavailable",
-          `We couldn't reach the scheduling system to check that code. Please try again in a moment, or email ${SUPPORT_EMAIL}.`,
-        );
-      }
-      const seen = new Set<number>(requestedTypeId !== null ? [requestedTypeId] : []);
-      const firstPerCategory: number[] = [];
-      const rest: number[] = [];
-      const usedCategory = new Set<PackageCategory>();
-      for (const t of types) {
-        if (seen.has(t.id)) continue;
-        seen.add(t.id);
-        const cat = categoryOfTypeName(t.name)!;
-        if (!usedCategory.has(cat)) {
-          usedCategory.add(cat);
-          firstPerCategory.push(t.id);
-        } else {
-          rest.push(t.id);
+      if (requestedTypeId !== null) {
+        const first = await checkCertificate(acuityAuth, code, requestedTypeId, email);
+        if (first.cert) {
+          cert = first.cert;
+          applicable = true;
+        } else if (first.failure) {
+          failures.push(first.failure);
         }
       }
-      const batches: number[][] = [];
-      if (firstPerCategory.length > 0) batches.push(firstPerCategory);
-      for (let i = 0; i < rest.length; i += 8) batches.push(rest.slice(i, i + 8));
 
-      for (const batch of batches) {
-        const results = await Promise.all(
-          batch.map((id) => checkCertificate(acuityAuth, code, id, userEmail)),
-        );
-        const hit = results.find((r) => r.cert);
-        if (hit?.cert) {
-          cert = hit.cert;
-          break;
+      if (!cert) {
+        const types = await loadTherapyTypes();
+        if (types.length === 0 && requestedTypeId === null) return null;
+        const seen = new Set<number>(requestedTypeId !== null ? [requestedTypeId] : []);
+        const firstPerCategory: number[] = [];
+        const rest: number[] = [];
+        const usedCategory = new Set<PackageCategory>();
+        for (const t of types) {
+          if (seen.has(t.id)) continue;
+          seen.add(t.id);
+          const cat = categoryOfTypeName(t.name)!;
+          if (!usedCategory.has(cat)) {
+            usedCategory.add(cat);
+            firstPerCategory.push(t.id);
+          } else {
+            rest.push(t.id);
+          }
         }
-        for (const r of results) if (r.failure) failures.push(r.failure);
-        // A definitive verdict (expired / used up / unknown code) is the same
-        // for every type — no point scanning further.
-        const verdict = classifyFailures(failures).reason;
-        if (verdict === "expired" || verdict === "used_up" || verdict === "server_unavailable") break;
+        const batches: number[][] = [];
+        if (firstPerCategory.length > 0) batches.push(firstPerCategory);
+        for (let i = 0; i < rest.length; i += 8) batches.push(rest.slice(i, i + 8));
+
+        for (const batch of batches) {
+          const results = await Promise.all(
+            batch.map((id) => checkCertificate(acuityAuth, code, id, email)),
+          );
+          const hit = results.find((r) => r.cert);
+          if (hit?.cert) {
+            cert = hit.cert;
+            break;
+          }
+          for (const r of results) if (r.failure) failures.push(r.failure);
+          // A definitive verdict (expired / used up / unknown code) is the same
+          // for every type — no point scanning further.
+          const verdict = classifyFailures(failures).reason;
+          if (verdict === "expired" || verdict === "used_up" || verdict === "server_unavailable") break;
+        }
+      }
+      return { cert, applicable, failures };
+    }
+
+    const unreachable = () =>
+      refuse(
+        "server_unavailable",
+        `We couldn't reach the scheduling system to check that code. Please try again in a moment, or email ${SUPPORT_EMAIL}.`,
+      );
+
+    let found = await scan(userEmail);
+    if (!found) return unreachable();
+    // Acuity redeems a bundle by its code alone; the email on it only decides
+    // whose account lists it (Fettle, 2026-10-30). So if the only objection
+    // is the email, ask again without one and let the code holder link it.
+    let linkedFromOtherEmail = false;
+    if (!found.cert && classifyFailures(found.failures).reason === "wrong_email") {
+      logStep("Code is tied to another email — checking it without one", { code });
+      const retry = await scan(null);
+      if (!retry) return unreachable();
+      if (retry.cert) {
+        found = retry;
+        linkedFromOtherEmail = true;
+      } else {
+        // Keep both sets of answers: the retry's (e.g. "used up") is more
+        // specific than the email objection.
+        found = { ...retry, failures: [...retry.failures, ...found.failures] };
       }
     }
+    const { cert, applicable, failures } = found;
 
     if (!cert) {
       const { reason, message } = classifyFailures(failures);
@@ -553,6 +583,7 @@ serve(async (req) => {
       remainingMinutes: cert.remainingMinutes ?? null,
       expiration: cert.expiration ?? null,
       applicable,
+      linkedFromOtherEmail,
     });
 
     // ── Is it a session bundle? ───────────────────────────────────────────
@@ -573,13 +604,11 @@ serve(async (req) => {
       );
     }
 
-    // Belt and braces — Acuity already applied these when we passed the email.
+    // A bundle bought under another email is still the code holder's to use
+    // (Acuity doesn't lock codes to an email), so it is linked — just logged.
     if (cert.email && cert.email.trim().toLowerCase() !== userEmail.toLowerCase()) {
-      return refuse(
-        "wrong_email",
-        `This bundle is registered to a different email address. Sign in with that email, or email ${SUPPORT_EMAIL} and we'll move it for you.`,
-        certDetails,
-      );
+      linkedFromOtherEmail = true;
+      logStep("Linking a bundle registered to another email", { certEmail: cert.email, userEmail });
     }
     if (cert.expiration && new Date(cert.expiration).getTime() < Date.now()) {
       return refuse("expired", `This bundle has expired. If you think that's wrong, email ${SUPPORT_EMAIL}.`, certDetails);
@@ -632,6 +661,9 @@ serve(async (req) => {
           package: pkg,
           packageName,
           remainingSessions,
+          totalSessions,
+          expiresAt,
+          linkedFromOtherEmail,
           category: category ?? null,
           categoryLabel: category ? CATEGORY_LABEL[category] : null,
         }),
