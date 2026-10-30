@@ -76,7 +76,8 @@ import {
     supportMailto,
     type CodeProblem,
 } from '@/lib/booking/codeProblem';
-import { BUNDLE_CODE_HELP } from '@/lib/bundles';
+import { BUNDLE_CODE_HELP, notUsableReason } from '@/lib/bundles';
+import { BundleCard } from '@/components/bundles/BundleCard';
 import { normaliseBundleCode } from '@/hooks/useLinkBundleCode';
 import {
     ASSESSMENTS,
@@ -289,6 +290,15 @@ export function BookingModal({
                 return !isClinicalCategory;
             }),
         [activePackages, isClinicalCategory, sessionCategory]
+    );
+    // The client's other bundles, shown greyed out with the reason they can't
+    // pay for this session rather than hidden.
+    const otherBundles = useMemo(
+        () =>
+            activePackages
+                .filter((pkg) => !categoryPackages.includes(pkg))
+                .map((pkg) => ({ pkg, reason: notUsableReason(pkg, sessionCategory) })),
+        [activePackages, categoryPackages, sessionCategory]
     );
     const categoryRemainingSessions = useMemo(
         () =>
@@ -3036,6 +3046,29 @@ export function BookingModal({
                                     </div>
                                 </button>
 
+                                {/* Which bundle the credit comes from. */}
+                                {usePackageCredits && (
+                                    <div className="space-y-2 pl-2 sm:pl-4">
+                                        {categoryPackages.length > 1 && (
+                                            <p className="text-xs font-medium text-muted-foreground">
+                                                Choose which bundle to use
+                                            </p>
+                                        )}
+                                        {categoryPackages.map((pkg) => (
+                                            <BundleCard
+                                                key={pkg.id}
+                                                bundle={pkg}
+                                                selected={selectedPackageId === pkg.id}
+                                                onSelect={
+                                                    categoryPackages.length > 1
+                                                        ? () => setSelectedPackageId(pkg.id)
+                                                        : undefined
+                                                }
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -3066,6 +3099,19 @@ export function BookingModal({
                                         )}
                                     </div>
                                 </button>
+                            </div>
+                        )}
+
+                        {/* Bundles that can't pay for this session: say why
+                            instead of hiding them. */}
+                        {!packagesLoading && otherBundles.length > 0 && (
+                            <div className="space-y-2">
+                                <p className="text-xs font-medium text-muted-foreground">
+                                    Can't be used for this session
+                                </p>
+                                {otherBundles.map(({ pkg, reason }) => (
+                                    <BundleCard key={pkg.id} bundle={pkg} unusableReason={reason} />
+                                ))}
                             </div>
                         )}
 

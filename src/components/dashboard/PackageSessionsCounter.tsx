@@ -2,6 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useActivePackages } from "@/hooks/useUserPackages";
 import { BookSessionDropdown } from "@/components/booking/BookSessionDropdown";
+import { BundleCard } from "@/components/bundles/BundleCard";
 import { Gift, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -22,15 +23,6 @@ export function PackageSessionsCounter() {
   if (packages.length === 0) {
     return null;
   }
-
-  const getProgressColor = () => {
-    const totalSessions = packages.reduce((sum, pkg) => sum + pkg.total_sessions, 0);
-    const usedPercentage = ((totalSessions - totalRemainingSessions) / totalSessions) * 100;
-    
-    if (usedPercentage >= 80) return "bg-amber-500";
-    if (usedPercentage >= 50) return "bg-primary";
-    return "bg-success";
-  };
 
   return (
     <Card className="border-success/30 bg-gradient-to-br from-success/5 via-background to-success/10 animate-fade-in overflow-hidden relative w-full max-w-full">
@@ -65,31 +57,11 @@ export function PackageSessionsCounter() {
                 : `You have ${totalRemainingSessions} sessions remaining`}
             </p>
             
-            {/* Package breakdown */}
+            {/* One card per bundle: sessions left, what it covers, expiry */}
             <div className="space-y-2 mb-3">
-              {packages.map((pkg) => {
-                const usedSessions = pkg.total_sessions - pkg.remaining_sessions;
-                const progressPercent = (pkg.remaining_sessions / pkg.total_sessions) * 100;
-                
-                return (
-                  <div key={pkg.id} className="space-y-1">
-                    <div className="flex justify-between gap-2 text-xs min-w-0">
-                      <span className="text-muted-foreground truncate pr-2 min-w-0 flex-1" title={pkg.package_name}>
-                        {pkg.package_name}
-                      </span>
-                      <span className="font-medium text-foreground shrink-0">
-                        {pkg.remaining_sessions}/{pkg.total_sessions} left
-                      </span>
-                    </div>
-                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div 
-                        className={cn("h-full rounded-full transition-all duration-500", getProgressColor())}
-                        style={{ width: `${progressPercent}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+              {packages.map((pkg) => (
+                <BundleCard key={pkg.id} bundle={pkg} />
+              ))}
             </div>
             
             <BookSessionDropdown variant="compact" />
