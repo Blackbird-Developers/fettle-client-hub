@@ -190,7 +190,7 @@ export function ReviewStep() {
           {consentRow(
             'first',
             youth
-              ? 'I am the parent or legal guardian of the young person attending.'
+              ? 'I acknowledge and agree that I have completed the mandatory consent form for Fettle Youth Therapy.'
               : 'I confirm I am over 18. This service is for over 18s only.'
           )}
           {consentRow(
