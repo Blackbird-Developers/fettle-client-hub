@@ -347,55 +347,6 @@ export function useRetentionFunnel() {
   return { funnel, loading: isLoading, error: error ?? null };
 }
 
-// Revenue metrics - uses edge function data
-export function useRevenueMetrics() {
-  const { data, isLoading, error } = useAdminMetrics();
-
-  const metrics = data?.revenue ?? {
-    totalRevenue: 0,
-    thisMonthRevenue: 0,
-    lastMonthRevenue: 0,
-    monthOverMonthChange: 0,
-    totalPackagesSold: 0,
-    averagePackageValue: 0,
-    thisMonthPackages: 0,
-  };
-
-  return { metrics, isLoading, error: error ?? null };
-}
-
-// Session metrics - uses edge function data
-export function useSessionMetrics() {
-  const { data, isLoading, error } = useAdminMetrics();
-
-  const metrics = data?.sessions ?? {
-    totalCompleted: 0,
-    totalUpcoming: 0,
-    thisMonthCompleted: 0,
-    lastMonthCompleted: 0,
-    monthOverMonthGrowth: 0,
-    uniqueClientsThisMonth: 0,
-    firstTimersThisMonth: 0,
-    canceledThisMonth: 0,
-  };
-
-  return { metrics, loading: isLoading, error: error ?? null };
-}
-
-// Engagement stats - uses edge function data
-export function useEngagementStats() {
-  const { data, isLoading, error } = useAdminMetrics();
-
-  const stats = data?.engagement ?? {
-    totalActiveCredits: 0,
-    uniqueClients: 0,
-    activePackageHolders: 0,
-    clientsWithoutPackages: 0,
-  };
-
-  return { stats, isLoading, error: error ?? null };
-}
-
 // Response of the admin-customer-insights edge function (row types come from
 // the function's own logic module so the two can't drift apart).
 export interface CustomerInsightsResponse {
