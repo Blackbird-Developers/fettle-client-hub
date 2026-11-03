@@ -89,3 +89,68 @@ verify_jwt = false
 # function checks itself.
 [functions.sales-tasks]
 verify_jwt = false
+
+# Every function below is deployed on prod with verify_jwt = false. Each one
+# checks its own caller (user JWT, admin role, service-role key or cron secret)
+# where it needs to. They are listed so a plain `supabase functions deploy`
+# keeps the setting instead of switching the check on.
+
+[functions.admin-analytics]
+verify_jwt = false
+
+[functions.admin-clinical]
+verify_jwt = false
+
+[functions.admin-customer-insights]
+verify_jwt = false
+
+[functions.admin-leads]
+verify_jwt = false
+
+[functions.admin-metrics]
+verify_jwt = false
+
+[functions.book-with-credit]
+verify_jwt = false
+
+[functions.book-with-package]
+verify_jwt = false
+
+[functions.create-package-payment-intent]
+verify_jwt = false
+
+[functions.create-package-payment]
+verify_jwt = false
+
+[functions.pay-session]
+verify_jwt = false
+
+[functions.redeem-package-code]
+verify_jwt = false
+
+[functions.send-credit-used-confirmation]
+verify_jwt = false
+
+[functions.send-credits-depleted]
+verify_jwt = false
+
+[functions.send-monthly-credit-summary]
+verify_jwt = false
+
+[functions.send-package-confirmation]
+verify_jwt = false
+
+[functions.send-password-reset]
+verify_jwt = false
+
+[functions.sync-acuity-packages]
+verify_jwt = false
+
+[functions.unpaid-sessions]
+verify_jwt = false
+
+[functions.user-roles]
+verify_jwt = false
+
+[functions.verify-package-payment]
+verify_jwt = false
