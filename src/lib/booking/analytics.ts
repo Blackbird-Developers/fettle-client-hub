@@ -1,7 +1,7 @@
-// GTM events for the booking wizard (docs/QUIZ_BOOKING_FLOW.md §9). The hub
-// has no GTM container yet (Q11): until one is added to index.html this only
-// fills window.dataLayer, which nothing reads. Analytics must never block or
-// break a booking, so track() never throws.
+// GTM events for the booking wizard (docs/QUIZ_BOOKING_FLOW.md §9,
+// docs/GTM_BOOKING_WIZARD.md). GTM loads from src/lib/gtm.ts once VITE_GTM_ID
+// is set; until then this only fills window.dataLayer, which nothing reads.
+// Analytics must never block or break a booking, so track() never throws.
 
 export const BOOKING_FLOW = 'hub_quiz';
 
