@@ -242,7 +242,8 @@ serve(async (req) => {
 
     // Send confirmation email (fire and forget - don't block on this)
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY");
+    // send-booking-confirmation only accepts the service-role key.
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     
     if (supabaseUrl && supabaseKey) {
       try {
