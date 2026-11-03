@@ -1,14 +1,16 @@
 // The "you're booked" email for every booking path: card payment
 // (confirm-payment-and-book, send-booking-confirmation), referral credit
 // (book-with-credit) and bundle credit (send-credit-used-confirmation).
-// Look, colours and footer follow the emails Fettle's content team supplied
-// (portal-adoption-emails/templates.ts): logo banner, warm beige page, Fettle
-// orange, white rounded cards. Transactional, so no unsubscribe link.
+// Kept short on purpose: Fettle's logo and colours (from the emails Fettle's
+// content team supplied, portal-adoption-emails/templates.ts), the session
+// details, one button and a short footer. Transactional, so no unsubscribe
+// link.
 
 export const HUB_SESSIONS_URL = "https://my.fettle.ie/sessions";
 const DEFAULT_TIMEZONE = "Europe/Dublin";
-const LOGO_URL =
-  "https://d3k81ch9hvuctc.cloudfront.net/company/SX4DGx/images/25addbe4-7b73-47d2-ae58-e783b9614848.png";
+// Served from the hub (public/email/fettle-logo.png), so it does not depend
+// on another service.
+const LOGO_URL = "https://my.fettle.ie/email/fettle-logo.png";
 
 const ORANGE = "#f47d31";
 const ORANGE_DARK = "#c2410c";
@@ -68,46 +70,32 @@ function euro(cents: number): string {
 }
 
 function detailRow(label: string, value: string, last = false): string {
-  return `<tr><td style="padding:${last ? "12px 0 0 0" : "12px 0"};${last ? "" : ` border-bottom:1px solid ${LINE};`} font-family:${FONT};">
-<div style="font-size:12px; line-height:16px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:${MUTED}; padding-bottom:3px;">${label}</div>
-<div style="font-size:17px; line-height:24px; font-weight:700; color:${INK};">${value}</div>
+  return `<tr><td style="padding:${last ? "11px 0 0 0" : "11px 0"};${last ? "" : ` border-bottom:1px solid ${LINE};`} font-family:${FONT};">
+<div style="font-size:12px; line-height:16px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:${MUTED}; padding-bottom:2px;">${label}</div>
+<div style="font-size:16px; line-height:23px; font-weight:700; color:${INK};">${value}</div>
 </td></tr>`;
 }
 
-function paymentBlock(p: BookingPayment): string {
+/** The "Paid" row: amount and receipt, referral credit, or bundle sessions left. */
+function paymentValue(p: BookingPayment): string {
   if (p.kind === "card") {
     const receipt = p.receiptUrl
-      ? `<div style="padding-top:6px;"><a href="${escapeHtml(p.receiptUrl)}" target="_blank" style="color:${ORANGE_DARK}; font-weight:700; text-decoration:underline;">View your receipt</a></div>`
+      ? ` &middot; <a href="${escapeHtml(p.receiptUrl)}" target="_blank" style="color:${ORANGE_DARK}; font-weight:700; text-decoration:underline;">Receipt</a>`
       : "";
-    return `<div style="font-size:12px; line-height:16px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:${MUTED}; padding-bottom:3px;">Amount paid</div>
-<div style="font-size:24px; line-height:30px; font-weight:800; color:${INK};">${euro(p.amountCents)}</div>${receipt}`;
+    return `${euro(p.amountCents)}${receipt}`;
   }
-  if (p.kind === "referral") {
-    return `<div style="font-size:12px; line-height:16px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:${MUTED}; padding-bottom:3px;">Paid with</div>
-<div style="font-size:18px; line-height:26px; font-weight:800; color:${INK};">Your referral credit</div>
-<div style="font-size:15px; line-height:22px; color:${BODY};">Nothing was charged to your card.</div>`;
-  }
+  if (p.kind === "referral") return "Referral credit (nothing charged)";
   const total = Math.max(p.totalSessions, 1);
   const left = Math.max(Math.min(p.remainingSessions, total), 0);
-  const percent = Math.round((left / total) * 100);
   const low = left <= 2
-    ? `<div style="font-size:14px; line-height:21px; color:${ORANGE_DARK}; font-weight:700; padding-top:10px;">${left === 0 ? "That was the last session in this bundle." : "You&rsquo;re running low."} You can buy another bundle in My Fettle.</div>`
+    ? `<div style="font-size:14px; line-height:20px; font-weight:700; color:${ORANGE_DARK}; padding-top:2px;">${left === 0 ? "That was your last bundle session." : "You&rsquo;re running low."} You can buy another bundle in My Fettle.</div>`
     : "";
-  return `<div style="font-size:12px; line-height:16px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:${MUTED}; padding-bottom:3px;">Paid with your bundle</div>
-<div style="font-size:18px; line-height:26px; font-weight:800; color:${INK};">${left} of ${total} session${total === 1 ? "" : "s"} left</div>
-<div style="font-size:14px; line-height:20px; color:${BODY}; padding-bottom:10px;">${escapeHtml(p.packageName)}</div>
-<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background:${LINE}; border-radius:999px;"><tr><td width="${percent}%" style="width:${percent}%; background:${ORANGE}; border-radius:999px; font-size:1px; line-height:10px; height:10px;">&nbsp;</td><td style="font-size:1px; line-height:10px;">&nbsp;</td></tr></table>${low}`;
-}
-
-function step(n: number, title: string, text: string): string {
-  return `<tr><td valign="top" width="44" style="padding:0 0 16px 0;"><div style="font-family:${FONT}; background:${ORANGE}; color:#ffffff; width:30px; height:30px; line-height:30px; border-radius:999px; text-align:center; font-size:14px; font-weight:800;">${n}</div></td>
-<td valign="top" style="padding:3px 0 16px 0; font-family:${FONT};"><div style="font-size:16px; line-height:22px; font-weight:800; color:${INK};">${title}</div><div style="font-size:15px; line-height:23px; color:${BODY};">${text}</div></td></tr>`;
+  return `Bundle &middot; ${left} of ${total} session${total === 1 ? "" : "s"} left${low}`;
 }
 
 export function bookingConfirmationHtml(input: BookingConfirmationInput): string {
   const firstName = escapeHtml(input.firstName?.trim() || "there");
   const therapist = escapeHtml(input.therapistName?.trim() || "your therapist");
-  const therapistFirst = escapeHtml((input.therapistName?.trim() || "").split(/\s+/)[0] || "your therapist");
   const sessionType = escapeHtml(input.sessionType?.trim() || "Therapy session");
   const date = escapeHtml(input.dateLabel);
   const time = escapeHtml(input.timeLabel);
@@ -130,8 +118,8 @@ export function bookingConfirmationHtml(input: BookingConfirmationInput): string
     @media screen and (max-width: 640px) {
       .container { width: 100% !important; }
       .mobile-pad { padding-left: 18px !important; padding-right: 18px !important; }
-      .card-pad { padding: 22px !important; }
-      .hero-title { font-size: 28px !important; line-height: 34px !important; }
+      .card-pad { padding: 4px 20px 16px 20px !important; }
+      .hero-title { font-size: 26px !important; line-height: 32px !important; }
       .button { display: block !important; width: 100% !important; box-sizing: border-box !important; }
     }
   </style>
@@ -140,36 +128,35 @@ export function bookingConfirmationHtml(input: BookingConfirmationInput): string
   <div style="display:none; max-height:0; overflow:hidden; opacity:0; mso-hide:all;">${preview}</div>
   <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background:${PAGE};">
     <tr>
-      <td align="center" style="padding:0;">
-        <table role="presentation" width="640" border="0" cellspacing="0" cellpadding="0" class="container" style="width:640px; max-width:640px; background:#ffffff; border-radius:24px;">
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" width="600" border="0" cellspacing="0" cellpadding="0" class="container" style="width:600px; max-width:600px; background:#ffffff; border-radius:24px; border-top:6px solid ${ORANGE};">
 
-          <!-- LOGO -->
+          <!-- LOGO (styled alt text stands in when a mail app hides images) -->
           <tr>
-            <td align="center" style="padding:0;">
-              <img src="${LOGO_URL}" alt="Fettle" width="640" style="width:100%; max-width:640px; height:auto; border-radius:24px 24px 0 0;" />
+            <td align="center" style="padding:26px 40px 4px 40px;">
+              <img src="${LOGO_URL}" alt="Fettle.ie" width="520" style="width:100%; max-width:520px; height:auto; color:${ORANGE}; font-family:${FONT}; font-size:30px; line-height:40px; font-weight:800; text-align:center;" />
             </td>
           </tr>
 
-          <!-- HERO -->
+          <!-- HEADING -->
           <tr>
-            <td class="mobile-pad" align="center" style="padding:34px 40px 6px 40px; font-family:${FONT};">
-              <div style="background:#e7f6ee; color:#17a86b; width:56px; height:56px; line-height:56px; border-radius:999px; text-align:center; font-size:28px; font-weight:800; margin:0 auto;">&#10003;</div>
-              <div class="hero-title" style="padding:16px 0 8px 0; font-size:31px; line-height:37px; font-weight:800; color:${INK};">You&rsquo;re booked, ${firstName}!</div>
-              <div style="font-size:17px; line-height:27px; color:${BODY}; max-width:470px; margin:0 auto;">Your session with ${therapist} is confirmed. Here are the details.</div>
+            <td class="mobile-pad" align="center" style="padding:10px 40px 0 40px; font-family:${FONT};">
+              <div class="hero-title" style="font-size:28px; line-height:34px; font-weight:800; color:${INK};">You&rsquo;re booked, ${firstName}!</div>
+              <div style="font-size:16px; line-height:25px; color:${BODY}; padding-top:8px;">We&rsquo;ll text and email your session link before the session.</div>
             </td>
           </tr>
 
-          <!-- SESSION DETAILS -->
+          <!-- DETAILS -->
           <tr>
-            <td class="mobile-pad" style="padding:24px 40px 0 40px;">
-              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background:${SOFT}; border:1px solid ${LINE}; border-radius:20px; border-collapse:separate !important;">
+            <td class="mobile-pad" style="padding:22px 40px 0 40px;">
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background:${SOFT}; border:1px solid ${LINE}; border-radius:18px; border-collapse:separate !important;">
                 <tr>
-                  <td class="card-pad" style="padding:16px 26px 20px 26px;">
+                  <td class="card-pad" style="padding:6px 24px 16px 24px;">
                     <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
-${detailRow("Date", date)}
-${detailRow("Time", time)}
+${detailRow("When", `${date} at ${time}`)}
 ${detailRow("Therapist", therapist)}
-${detailRow("Session", sessionType, true)}
+${detailRow("Session", sessionType)}
+${detailRow("Paid", paymentValue(input.payment), true)}
                     </table>
                   </td>
                 </tr>
@@ -177,83 +164,19 @@ ${detailRow("Session", sessionType, true)}
             </td>
           </tr>
 
-          <!-- PAYMENT -->
-          <tr>
-            <td class="mobile-pad" style="padding:14px 40px 0 40px;">
-              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background:#fff2e3; border-radius:20px; border-collapse:separate !important;">
-                <tr>
-                  <td class="card-pad" style="padding:20px 26px; font-family:${FONT};">
-${paymentBlock(input.payment)}
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- WHAT HAPPENS NEXT -->
-          <tr>
-            <td class="mobile-pad" style="padding:30px 40px 6px 40px; font-family:${FONT};">
-              <div style="font-size:14px; line-height:18px; font-weight:800; text-transform:uppercase; letter-spacing:1.2px; color:${ORANGE_DARK}; padding-bottom:16px;">What happens next</div>
-              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
-${step(1, "Look out for your session link", "We&rsquo;ll text and email your secure log-in details before the session.")}
-${step(2, `Meet ${therapistFirst} online`, "Find a quiet, private spot. That&rsquo;s all you need.")}
-${step(3, "Manage it in My Fettle", "See your upcoming sessions and book your next one whenever suits you.")}
-              </table>
-            </td>
-          </tr>
-
           <!-- BUTTON -->
           <tr>
-            <td class="mobile-pad" align="center" style="padding:6px 40px 10px 40px;">
+            <td class="mobile-pad" align="center" style="padding:24px 40px 0 40px;">
               <a class="button" href="${HUB_SESSIONS_URL}" target="_blank" style="display:inline-block; background:${ORANGE}; color:#ffffff; font-family:${FONT}; font-size:16px; line-height:20px; font-weight:700; padding:14px 30px; border-radius:999px;">View my sessions</a>
-            </td>
-          </tr>
-          <tr>
-            <td class="mobile-pad" align="center" style="padding:10px 54px 26px 54px; font-family:${FONT}; font-size:14px; line-height:22px; color:${MUTED};">
-              Need to reschedule or cancel? Please let us know at least 48 hours before your session.
             </td>
           </tr>
 
           <!-- FOOTER -->
           <tr>
-            <td class="mobile-pad" style="padding:4px 32px 28px 32px;">
-              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background:#ffffff; border-radius:20px;">
-                <tr>
-                  <td class="card-pad" style="padding:26px 28px 24px 28px; font-family:${FONT}; color:${INK};">
-                    <div style="font-size:18px; line-height:30px; color:${INK}; padding-bottom:22px;">
-                      Warmly,<br />
-                      The Fettle Team
-                    </div>
-                    <div style="border-top:1px solid ${INK}; font-size:1px; line-height:1px;">&nbsp;</div>
-                    <div style="padding:22px 0 10px 0; text-align:center;">
-                      <div style="font-size:22px; line-height:30px; font-weight:700; color:${INK}; padding-bottom:8px;">
-                        Got a question? We&rsquo;re here to help
-                      </div>
-                      <div style="font-size:16px; line-height:26px; color:${BODY};">
-                        Email us at
-                        <a href="mailto:hello@fettle.ie" style="color:#2563eb; text-decoration:underline;">hello@fettle.ie</a>
-                        or call
-                        <a href="tel:19125688" style="color:#2563eb; text-decoration:underline;">1 912 5688</a>
-                        during office hours and a member of our team will be happy to help.
-                      </div>
-                    </div>
-                    <div style="padding:18px 0 18px 0; text-align:center;">
-                      <a href="https://x.com/fettletherapy" target="_blank" style="display:inline-block; padding:0 10px;">
-                        <img src="https://cdn-icons-png.flaticon.com/512/733/733579.png" alt="X" width="18" style="width:18px; height:18px; display:inline-block;" />
-                      </a>
-                      <a href="https://www.facebook.com/fettletherapy" target="_blank" style="display:inline-block; padding:0 10px;">
-                        <img src="https://cdn-icons-png.flaticon.com/512/733/733547.png" alt="Facebook" width="18" style="width:18px; height:18px; display:inline-block;" />
-                      </a>
-                      <a href="https://www.instagram.com/fettle.therapy" target="_blank" style="display:inline-block; padding:0 10px;">
-                        <img src="https://cdn-icons-png.flaticon.com/512/2111/2111463.png" alt="Instagram" width="18" style="width:18px; height:18px; display:inline-block;" />
-                      </a>
-                    </div>
-                    <div style="text-align:center; font-size:13px; line-height:22px; color:${MUTED};">
-                      Fettle Therapy Unit 1 Block K, Monavalley Business Park, Tralee, Co. Kerry V92H5KW
-                    </div>
-                  </td>
-                </tr>
-              </table>
+            <td class="mobile-pad" align="center" style="padding:22px 40px 28px 40px; font-family:${FONT}; font-size:14px; line-height:22px; color:${MUTED};">
+              Need to reschedule or cancel? Let us know at least 48 hours before your session.<br />
+              Questions? <a href="mailto:hello@fettle.ie" style="color:${ORANGE_DARK}; text-decoration:underline;">hello@fettle.ie</a> &middot; <a href="tel:19125688" style="color:${ORANGE_DARK}; text-decoration:underline;">1 912 5688</a>
+              <div style="padding-top:14px; font-size:13px; color:${MUTED};">Warmly, the Fettle Team</div>
             </td>
           </tr>
         </table>

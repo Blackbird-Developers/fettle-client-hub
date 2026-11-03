@@ -43,9 +43,15 @@ describe("bookingConfirmationHtml", () => {
     expect(html).not.toContain("24 hours");
   });
 
+  it("uses the hub-hosted logo with a text fallback", () => {
+    const html = bookingConfirmationHtml(base);
+    expect(html).toContain('src="https://my.fettle.ie/email/fettle-logo.png"');
+    expect(html).toContain('alt="Fettle.ie"');
+  });
+
   it("says referral credit paid and nothing was charged", () => {
     const html = bookingConfirmationHtml({ ...base, payment: { kind: "referral" } });
-    expect(html).toContain("Your referral credit");
+    expect(html).toContain("Referral credit (nothing charged)");
     expect(html).not.toContain("&euro;");
   });
 
