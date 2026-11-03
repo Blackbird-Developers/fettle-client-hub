@@ -1,0 +1,436 @@
+// @vitest-environment jsdom
+import "@/test/setupDom";
+import { useEffect } from "react";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { TherapistRow } from "@/lib/booking/therapists";
+import { addDaysToKey, dublinDateKey } from "@/lib/booking/time";
+import { savePendingPayment } from "@/lib/booking/payment";
+import { clearWizard, initialState } from "@/lib/booking/wizard";
+import { BookingWizard } from "./BookingWizard";
+
+vi.hoisted(() => vi.stubEnv("VITE_STRIPE_PUBLISHABLE_KEY", "pk_test_wizard"));
+
+const data = vi.hoisted(() => ({
+  days: [] as { date: string; times: string[] }[],
+  packages: [] as {
+    id: string;
+    package_id: string;
+    remaining_sessions: number;
+    package_name?: string;
+    total_sessions?: number;
+    expires_at?: string | null;
+  }[],
+  slotFree: true,
+  confirmStatus: "succeeded",
+  referralCents: 0,
+}));
+
+const checkout = vi.hoisted(() => ({
+  createSessionIntent: vi.fn(),
+  completeSessionPayment: vi.fn(),
+  bookWithReferralCredit: vi.fn(),
+  bookWithPackageCredit: vi.fn(),
+  createBundleIntent: vi.fn(),
+  confirmBundlePayment: vi.fn(),
+  redeemBundleCode: vi.fn(),
+}));
+
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: () => ({ profile: { first_name: "Sarah", last_name: "Byrne", email: "sarah@example.com", timezone: "Europe/Dublin" } }),
+}));
+vi.mock("@/hooks/useAcuity", () => ({
+  useAcuityAppointments: () => ({
+    // A returning client with a phone: no history question, compact details.
+    appointments: [{ canceled: false, phone: "087 765 4321", datetime: "2026-01-01T10:00:00+0000" }],
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}));
+vi.mock("@/hooks/useUserPackages", () => ({
+  useActivePackages: () => ({ packages: data.packages, isLoading: false }),
+  useRefreshBundlesOnOpen: () => {},
+}));
+vi.mock("@/hooks/useReferrals", () => ({ useReferrals: () => ({ data: { balance_cents: data.referralCents } }) }));
+vi.mock("@/hooks/useTherapistDirectory", () => ({
+  useTherapistDirectory: () => ({
+    therapists: [elaine],
+    publicTypeIds: new Set(["111"]),
+    typeById: new Map([["111", { id: 111, name: "Individual Session with Elaine O'Dwyer", price: "95.00", duration: 50 }]]),
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}));
+vi.mock("@/hooks/useTherapistSlots", () => ({
+  useFirstOpenMonth: () => ({
+    data: { month: data.days[0].date.slice(0, 7), days: data.days },
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
+  useMonthSlots: (_s: unknown, month: string | null) => ({
+    data: month ? data.days.filter((d) => d.date.startsWith(month)) : undefined,
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
+  useInvalidateSlots: () => vi.fn(),
+}));
+vi.mock("@/lib/booking/availability", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/booking/availability")>()),
+  recheckSlot: async () => data.slotFree,
+}));
+vi.mock("./checkout", () => checkout);
+
+const confirmPayment = vi.fn(async () => ({ paymentIntent: { status: data.confirmStatus } }));
+vi.mock("@stripe/stripe-js", () => ({
+  loadStripe: vi.fn(async () => ({
+    retrievePaymentIntent: async () => ({ paymentIntent: { status: data.confirmStatus, amount: 9500 } }),
+  })),
+}));
+vi.mock("@stripe/react-stripe-js", () => ({
+  Elements: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  PaymentElement: ({ onReady }: { onReady?: () => void }) => {
+    useEffect(() => onReady?.(), [onReady]);
+    return <div>Card form</div>;
+  },
+  useStripe: () => ({ confirmPayment }),
+  useElements: () => ({ submit: async () => ({}) }),
+}));
+
+const elaine: TherapistRow = {
+  id: 7,
+  name: "Elaine O'Dwyer",
+  calendarid: "4567890",
+  status: "active",
+  appointmentidindividual: "111",
+};
+
+const bundleIntent = (amount: number, referral = 0) => ({
+  ok: true,
+  creditCoversAll: false,
+  intent: { clientSecret: "pi_b_secret", paymentIntentId: "pi_b", amount: amount - referral, originalAmount: amount, referralCreditApplied: referral },
+});
+
+async function walkToPay(user: ReturnType<typeof userEvent.setup>, choosePlan: RegExp) {
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={["/book?therapist=7"]}>
+        <BookingWizard />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+  await user.click(await screen.findByRole("button", { name: "Let’s begin →" }));
+  await user.click(await screen.findByRole("button", { name: /Earliest time/ }));
+  await user.click(screen.getByRole("button", { name: "Continue →" }));
+  await user.click(await screen.findByRole("button", { name: "Continue to payment →" }));
+  await user.click(await screen.findByRole("radio", { name: choosePlan }));
+  await user.click(screen.getByRole("button", { name: "Continue →" }));
+  for (const box of await screen.findAllByRole("checkbox")) await user.click(box);
+  await user.click(screen.getByRole("button", { name: "Continue to payment →" }));
+  expect(await screen.findByRole("heading", { name: "Confirm and pay" })).toBeInTheDocument();
+}
+
+/** Like walkToPay, with a discount code typed on the review step. */
+async function walkToPayWithCode(user: ReturnType<typeof userEvent.setup>, choosePlan: RegExp, code: string) {
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={["/book?therapist=7"]}>
+        <BookingWizard />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+  await user.click(await screen.findByRole("button", { name: "Let’s begin →" }));
+  await user.click(await screen.findByRole("button", { name: /Earliest time/ }));
+  await user.click(screen.getByRole("button", { name: "Continue →" }));
+  await user.click(await screen.findByRole("button", { name: "Continue to payment →" }));
+  await user.click(await screen.findByRole("radio", { name: choosePlan }));
+  await user.click(screen.getByRole("button", { name: "Continue →" }));
+  await user.type(await screen.findByLabelText("Have a discount code?"), `${code}{Enter}`);
+  for (const box of screen.getAllByRole("checkbox")) await user.click(box);
+  await user.click(screen.getByRole("button", { name: "Continue to payment →" }));
+  expect(await screen.findByRole("heading", { name: "Confirm and pay" })).toBeInTheDocument();
+}
+
+beforeEach(() => {
+  clearWizard();
+  vi.clearAllMocks();
+  data.packages = [];
+  data.slotFree = true;
+  data.referralCents = 0;
+  data.confirmStatus = "succeeded";
+  const day = addDaysToKey(dublinDateKey(new Date()), 2);
+  data.days = [{ date: day, times: [`${day}T18:00:00+0000`] }];
+  checkout.createSessionIntent.mockResolvedValue({
+    ok: true,
+    intent: { clientSecret: "pi_1_secret", paymentIntentId: "pi_1", amount: 9500, originalAmount: 9500 },
+  });
+  checkout.completeSessionPayment.mockResolvedValue({ status: "booked", appointmentId: 555 });
+});
+
+describe("Pay step", () => {
+  it("pays for a single session and books it", async () => {
+    const user = userEvent.setup();
+    await walkToPay(user, /Single session/);
+
+    const body = checkout.createSessionIntent.mock.calls[0][0];
+    expect(body).toMatchObject({
+      appointmentTypeID: 111,
+      appointmentTypePrice: "95.00",
+      calendarID: 4567890,
+      calendarName: "Elaine O'Dwyer",
+      phone: "087 765 4321",
+      notes: "Booked via My Fettle (quiz flow). For: individual therapy. Therapy before: I’ve had therapy before.",
+    });
+    expect(body.intakeFormFields.map((f: { id: number }) => f.id)).toEqual([10466116, 9292394, 9292405]);
+
+    await user.click(await screen.findByRole("button", { name: /Pay €95\.00/ }));
+    expect(confirmPayment).toHaveBeenCalled();
+    expect(checkout.completeSessionPayment).toHaveBeenCalledWith("pi_1");
+    expect(await screen.findByRole("heading", { name: "You’re booked, Sarah!" })).toBeInTheDocument();
+  });
+
+  it("stops before charging when the slot was just taken", async () => {
+    const user = userEvent.setup();
+    data.slotFree = false;
+    await walkToPay(user, /Single session/);
+    await user.click(await screen.findByRole("button", { name: /Pay €95\.00/ }));
+    expect(await screen.findByText(/You have not been charged\. Please choose another time\./)).toBeInTheDocument();
+    expect(confirmPayment).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Choose another time" }));
+    expect(await screen.findByRole("heading", { name: "When suits you, Sarah?" })).toBeInTheDocument();
+  });
+
+  it("shows a rejected code and charges the full price", async () => {
+    const user = userEvent.setup();
+    checkout.createSessionIntent.mockResolvedValue({
+      ok: true,
+      intent: { clientSecret: "pi_2_secret", paymentIntentId: "pi_2", amount: 9500, originalAmount: 9500, couponRejected: "promo_expired" },
+    });
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/book?therapist=7"]}>
+          <BookingWizard />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    await user.click(await screen.findByRole("button", { name: "Let’s begin →" }));
+    await user.click(await screen.findByRole("button", { name: /Earliest time/ }));
+    await user.click(screen.getByRole("button", { name: "Continue →" }));
+    await user.click(await screen.findByRole("button", { name: "Continue to payment →" }));
+    await user.click(await screen.findByRole("radio", { name: /Single session/ }));
+    await user.click(screen.getByRole("button", { name: "Continue →" }));
+    await user.type(await screen.findByLabelText("Have a discount code?"), "oldcode{Enter}");
+    expect(screen.getByText("Code saved. Your total is confirmed on the next step.")).toBeInTheDocument();
+    for (const box of screen.getAllByRole("checkbox")) await user.click(box);
+    await user.click(screen.getByRole("button", { name: "Continue to payment →" }));
+
+    expect(await screen.findByText("This discount code has expired. Proceeding at full price.")).toBeInTheDocument();
+    expect(checkout.createSessionIntent.mock.calls[0][1]).toEqual({ couponCode: "OLDCODE", useReferralCredit: false });
+  });
+
+  it("re-checks a refused code as a bundle and says why it can't be used", async () => {
+    const user = userEvent.setup();
+    checkout.createSessionIntent.mockResolvedValue({
+      ok: true,
+      intent: { clientSecret: "pi_3_secret", paymentIntentId: "pi_3", amount: 9500, originalAmount: 9500, couponRejected: "unknown_code" },
+    });
+    checkout.redeemBundleCode.mockResolvedValue({ ok: false, reason: "used_up", message: "All 6 sessions on this bundle have been used." });
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/book?therapist=7"]}>
+          <BookingWizard />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    await user.click(await screen.findByRole("button", { name: "Let’s begin →" }));
+    await user.click(await screen.findByRole("button", { name: /Earliest time/ }));
+    await user.click(screen.getByRole("button", { name: "Continue →" }));
+    await user.click(await screen.findByRole("button", { name: "Continue to payment →" }));
+    await user.click(await screen.findByRole("radio", { name: /Single session/ }));
+    await user.click(screen.getByRole("button", { name: "Continue →" }));
+    await user.type(await screen.findByLabelText("Have a discount code?"), "704E3907{Enter}");
+    for (const box of screen.getAllByRole("checkbox")) await user.click(box);
+    await user.click(screen.getByRole("button", { name: "Continue to payment →" }));
+
+    expect(
+      await screen.findByText(
+        "All sessions on this bundle are used. All 6 sessions on this bundle have been used. You can pay the full price below."
+      )
+    ).toBeInTheDocument();
+    expect(checkout.redeemBundleCode).toHaveBeenCalledWith("704E3907", expect.any(Number));
+    expect(screen.getByRole("link", { name: "Email hello@fettle.ie" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Try another code" }));
+    expect(await screen.findByRole("heading", { name: "Everything look right?" })).toBeInTheDocument();
+  });
+
+  it("shows bundles that can't pay for this session, and the add-code option", async () => {
+    const user = userEvent.setup();
+    data.packages = [
+      { id: "pkg-y", package_id: "1370588", remaining_sessions: 2, package_name: "Youth Bundle 3 x 60min", total_sessions: 3, expires_at: null },
+    ];
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/book?therapist=7"]}>
+          <BookingWizard />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    await user.click(await screen.findByRole("button", { name: "Let’s begin →" }));
+    await user.click(await screen.findByRole("button", { name: /Earliest time/ }));
+    await user.click(screen.getByRole("button", { name: "Continue →" }));
+    await user.click(await screen.findByRole("button", { name: "Continue to payment →" }));
+
+    expect(await screen.findByText("Can’t be used for this session")).toBeInTheDocument();
+    expect(
+      screen.getByText("This bundle is for youth therapy, so it can't be used for individual therapy sessions.")
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Have a bundle\? Add your code/ }));
+    expect(screen.getByLabelText("Bundle code")).toBeInTheDocument();
+  });
+
+  it("books with an unused bundle credit, with no card", async () => {
+    const user = userEvent.setup();
+    data.packages = [{ id: "pkg-1", package_id: "1122832", remaining_sessions: 3 }];
+    checkout.bookWithPackageCredit.mockResolvedValue({ status: "booked", appointmentId: 777, remaining: 2 });
+    await walkToPay(user, /Use 1 of your 3 remaining sessions/);
+
+    expect(screen.queryByText("Card form")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Confirm booking" }));
+    expect(checkout.bookWithPackageCredit.mock.calls[0][0]).toBe("pkg-1");
+    expect(checkout.createSessionIntent).not.toHaveBeenCalled();
+    expect(await screen.findByText("2 sessions left in your bundle")).toBeInTheDocument();
+  });
+
+  it("buys a bundle and books the chosen time with its first credit", async () => {
+    const user = userEvent.setup();
+    checkout.createBundleIntent.mockResolvedValue(bundleIntent(52800));
+    checkout.confirmBundlePayment.mockResolvedValue({ ok: true, packageId: "pkg-new", remaining: 6 });
+    checkout.bookWithPackageCredit.mockResolvedValue({ status: "booked", appointmentId: 888, remaining: 5 });
+    await walkToPay(user, /6-session bundle/);
+
+    expect(checkout.createBundleIntent.mock.calls[0][0]).toBe(996385);
+    await user.click(await screen.findByRole("button", { name: /Pay €528\.00/ }));
+    expect(checkout.confirmBundlePayment).toHaveBeenCalledWith("pi_b");
+    expect(checkout.bookWithPackageCredit.mock.calls[0][0]).toBe("pkg-new");
+    expect(await screen.findByText("5 sessions left in your bundle")).toBeInTheDocument();
+  });
+
+  it("takes a discount code off a new bundle", async () => {
+    const user = userEvent.setup();
+    checkout.createBundleIntent.mockResolvedValue({
+      ok: true,
+      creditCoversAll: false,
+      intent: {
+        clientSecret: "pi_b_secret",
+        paymentIntentId: "pi_b",
+        amount: 47520,
+        originalAmount: 52800,
+        referralCreditApplied: 0,
+        discountApplied: true,
+        couponRejected: null,
+      },
+    });
+    await walkToPayWithCode(user, /6-session bundle/, "spring10");
+
+    expect(checkout.createBundleIntent.mock.calls[0][2]).toEqual({ couponCode: "SPRING10", useReferralCredit: false });
+    expect(await screen.findByText(/Discount applied · SPRING10/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Pay €475\.20/ })).toBeInTheDocument();
+  });
+
+  it("explains a loyalty code can't be used on a bundle and charges the full price", async () => {
+    const user = userEvent.setup();
+    checkout.createBundleIntent.mockResolvedValue({
+      ok: true,
+      creditCoversAll: false,
+      intent: { ...bundleIntent(52800).intent, discountApplied: false, couponRejected: "not_for_bundles" },
+    });
+    await walkToPayWithCode(user, /6-session bundle/, "FETTLELOYALTY5");
+
+    expect(
+      await screen.findByText("Loyalty rewards can be used on single sessions, not on bundles. Proceeding at full price.")
+    ).toBeInTheDocument();
+    expect(checkout.redeemBundleCode).not.toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: /Pay €528\.00/ })).toBeInTheDocument();
+  });
+
+  it("takes referral credit off a new bundle", async () => {
+    const user = userEvent.setup();
+    data.referralCents = 2000;
+    checkout.createBundleIntent.mockImplementation(async (_id: number, _c: unknown, o: { useReferralCredit?: boolean }) =>
+      bundleIntent(52800, o.useReferralCredit ? 2000 : 0)
+    );
+    await walkToPay(user, /6-session bundle/);
+
+    expect(checkout.createBundleIntent.mock.calls[0][2]).toEqual({ useReferralCredit: false });
+    await user.click(await screen.findByRole("checkbox", { name: "Use my €20.00 referral credit" }));
+    expect(await screen.findByText("Referral credit applied: you save €20.00.")).toBeInTheDocument();
+    expect(checkout.createBundleIntent.mock.calls.at(-1)[2]).toEqual({ useReferralCredit: true });
+    expect(await screen.findByRole("button", { name: /Pay €508\.00/ })).toBeInTheDocument();
+  });
+
+  it("charges the full bundle price when the credit would cover all of it", async () => {
+    const user = userEvent.setup();
+    data.referralCents = 60000;
+    checkout.createBundleIntent.mockImplementation(async (_id: number, _c: unknown, o: { useReferralCredit?: boolean }) =>
+      o.useReferralCredit ? { ok: true, creditCoversAll: true } : bundleIntent(52800)
+    );
+    await walkToPay(user, /6-session bundle/);
+    await user.click(await screen.findByRole("checkbox", { name: "Use my €600.00 referral credit" }));
+
+    expect(await screen.findByText("Referral credit not used")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Pay €528\.00/ })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Use my €600.00 referral credit" })).not.toBeChecked();
+  });
+
+  it("finishes the booking after a redirect payment method returns", async () => {
+    const slot = data.days[0].times[0];
+    savePendingPayment({
+      kind: "session",
+      paymentIntentId: "pi_r",
+      entry: "therapist=7",
+      state: initialState({
+        started: true,
+        therapistId: "7",
+        who: "individual",
+        slot,
+        history: "past",
+        planId: "single-individual",
+        details: { firstName: "Sarah", lastName: "Byrne", email: "sarah@example.com", phone: "087 765 4321", partnerName: "", youngPersonName: "", note: "" },
+        consents: { first: true, contact: true, terms: true },
+      }),
+    });
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter
+          initialEntries={["/book?therapist=7&step=pay&wizard_return=1&payment_intent=pi_r&payment_intent_client_secret=pi_r_secret&redirect_status=succeeded"]}
+        >
+          <BookingWizard />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    expect(await screen.findByRole("heading", { name: "You’re booked, Sarah!" })).toBeInTheDocument();
+    expect(checkout.completeSessionPayment).toHaveBeenCalledWith("pi_r");
+    expect(checkout.createSessionIntent).not.toHaveBeenCalled();
+  });
+
+  it("keeps a new bundle when its first booking loses the slot", async () => {
+    const user = userEvent.setup();
+    checkout.createBundleIntent.mockResolvedValue(bundleIntent(27150));
+    checkout.confirmBundlePayment.mockResolvedValue({ ok: true, packageId: "pkg-new", remaining: 3 });
+    checkout.bookWithPackageCredit.mockResolvedValue({
+      status: "failed",
+      network: false,
+      failure: { slotTaken: true, moneyReturned: null, reason: "This time slot is no longer available." },
+    });
+    await walkToPay(user, /3-session bundle/);
+    await user.click(await screen.findByRole("button", { name: /Pay €271\.50/ }));
+    expect(await screen.findByText("That time was just taken. Your bundle is saved — choose another time.")).toBeInTheDocument();
+  });
+});

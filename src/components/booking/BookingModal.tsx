@@ -38,7 +38,7 @@ import {
     usePrefetchCalendarDay,
     type PoolOwner,
 } from '@/hooks/usePooledAvailability';
-import { useActivePackages } from '@/hooks/useUserPackages';
+import { useActivePackages, useRefreshBundlesOnOpen } from '@/hooks/useUserPackages';
 import { useReferrals } from '@/hooks/useReferrals';
 import { useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
@@ -61,9 +61,24 @@ import {
     Zap,
     Lock,
     FileText,
+    AlertCircle,
+    Mail,
+    Ticket,
+    Link2,
+    ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getPackageCategory } from '@/lib/packageCategory';
+import {
+    bundleProblem,
+    couponProblem,
+    shouldCheckAsBundle,
+    supportMailto,
+    type CodeProblem,
+} from '@/lib/booking/codeProblem';
+import { BUNDLE_CODE_HELP, balanceMessage, deductionMessage, notUsableReason } from '@/lib/bundles';
+import { BundleCard } from '@/components/bundles/BundleCard';
+import { normaliseBundleCode } from '@/hooks/useLinkBundleCode';
 import {
     ASSESSMENTS,
     getAssessmentPriceOverride,
@@ -172,6 +187,10 @@ export function BookingModal({
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [ignorePreselectedTherapist, setIgnorePreselectedTherapist] =
         useState(false);
+    // True when the therapist came from the "Book again with your therapist"
+    // shortcut, so Back on the date step returns to the session types.
+    const [bookedFromRebookShortcut, setBookedFromRebookShortcut] =
+        useState(false);
     const [formData, setFormData] = useState({
         firstName: '',
         lastName: '',
@@ -206,8 +225,19 @@ export function BookingModal({
     const [bookingResult, setBookingResult] = useState<{
         appointment: any;
         receiptUrl?: string;
+        /** Set when a bundle credit paid for the session. */
+        bundle?: { balance: string };
     } | null>(null);
     const [couponCode, setCouponCode] = useState('');
+    // A code the client typed that couldn't be used. While set, the confirm
+    // step explains why and offers: try another code, pay, or contact us.
+    const [codeProblem, setCodeProblem] = useState<CodeProblem | null>(null);
+    // "Have a bundle? Add your code", above the payment choice.
+    const [bundleCodeOpen, setBundleCodeOpen] = useState(false);
+    const [bundleCode, setBundleCode] = useState('');
+    const [isLinkingBundle, setIsLinkingBundle] = useState(false);
+    // Which field the refused code came from, for "Try another code".
+    const [codeProblemField, setCodeProblemField] = useState<'bundleCode' | 'couponCode'>('couponCode');
     const [usePackageCredits, setUsePackageCredits] = useState(false);
     const [applyReferralCredit, setApplyReferralCredit] = useState(false);
     const [selectedPackageId, setSelectedPackageId] = useState<string | null>(
@@ -238,9 +268,11 @@ export function BookingModal({
     // Slot whose therapist is being looked up after the client picked it.
     const [assigningTime, setAssigningTime] = useState<string | null>(null);
 
-    // Fetch user's active packages
+    // Fetch user's active packages, re-checking Acuity for new bundles
+    // (e.g. bought on fettle.ie while signed in) each time the modal opens.
     const { packages: activePackages, isLoading: packagesLoading } =
         useActivePackages();
+    useRefreshBundlesOnOpen(open);
 
     // Only credits whose bundle category matches the session being booked may
     // be redeemed — a youth/couples bundle can't pay for an individual session
@@ -260,6 +292,15 @@ export function BookingModal({
                 return !isClinicalCategory;
             }),
         [activePackages, isClinicalCategory, sessionCategory]
+    );
+    // The client's other bundles, shown greyed out with the reason they can't
+    // pay for this session rather than hidden.
+    const otherBundles = useMemo(
+        () =>
+            activePackages
+                .filter((pkg) => !categoryPackages.includes(pkg))
+                .map((pkg) => ({ pkg, reason: notUsableReason(pkg, sessionCategory) })),
+        [activePackages, categoryPackages, sessionCategory]
     );
     const categoryRemainingSessions = useMemo(
         () =>
@@ -316,6 +357,16 @@ export function BookingModal({
             const trimmedCalendarName = preselectedCalendarName.trim();
             const therapistFirstName = trimmedCalendarName.split(' ')[0];
             return types.filter((type) => {
+                // The type must belong to this therapist's calendar. The name
+                // match below allows first names only ("...with Ken"), which
+                // on its own also matched other therapists sharing or starting
+                // with that first name (three Emmas, Lisa/Linda, Paul/Paula).
+                if (
+                    preselectedCalendarId &&
+                    !type.calendarIDs?.includes(preselectedCalendarId)
+                ) {
+                    return false;
+                }
                 const nameLower = type.name.toLowerCase();
                 const therapistNameLower = therapistFirstName.toLowerCase();
                 const fullNameLower = trimmedCalendarName.toLowerCase();
@@ -370,6 +421,7 @@ export function BookingModal({
         }
     }, [
         types,
+        preselectedCalendarId,
         preselectedCalendarName,
         ignorePreselectedTherapist,
         sessionCategory,
@@ -474,7 +526,9 @@ export function BookingModal({
                     .replace(/Individual Session with [^(]+/i, '')
                     .trim();
             }
-            return cleaned || 'Therapy Session';
+            // Fall back to the full type name ("Individual Session with Emma
+            // Keane") so the therapist is always visible on the card.
+            return cleaned || name.trim();
         }
 
         // Extract the focus area from parentheses
@@ -588,6 +642,37 @@ export function BookingModal({
         );
     }, [appointments, calendars]);
 
+    // Therapists the client has seen before, most recent first, each paired
+    // with their own "Individual Session with <name>" type. Shown at the top
+    // of the individual session-type step so a returning client can rebook
+    // without having to find their therapist under a topic.
+    const rebookOptions = useMemo(() => {
+        if (!appointments.length || !types.length) return [];
+        const seen = new Set<number>();
+        const options: { calendar: AcuityCalendar; typeId: number }[] = [];
+        const sorted = [...appointments]
+            .filter((a) => !a.canceled)
+            .sort(
+                (a, b) =>
+                    new Date(b.datetime).getTime() -
+                    new Date(a.datetime).getTime()
+            );
+        for (const apt of sorted) {
+            if (seen.has(apt.calendarID)) continue;
+            seen.add(apt.calendarID);
+            const calendar = calendars.find((c) => c.id === apt.calendarID);
+            const type = types.find((t) => {
+                const nameLower = t.name.toLowerCase();
+                return (
+                    nameLower.startsWith('individual session with') &&
+                    !!t.calendarIDs?.includes(apt.calendarID)
+                );
+            });
+            if (calendar && type) options.push({ calendar, typeId: type.id });
+        }
+        return options;
+    }, [appointments, calendars, types]);
+
     const availableDateStrings = availableDates.map((d) => d.date);
 
     const isDateAvailable = (date: Date) => {
@@ -663,14 +748,17 @@ export function BookingModal({
             // Invalidate packages query to refresh the counter
             queryClient.invalidateQueries({ queryKey: ['user-packages'] });
 
-            setBookingResult({ appointment: data.appointment });
+            const bundleUsed = activePackages.find((pkg) => pkg.id === selectedPackageId);
+            const balance = balanceMessage(bundleUsed?.package_name, data.remainingSessions ?? 0);
+            setBookingResult({
+                appointment: data.appointment,
+                bundle: { balance },
+            });
             setStep('success');
 
             toast({
                 title: 'Session Booked!',
-                description: `You have ${data.remainingSessions} session${
-                    data.remainingSessions === 1 ? '' : 's'
-                } remaining in your package.`,
+                description: balance,
             });
         } catch (error) {
             console.error('Package booking error:', error);
@@ -696,11 +784,14 @@ export function BookingModal({
         }
     };
 
-    // The "coupon" the client typed is really a session-bundle certificate
-    // (create-payment-intent tells us via `packageCertificate`). Link it to the
-    // account and flip this booking over to a package credit — the client has
-    // already paid for these sessions, so we must not charge them again.
-    const handleBundleCodeDetected = async (code: string) => {
+    // The "coupon" the client typed is (or may be) a session-bundle
+    // certificate. Link it to the account and flip this booking over to a
+    // package credit — the client has already paid for these sessions, so we
+    // must not charge them again. If Acuity refuses it, keep the client on the
+    // confirm step with the reason (see codeProblem) rather than charging them.
+    // `couponRejected` is create-payment-intent's verdict on the same code, used
+    // for the wording when it turns out to be a discount code after all.
+    const handleBundleCodeDetected = async (code: string, couponRejected?: string | null) => {
         const categoryLabel: Record<string, string> = {
             individual: 'individual therapy',
             couples: 'couples therapy',
@@ -714,19 +805,25 @@ export function BookingModal({
                 { body: { code, appointmentTypeID: selectedType } }
             );
             if (linkError) {
-                // Non-2xx (e.g. expired session at the gateway) — surface the
-                // function's own message when there is one.
-                let message = "We couldn't link this bundle code right now. Please try again.";
+                // Non-2xx (e.g. expired session at the gateway) — use the
+                // function's own reason and message when there is one.
+                let body: { reason?: string; message?: string } | null = null;
                 try {
-                    const body = await (linkError as { context?: Response }).context?.json();
-                    if (body?.message) message = body.message;
+                    body = await (linkError as { context?: Response }).context?.json();
                 } catch {
                     /* keep the default message */
                 }
-                throw new Error(message);
+                setCodeProblem(
+                    bundleProblem(code, {
+                        reason: body?.reason || 'server_error',
+                        message: body?.message || "We couldn't check this bundle code right now. Please try again, or email hello@fettle.ie.",
+                    })
+                );
+                return;
             }
             if (!link?.ok) {
-                throw new Error(link?.message || "We couldn't link this bundle code to your account.");
+                setCodeProblem(bundleProblem(code, link, couponRejected));
+                return;
             }
 
             // Refresh credits so the confirm step shows the linked bundle.
@@ -739,14 +836,16 @@ export function BookingModal({
 
             if (link.applicable === false) {
                 // Linked, but restricted to another session type (e.g. a youth
-                // bundle typed on an individual booking). Leave this booking on
-                // card payment and explain.
+                // bundle typed on an individual booking). Keep this booking on
+                // the confirm step and explain.
                 setUsePackageCredits(false);
                 setSelectedPackageId(null);
                 const bundleFor = link.categoryLabel ? ` for ${link.categoryLabel}` : '';
-                toast({
-                    title: 'Bundle linked to your account',
-                    description: `${sessionsText} available${bundleFor}. It can't be used for this ${categoryLabel[sessionCategory] || ''} session — choose a matching session type to use it, or continue to pay for this one.`,
+                setCodeProblem({
+                    code,
+                    reason: 'not_applicable',
+                    title: 'This bundle is for a different session type',
+                    message: `We've linked it to your account: ${sessionsText} available${bundleFor}. It can't be used for this ${categoryLabel[sessionCategory] || ''} session. Go back and choose a matching session type to use it, or pay for this one.`,
                 });
                 return;
             }
@@ -757,23 +856,42 @@ export function BookingModal({
                 title: link.alreadyLinked ? 'Bundle found on your account' : 'Bundle linked to your account',
                 description: `${sessionsText} available. Press "Book Session" to use one for this booking — no payment needed.`,
             });
-        } catch (error) {
-            const message = error instanceof Error
-                ? error.message
-                : "We couldn't link this bundle code. Please try again or contact hello@fettle.ie for support.";
-            toast({
-                title: 'Bundle code not linked',
-                description: message,
-                variant: 'destructive',
-            });
+        } catch {
+            setCodeProblem(
+                bundleProblem(code, {
+                    reason: 'server_error',
+                    message: "We couldn't check this bundle code. Please try again or email hello@fettle.ie.",
+                })
+            );
         }
     };
 
-    const handleProceedToPayment = async () => {
+    // "Have a bundle? Add your code": same checks as a bundle code typed in
+    // the discount field, without trying it as a discount first.
+    const handleAddBundleCode = async () => {
+        const code = normaliseBundleCode(bundleCode);
+        if (!code || isLinkingBundle) return;
+        setCodeProblem(null);
+        setCodeProblemField('bundleCode');
+        setIsLinkingBundle(true);
+        try {
+            await handleBundleCodeDetected(code);
+            setBundleCode('');
+        } finally {
+            setIsLinkingBundle(false);
+        }
+    };
+
+    // `skipCode`: the client chose "Pay for this session" after their code
+    // was refused, so charge the full price without it.
+    const handleProceedToPayment = async (options?: { skipCode?: boolean }) => {
         // If using package credits, book with package instead
         if (usePackageCredits && selectedPackageId) {
             return handleBookWithPackage();
         }
+        setCodeProblem(null);
+        setCodeProblemField('couponCode');
+        const codeToSend = options?.skipCode ? '' : couponCode.trim();
 
         console.log('[Stripe Debug] handleProceedToPayment called');
         console.log('[Stripe Debug] selectedType:', selectedType);
@@ -855,7 +973,7 @@ export function BookingModal({
                 // options there).
                 couponCode: isClinicalCategory
                     ? undefined
-                    : couponCode.trim() || undefined,
+                    : codeToSend || undefined,
                 // Apply referral credit (server reduces the charge / may fully cover)
                 useReferralCredit: isClinicalCategory
                     ? false
@@ -925,7 +1043,7 @@ export function BookingModal({
             }
 
             // Surface the discount-code outcome before charging.
-            if (couponCode.trim()) {
+            if (codeToSend) {
                 if (data.discountApplied) {
                     // Percentage codes report discountPercent; fixed-amount
                     // codes report only discountAmount (cents off).
@@ -937,33 +1055,16 @@ export function BookingModal({
                         description: `You're paying €${((data.amount || 0) / 100).toFixed(2)} instead of €${((data.originalAmount || 0) / 100).toFixed(2)}.`,
                     });
                 } else if (data.couponRejected) {
-                    const reasons: Record<string, string> = {
-                        unknown_code: "That coupon code isn't recognised.",
-                        not_signed_in: "We couldn't verify your account to apply this coupon.",
-                        server_unavailable: "We couldn't verify your coupon right now — please try again.",
-                        validation_error: "We couldn't verify your coupon right now — please try again.",
-                        not_earned: "This reward hasn't been unlocked on your account yet.",
-                        coupon_invalid: "This coupon is no longer valid.",
-                        coupon_not_found: "This coupon is no longer valid.",
-                        coupon_no_discount: "This coupon is no longer valid.",
-                        below_minimum: "This coupon can't be applied to this session.",
-                        promo_inactive: 'This discount code is no longer active.',
-                        promo_expired: 'This discount code has expired.',
-                        promo_restricted: "This discount code can't be used here.",
-                        promo_minimum: 'This discount code needs a higher order total.',
-                        promo_currency: "This discount code isn't valid for euro payments.",
-                        promo_no_discount: "This discount code doesn't reduce this payment.",
-                        acuity_expired: 'This coupon has expired.',
-                        acuity_not_applicable: "This coupon doesn't apply to this session type.",
-                        acuity_package_code: "This is a session-bundle code, but we couldn't link it to your account just now — please try again or email hello@fettle.ie.",
-                        acuity_unsupported: "This code can't be applied here. Email hello@fettle.ie and we'll apply it for you.",
-                        website_only: "This code can't be used in the client portal.",
-                    };
-                    toast({
-                        title: 'Coupon not applied',
-                        description: `${reasons[data.couponRejected] || 'This coupon could not be applied.'} Proceeding at full price.`,
-                        variant: 'destructive',
-                    });
+                    // Never fall through to card payment on a refused code.
+                    // Codes Stripe and the rewards didn't know may be bundles
+                    // Acuity refused — ask redeem-package-code for the real
+                    // reason (it also links the bundle if it is usable).
+                    if (shouldCheckAsBundle(data.couponRejected)) {
+                        await handleBundleCodeDetected(codeToSend, data.couponRejected);
+                    } else {
+                        setCodeProblem(couponProblem(codeToSend, data.couponRejected));
+                    }
+                    return;
                 }
             }
 
@@ -1054,11 +1155,16 @@ export function BookingModal({
         setPaymentLivemode(null);
         setBookingResult(null);
         setCouponCode('');
+        setCodeProblem(null);
+        setBundleCodeOpen(false);
+        setBundleCode('');
+        setCodeProblemField('couponCode');
         setUsePackageCredits(false);
         setApplyReferralCredit(false);
         setSelectedPackageId(null);
         setHasUserMadePaymentChoice(false);
         setIgnorePreselectedTherapist(false);
+        setBookedFromRebookShortcut(false);
         setAssigningTime(null);
     };
 
@@ -1080,6 +1186,7 @@ export function BookingModal({
     // For couples/youth sessions, the therapist is embedded in the type name, so extract calendar and skip to date
     const handleTypeSelection = (typeId: number) => {
         setSelectedType(typeId);
+        setBookedFromRebookShortcut(false);
 
         // Assessments and psychiatry don't require choosing a clinician:
         // availability is pooled across the type's calendars and Acuity
@@ -1118,6 +1225,21 @@ export function BookingModal({
 
     const handleSelectTherapist = (calendarId: number) => {
         setSelectedCalendar(calendarId);
+        setStep('date');
+    };
+
+    // "Book again with your therapist": book that therapist's own session
+    // type on their calendar, skipping the topic and therapist steps.
+    const showRebookShortcuts =
+        sessionCategory === 'individual' &&
+        !autoAssign &&
+        !(preselectedCalendarName && !ignorePreselectedTherapist) &&
+        rebookOptions.length > 0;
+
+    const handleRebookTherapist = (typeId: number, calendarId: number) => {
+        setSelectedType(typeId);
+        setSelectedCalendar(calendarId);
+        setBookedFromRebookShortcut(true);
         setStep('date');
     };
 
@@ -1745,6 +1867,65 @@ export function BookingModal({
                         ) : (
                             <ScrollArea className="h-[300px] pr-4">
                                 <div className="space-y-3">
+                                    {showRebookShortcuts && (
+                                        <>
+                                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                <Users className="h-4 w-4" />
+                                                <span>
+                                                    Book again with your
+                                                    therapist
+                                                </span>
+                                            </div>
+                                            {rebookOptions.map(
+                                                ({ calendar, typeId }) => (
+                                                    <button
+                                                        key={calendar.id}
+                                                        onClick={() =>
+                                                            handleRebookTherapist(
+                                                                typeId,
+                                                                calendar.id
+                                                            )
+                                                        }
+                                                        className="w-full p-3 rounded-xl border-2 border-primary/30 bg-primary/5 text-left transition-all hover:border-primary hover:bg-primary/10">
+                                                        <div className="flex items-center gap-3">
+                                                            <TherapistAvatar
+                                                                name={
+                                                                    calendar.name
+                                                                }
+                                                                calendarId={
+                                                                    calendar.id
+                                                                }
+                                                                imageUrl={therapistImages.get(
+                                                                    calendar.id
+                                                                )}
+                                                                size="sm"
+                                                            />
+                                                            <div className="flex-1 min-w-0">
+                                                                <h4 className="font-semibold text-foreground truncate">
+                                                                    {calendar.name.trim()}
+                                                                </h4>
+                                                                <p className="text-xs text-muted-foreground">
+                                                                    Individual
+                                                                    session
+                                                                </p>
+                                                            </div>
+                                                            <ArrowRight className="h-4 w-4 text-primary shrink-0" />
+                                                        </div>
+                                                    </button>
+                                                )
+                                            )}
+                                            <div className="relative py-2">
+                                                <div className="absolute inset-0 flex items-center">
+                                                    <span className="w-full border-t" />
+                                                </div>
+                                                <div className="relative flex justify-center text-xs uppercase">
+                                                    <span className="bg-background px-2 text-muted-foreground">
+                                                        Or choose a topic
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
                                     {filteredAppointmentTypes.map((type) => (
                                         <button
                                             key={type.id}
@@ -1762,7 +1943,8 @@ export function BookingModal({
                                                     <h4 className="font-semibold text-foreground">
                                                         {formatSessionDisplayName(
                                                             type.name,
-                                                            !!preselectedCalendarName
+                                                            !!preselectedCalendarName &&
+                                                                !ignorePreselectedTherapist
                                                         )}
                                                     </h4>
                                                     <NextAvailableTypeHint
@@ -2082,6 +2264,7 @@ export function BookingModal({
                                         sessionCategory === 'assessment'
                                             ? 'pricing'
                                             : autoAssign ||
+                                              bookedFromRebookShortcut ||
                                               sessionCategory === 'couples' ||
                                               sessionCategory === 'youth' ||
                                               sessionCategory === 'psychiatry'
@@ -2095,6 +2278,7 @@ export function BookingModal({
                                     : sessionCategory === 'psychiatry'
                                     ? 'Back to consultation details'
                                     : autoAssign ||
+                                      bookedFromRebookShortcut ||
                                       sessionCategory === 'couples' ||
                                       sessionCategory === 'youth'
                                     ? 'Back to session types'
@@ -2608,7 +2792,66 @@ export function BookingModal({
                 );
             }
 
-            case 'confirm':
+            case 'confirm': {
+                // A refused code: shown under the field it was typed in.
+                const codeProblemBox = codeProblem && (
+                    <div
+                        role="alert"
+                        className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3">
+                        <div className="flex gap-3">
+                            <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                            <div className="space-y-1">
+                                <p className="font-semibold text-foreground">
+                                    {codeProblem.title}
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                    {codeProblem.message}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    Code: <span className="font-mono">{codeProblem.code}</span>
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    setCodeProblem(null);
+                                    if (codeProblemField === 'bundleCode') {
+                                        setBundleCode('');
+                                    } else {
+                                        setCouponCode('');
+                                    }
+                                    document.getElementById(codeProblemField)?.focus();
+                                }}>
+                                Try another code
+                            </Button>
+                            {/* With a credit already chosen there's nothing to pay. */}
+                            {!usePackageCredits && (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={isSubmitting}
+                                    onClick={() => {
+                                        setCouponCode('');
+                                        handleProceedToPayment({ skipCode: true });
+                                    }}>
+                                    <CreditCard className="h-4 w-4" />
+                                    Pay for this session
+                                </Button>
+                            )}
+                            <Button asChild variant="ghost" size="sm">
+                                <a href={supportMailto(codeProblem)}>
+                                    <Mail className="h-4 w-4" />
+                                    Email hello@fettle.ie
+                                </a>
+                            </Button>
+                        </div>
+                    </div>
+                );
                 return (
                     <div className="space-y-6">
                         <div className="bg-accent/50 rounded-xl p-4 space-y-3">
@@ -2686,6 +2929,73 @@ export function BookingModal({
                             </div>
                         )}
 
+                        {/* "Have a bundle? Add your code" — above the payment
+                            choice, so a client who bought a bundle on
+                            fettle.ie links it here rather than paying.
+                            Bundles never cover assessments or psychiatry. */}
+                        {!packagesLoading && !isClinicalCategory && (
+                            <div className="rounded-xl border border-dashed border-border p-3 space-y-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setBundleCodeOpen((v) => !v)}
+                                    aria-expanded={bundleCodeOpen}
+                                    className="w-full flex items-center gap-2 text-left">
+                                    <Ticket className="h-4 w-4 text-primary" />
+                                    <span className="text-sm font-semibold text-foreground">
+                                        Have a bundle? Add your code
+                                    </span>
+                                    <ChevronDown
+                                        className={cn(
+                                            'h-4 w-4 ml-auto text-muted-foreground transition-transform',
+                                            bundleCodeOpen && 'rotate-180'
+                                        )}
+                                    />
+                                </button>
+                                {bundleCodeOpen && (
+                                    <div className="space-y-2">
+                                        <div className="flex gap-2">
+                                            <Input
+                                                id="bundleCode"
+                                                aria-label="Bundle code"
+                                                value={bundleCode}
+                                                onChange={(e) => {
+                                                    setBundleCode(e.target.value.toUpperCase());
+                                                    setCodeProblem(null);
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        handleAddBundleCode();
+                                                    }
+                                                }}
+                                                placeholder="e.g. 704E3907"
+                                                className="uppercase"
+                                                maxLength={32}
+                                                autoComplete="off"
+                                                disabled={isLinkingBundle}
+                                            />
+                                            <Button
+                                                type="button"
+                                                onClick={handleAddBundleCode}
+                                                disabled={!bundleCode.trim() || isLinkingBundle || isSubmitting}
+                                                className="gap-2 shrink-0">
+                                                {isLinkingBundle ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                ) : (
+                                                    <Link2 className="h-4 w-4" />
+                                                )}
+                                                Add code
+                                            </Button>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            {BUNDLE_CODE_HELP}
+                                        </p>
+                                    </div>
+                                )}
+                                {codeProblemField === 'bundleCode' && codeProblemBox}
+                            </div>
+                        )}
+
                         {/* Package Credits Option - Show prominently when credits are available */}
                         {!packagesLoading && categoryRemainingSessions > 0 && (
                             <div className="space-y-3">
@@ -2741,6 +3051,37 @@ export function BookingModal({
                                     </div>
                                 </button>
 
+                                {/* Which bundle the credit comes from. */}
+                                {usePackageCredits && (
+                                    <div className="space-y-2 pl-2 sm:pl-4">
+                                        {categoryPackages.length > 1 && (
+                                            <p className="text-xs font-medium text-muted-foreground">
+                                                Choose which bundle to use
+                                            </p>
+                                        )}
+                                        {categoryPackages.map((pkg) => (
+                                            <BundleCard
+                                                key={pkg.id}
+                                                bundle={pkg}
+                                                selected={selectedPackageId === pkg.id}
+                                                onSelect={
+                                                    categoryPackages.length > 1
+                                                        ? () => setSelectedPackageId(pkg.id)
+                                                        : undefined
+                                                }
+                                            />
+                                        ))}
+                                        {(() => {
+                                            const chosen = categoryPackages.find((pkg) => pkg.id === selectedPackageId);
+                                            return chosen ? (
+                                                <p className="text-sm text-foreground bg-success/5 border border-success/20 rounded-lg p-3">
+                                                    {deductionMessage(chosen)}
+                                                </p>
+                                            ) : null;
+                                        })()}
+                                    </div>
+                                )}
+
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -2774,6 +3115,19 @@ export function BookingModal({
                             </div>
                         )}
 
+                        {/* Bundles that can't pay for this session: say why
+                            instead of hiding them. */}
+                        {!packagesLoading && otherBundles.length > 0 && (
+                            <div className="space-y-2">
+                                <p className="text-xs font-medium text-muted-foreground">
+                                    Can't be used for this session
+                                </p>
+                                {otherBundles.map(({ pkg, reason }) => (
+                                    <BundleCard key={pkg.id} bundle={pkg} unusableReason={reason} />
+                                ))}
+                            </div>
+                        )}
+
                         {/* Standard payment option when no packages (only show after packages have loaded) */}
                         {!packagesLoading &&
                             categoryRemainingSessions === 0 &&
@@ -2797,37 +3151,40 @@ export function BookingModal({
                                 </div>
                             )}
 
-                        {/* Coupon / bundle code - only show when paying. Accepts
-                            loyalty rewards, Stripe promotion codes, Acuity
-                            coupons, and session-bundle certificate codes (which
-                            get linked to the account and booked as a package
-                            credit). Discounts and referral credits are
-                            therapy-session perks, so neither is offered on
-                            assessment or psychiatry bookings. */}
+                        {/* Discount code - only show when paying. Accepts
+                            loyalty rewards, Stripe promotion codes and Acuity
+                            coupons. A session-bundle code typed here still
+                            works (it's linked and booked as a package credit),
+                            though bundles have their own field above.
+                            Discounts and referral credits are therapy-session
+                            perks, so neither is offered on assessment or
+                            psychiatry bookings. */}
                         {!usePackageCredits &&
                             !isClinicalCategory &&
                             selectedTypeData?.price &&
                             parseFloat(selectedTypeData.price) > 0 && (
                                 <div className="space-y-2">
                                     <Label htmlFor="couponCode">
-                                        Coupon or bundle code (optional)
+                                        Discount code (optional)
                                     </Label>
                                     <Input
                                         id="couponCode"
                                         value={couponCode}
-                                        onChange={(e) =>
+                                        onChange={(e) => {
                                             setCouponCode(
                                                 e.target.value.toUpperCase()
-                                            )
-                                        }
-                                        placeholder="Enter coupon or bundle code"
+                                            );
+                                            setCodeProblem(null);
+                                        }}
+                                        placeholder="Enter a discount code"
                                         className="uppercase"
                                     />
-                                    <p className="text-xs text-muted-foreground">
-                                        Bought a session bundle on fettle.ie or been given a bundle code? Enter it here and we'll link it to your account and book with a credit.
-                                    </p>
                                 </div>
                             )}
+
+                        {/* A refused discount code: say why and let the client
+                            choose what to do — never move them to payment silently. */}
+                        {codeProblemField === 'couponCode' && !usePackageCredits && codeProblemBox}
 
                         {/* Referral credit - only when paying by card and you have credit */}
                         {!usePackageCredits &&
@@ -2880,7 +3237,7 @@ export function BookingModal({
                                 Back
                             </Button>
                             <Button
-                                onClick={handleProceedToPayment}
+                                onClick={() => handleProceedToPayment()}
                                 className="flex-1 gap-2"
                                 disabled={isSubmitting}>
                                 {isSubmitting ? (
@@ -2905,6 +3262,7 @@ export function BookingModal({
                         </div>
                     </div>
                 );
+            }
 
             case 'payment': {
                 console.log('[Stripe Debug] Rendering payment step');
@@ -3070,6 +3428,20 @@ export function BookingModal({
                                         minute: '2-digit',
                                     })}
                                 </p>
+                            </div>
+                        )}
+
+                        {bookingResult?.bundle && (
+                            <div className="bg-success/10 border border-success/30 rounded-xl p-4 w-full flex gap-3">
+                                <Gift className="h-5 w-5 text-success shrink-0 mt-0.5" />
+                                <div className="space-y-1">
+                                    <p className="font-medium text-foreground">
+                                        Paid with 1 bundle credit
+                                    </p>
+                                    <p className="text-sm text-muted-foreground">
+                                        {bookingResult.bundle.balance}
+                                    </p>
+                                </div>
                             </div>
                         )}
 

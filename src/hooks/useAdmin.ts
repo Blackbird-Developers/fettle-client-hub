@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { queryOptions, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, queryOptions, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { ApiError, classifyApiError } from "@/lib/api-errors";
 import { readCachedAdminData, writeCachedAdminData } from "@/lib/adminDataCache";
 import { type AdminDataSource, timeLoad } from "@/lib/adminLoadProgress";
 import { normalizeProgression } from "@/lib/customerInsights";
+import type { AnalyticsCustomersResponse, AnalyticsResponse } from "@/lib/adminAnalytics";
 import {
   type CustomerFollowup,
   type FollowupPatch,
@@ -346,55 +347,6 @@ export function useRetentionFunnel() {
   return { funnel, loading: isLoading, error: error ?? null };
 }
 
-// Revenue metrics - uses edge function data
-export function useRevenueMetrics() {
-  const { data, isLoading, error } = useAdminMetrics();
-
-  const metrics = data?.revenue ?? {
-    totalRevenue: 0,
-    thisMonthRevenue: 0,
-    lastMonthRevenue: 0,
-    monthOverMonthChange: 0,
-    totalPackagesSold: 0,
-    averagePackageValue: 0,
-    thisMonthPackages: 0,
-  };
-
-  return { metrics, isLoading, error: error ?? null };
-}
-
-// Session metrics - uses edge function data
-export function useSessionMetrics() {
-  const { data, isLoading, error } = useAdminMetrics();
-
-  const metrics = data?.sessions ?? {
-    totalCompleted: 0,
-    totalUpcoming: 0,
-    thisMonthCompleted: 0,
-    lastMonthCompleted: 0,
-    monthOverMonthGrowth: 0,
-    uniqueClientsThisMonth: 0,
-    firstTimersThisMonth: 0,
-    canceledThisMonth: 0,
-  };
-
-  return { metrics, loading: isLoading, error: error ?? null };
-}
-
-// Engagement stats - uses edge function data
-export function useEngagementStats() {
-  const { data, isLoading, error } = useAdminMetrics();
-
-  const stats = data?.engagement ?? {
-    totalActiveCredits: 0,
-    uniqueClients: 0,
-    activePackageHolders: 0,
-    clientsWithoutPackages: 0,
-  };
-
-  return { stats, isLoading, error: error ?? null };
-}
-
 // Response of the admin-customer-insights edge function (row types come from
 // the function's own logic module so the two can't drift apart).
 export interface CustomerInsightsResponse {
@@ -429,10 +381,11 @@ const ACUITY_TIMEOUT_ERROR: ApiError = {
   retryable: true,
 };
 
-// GETs one of the admin Acuity edge functions with the caller's session.
+// GETs one of the admin edge functions with the caller's session (and an
+// optional query string).
 // Gives up after ADMIN_FUNCTION_TIMEOUT_MS; a gateway timeout (504) or the
 // function hitting Supabase's limits (546) count as a timeout too.
-async function fetchAdminFunction(name: string) {
+async function fetchAdminFunction(name: string, query?: string) {
   const { data: sessionData } = await supabase.auth.getSession();
   const accessToken = sessionData?.session?.access_token;
 
@@ -450,7 +403,8 @@ async function fetchAdminFunction(name: string) {
   try {
     let response: Response;
     try {
-      response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${name}`, {
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${name}${query ? `?${query}` : ""}`;
+      response = await fetch(url, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
@@ -628,6 +582,35 @@ export function useClinical() {
   const { user } = useAuth();
 
   return useQuery({ ...clinicalQuery(user?.id), enabled: isAdmin === true });
+}
+
+// The Overview analytics boards, counted from the saved copy of Acuity's
+// appointments (quick, so no progress loader). `query` is analyticsQuery()'s
+// output; the previous numbers stay on screen while new settings load.
+export function useAdminAnalytics(query: string) {
+  const { data: isAdmin } = useIsAdmin();
+  return useQuery<AnalyticsResponse, ApiError>({
+    queryKey: ["admin-analytics", query],
+    queryFn: () => fetchAdminFunction("admin-analytics", query),
+    enabled: isAdmin === true,
+    placeholderData: keepPreviousData,
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+    retry: ACUITY_QUERY_OPTIONS.retry,
+  });
+}
+
+// The customers behind one number on the Customers board; null = closed.
+export function useAnalyticsCustomers(query: string | null) {
+  const { data: isAdmin } = useIsAdmin();
+  return useQuery<AnalyticsCustomersResponse, ApiError>({
+    queryKey: ["admin-analytics-customers", query],
+    queryFn: () => fetchAdminFunction("admin-analytics", query!),
+    enabled: isAdmin === true && query !== null,
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+    retry: ACUITY_QUERY_OPTIONS.retry,
+  });
 }
 
 // Follow-ups and contact outcomes for a page's Contact column, with why

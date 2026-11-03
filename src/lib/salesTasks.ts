@@ -1,11 +1,14 @@
 import type { Tables } from "@/integrations/supabase/types";
+import { progressionRangeSlug } from "@/lib/adminNavigation";
 import {
   type SalesPriority,
   type SalesTaskKind,
   KIND_LABELS,
+  SECTION_ORDER,
   compareTasks,
   daysBetween,
   dublinDate,
+  progressionStageLabel,
 } from "../../supabase/functions/sales-tasks/logic.ts";
 import type { ScorePart } from "../../supabase/functions/admin-leads/score.ts";
 
@@ -15,7 +18,41 @@ import type { ScorePart } from "../../supabase/functions/admin-leads/score.ts";
 
 export type SalesTask = Tables<"sales_tasks">;
 export type { SalesPriority, SalesTaskKind };
-export { KIND_LABELS };
+export { KIND_LABELS, SECTION_ORDER };
+
+export const SECTION_LABELS: Record<SalesTaskKind, { title: string; description: string }> = {
+  progression: {
+    title: "Progressions",
+    description: "Customers between sessions 1→2, 2→3, 3→4 and 4→5 with nothing booked for a week or more.",
+  },
+  bundle: {
+    title: "Bundles",
+    description: "Stalled bundles (credits left, no session in 30+ days) and nearly-done ones (1 credit left), most urgent first.",
+  },
+  followup: {
+    title: "Follow-ups",
+    description: "Customers who asked to be called back, and tasks moved to today with “Follow up on…”.",
+  },
+  no_answer: {
+    title: "No answers",
+    description: "Customers who didn't pick up, with their next attempt due today.",
+  },
+  hot_lead: { title: "Hot leads", description: "Courtney's open quotes and missed Let's Talk calls." },
+  psychiatry: { title: "Psychiatry", description: "Clients due a call to book their psychiatry follow-up." },
+  assessment: { title: "Assessments", description: "Clients whose next assessment step isn't booked." },
+};
+
+/** How staff completed a task (the Complete pop-up). */
+export type CompletionOutcome = "completed" | "no_answer";
+
+/** "No answer · emailed and WhatsApped", for the history tab; null for older or auto-closed tasks. */
+export function completionLabel(
+  task: Pick<SalesTask, "completion_outcome" | "contacted_by_email" | "contacted_by_whatsapp">
+): string | null {
+  if (task.completion_outcome !== "no_answer") return null;
+  const channels = [task.contacted_by_email && "emailed", task.contacted_by_whatsapp && "WhatsApped"].filter(Boolean);
+  return channels.length ? `No answer · ${channels.join(" and ")}` : "No answer";
+}
 
 /** Completed and auto-closed tasks shown in the history tab. */
 export const HISTORY_DAYS = 30;
@@ -80,6 +117,59 @@ export function groupTasks(tasks: readonly SalesTask[], today: string): TaskGrou
   return { today: todayList, upcoming };
 }
 
+/**
+ * The section a task shows in: its kind, except that a task moved to a
+ * later date with "Follow up on…" comes back under Follow-ups.
+ */
+export function sectionFor(task: Pick<SalesTask, "kind" | "due_on" | "original_due_on">): SalesTaskKind {
+  if (task.due_on > task.original_due_on) return "followup";
+  return SECTION_ORDER.includes(task.kind as SalesTaskKind) ? (task.kind as SalesTaskKind) : "hot_lead";
+}
+
+/** Session N of a progression task ("session_2" → 2), or null. */
+export function progressionStage(task: Pick<SalesTask, "kind" | "lead_status">): number | null {
+  if (task.kind !== "progression") return null;
+  const match = /^session_(\d+)$/.exec(task.lead_status ?? "");
+  return match ? Number(match[1]) : null;
+}
+
+export interface TaskSection {
+  kind: SalesTaskKind;
+  tasks: SalesTask[];
+  /** Progressions only: the tasks per stage, 1→2 first. */
+  stages?: { fromSession: number; label: string; tasks: SalesTask[] }[];
+}
+
+/**
+ * Today's tasks in the page's seven sections, in working order. Each keeps
+ * the order it was given (most important first); progressions are also
+ * split by stage.
+ */
+export function groupSections(tasks: readonly SalesTask[]): TaskSection[] {
+  return SECTION_ORDER.map((kind) => {
+    const inSection = tasks.filter((task) => sectionFor(task) === kind);
+    if (kind !== "progression") return { kind, tasks: inSection };
+    const byStage = new Map<number, SalesTask[]>();
+    for (const task of inSection) {
+      const stage = progressionStage(task) ?? 0;
+      byStage.set(stage, [...(byStage.get(stage) ?? []), task]);
+    }
+    const stages = [...byStage.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([fromSession, list]) => ({
+        fromSession,
+        label: fromSession ? progressionStageLabel(fromSession) : "Other",
+        tasks: list,
+      }));
+    return { kind, tasks: stages.flatMap((stage) => stage.tasks), stages };
+  });
+}
+
+/** The first section with tasks: where the page starts. */
+export function firstSectionWithTasks(sections: readonly TaskSection[]): SalesTaskKind | null {
+  return sections.find((section) => section.tasks.length > 0)?.kind ?? null;
+}
+
 /** e.g. "Due today", "Overdue by 2 days", "In 3 days". */
 export function dueLabel(task: Pick<SalesTask, "due_on">, today: string): string {
   const days = daysBetween(today, task.due_on);
@@ -110,6 +200,10 @@ export function priorityReasons(task: Pick<SalesTask, "priority_reasons">): Scor
 }
 
 const SOURCE_PAGES: Record<SalesTaskKind, string> = {
+  progression: "/admin/progression",
+  bundle: "/admin/bundles",
+  followup: "/admin/followups",
+  no_answer: "/admin/no-answer",
   hot_lead: "/admin/leads",
   assessment: "/admin/assessments",
   psychiatry: "/admin/psychiatry",
@@ -117,9 +211,12 @@ const SOURCE_PAGES: Record<SalesTaskKind, string> = {
 
 /** The admin page the task came from, searched for this customer. */
 export function sourceHref(
-  task: Pick<SalesTask, "kind" | "customer_email" | "customer_phone" | "customer_name">
+  task: Pick<SalesTask, "kind" | "lead_status" | "customer_email" | "customer_phone" | "customer_name">
 ): string {
-  const page = SOURCE_PAGES[task.kind as SalesTaskKind] ?? "/admin";
+  const stage = progressionStage(task);
+  const page = stage
+    ? `/admin/progression/${progressionRangeSlug(stage)}`
+    : (SOURCE_PAGES[task.kind as SalesTaskKind] ?? "/admin");
   const query = task.customer_email ?? task.customer_phone ?? task.customer_name;
   return query ? `${page}?q=${encodeURIComponent(query)}` : page;
 }

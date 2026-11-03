@@ -79,7 +79,7 @@ export function describeReasons(
 export type ContactMethod = "call" | "email" | "sms" | "whatsapp" | "other";
 
 /** Where an outcome was logged; a No answer starts a sequence with this source. */
-export type AttemptSource = "progression" | "hot_lead" | "followups" | "no_answer";
+export type AttemptSource = "progression" | "hot_lead" | "followups" | "no_answer" | "sales_tasks";
 
 /** Optional details saved with an outcome (all checked by the database). */
 export interface AttemptMeta {

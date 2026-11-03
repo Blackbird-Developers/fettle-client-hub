@@ -5,7 +5,7 @@ import { useIsAdmin } from "@/hooks/useAdmin";
 import { readBundleFunnelIntent } from "@/lib/bundleFunnel";
 
 // Pages that manage their own navigation during sign-in, or are the funnel itself.
-const SKIP_PATHS = ["/get-started", "/packages", "/login", "/signup", "/reset-password"];
+const SKIP_PATHS = ["/get-started", "/packages", "/login", "/signup", "/reset-password", "/book"];
 
 /**
  * Sends a client who arrived from a fettle.ie bundle link to /get-started as

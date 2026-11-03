@@ -77,6 +77,7 @@ import {
   validateReasons,
 } from "@/lib/contactOutcomes";
 import { formatDate, formatDateTime, matchesSearch } from "@/lib/customerInsights";
+import { initialSearchFromUrl } from "@/lib/salesTasks";
 import {
   type NoAnswerSequence,
   type SequenceStatus,
@@ -128,7 +129,7 @@ export function NoAnswer() {
   // Optional extras (contact details, Acuity booking hint); the page works without them.
   const insights = useCustomerInsights();
   const [tab, setTab] = useState<TabId>("due");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearchFromUrl);
 
   const detailsByKey = useMemo(() => {
     const map = new Map<string, { name: string | null; email: string | null; phone: string | null; booked: boolean }>();

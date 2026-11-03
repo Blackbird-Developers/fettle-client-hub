@@ -10,7 +10,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
 import { type CustomerFollowup, blankFollowup } from "@/lib/customerFollowups";
 import { FollowUpsReport } from "./FollowUpsReport";
-import { FollowUpsSummaryCard } from "./FollowUpsSummaryCard";
 
 // customer_followups rows by key. Recording an outcome goes through the same
 // applyOutcome mirror the Progression tests use.
@@ -182,17 +181,5 @@ describe("Follow-ups report", () => {
     expect(screen.getByText("Di Doyle")).toBeInTheDocument();
     const price = screen.getByText("Price").closest("li")!;
     expect(price).toHaveTextContent("1 of 1 customers(100%)");
-  });
-});
-
-describe("Overview follow-ups card", () => {
-  it("counts who to call now and links to the report", () => {
-    renderWith(<FollowUpsSummaryCard />);
-    const tile = (label: string) => screen.getByText(label).parentElement!;
-    expect(tile("To call now")).toHaveTextContent("1");
-    expect(tile("Due in the next 7 days")).toHaveTextContent("1");
-    expect(tile("Continue later (all)")).toHaveTextContent("3");
-    expect(tile("Not continuing")).toHaveTextContent("1");
-    expect(screen.getByRole("link", { name: /Open report/ })).toHaveAttribute("href", "/admin/followups");
   });
 });

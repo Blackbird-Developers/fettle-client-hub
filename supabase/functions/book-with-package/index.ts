@@ -249,6 +249,9 @@ async function sendCreditUsedConfirmation(
         therapistName: appointment.calendar || 'Your Therapist',
         remainingSessions,
         totalSessions,
+        datetime: appointment.datetime,
+        timezone: userTimezone,
+        sessionType: appointment.type,
       }),
     });
 

@@ -10,6 +10,9 @@ import { useTherapistImages } from "@/hooks/useTherapistImages";
 import { useActivePackages } from "@/hooks/useUserPackages";
 import { useReferrals, formatEuros } from "@/hooks/useReferrals";
 import { BookingModal } from "@/components/booking/BookingModal";
+import { useNavigate } from "react-router-dom";
+import { useTherapistRows } from "@/hooks/useTherapistDirectory";
+import { wizardLinkForCalendar } from "@/lib/booking/links";
 import { TherapistAvatar } from "@/components/dashboard/MyTherapist";
 
 /** Days since the last session before we nudge a client to book again. */
@@ -28,6 +31,8 @@ export function BookAgainPrompt() {
   const { data: referralData } = useReferrals();
   const [bookingOpen, setBookingOpen] = useState(false);
   const [keepTherapist, setKeepTherapist] = useState(true);
+  const navigate = useNavigate();
+  const { data: therapistRows = [] } = useTherapistRows();
 
   const { lastSession, hasUpcoming } = useMemo(() => {
     const active = appointments.filter((apt) => !apt.canceled);
@@ -79,6 +84,14 @@ export function BookAgainPrompt() {
     : `Book your next session with ${firstName} and keep your momentum going.`;
 
   const openBooking = (withSameTherapist: boolean) => {
+    // Book in the /book wizard: with the same therapist (keeping the last
+    // session's service), or matching for "Choose someone else". Calendars
+    // outside the therapist table keep the booking modal.
+    const sameLink = wizardLinkForCalendar(lastSession.calendarID, therapistRows, lastSession.appointmentTypeID);
+    if (withSameTherapist ? sameLink : therapistRows.length) {
+      navigate(withSameTherapist ? sameLink! : "/book");
+      return;
+    }
     setKeepTherapist(withSameTherapist);
     setBookingOpen(true);
   };

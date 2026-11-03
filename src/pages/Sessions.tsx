@@ -33,6 +33,10 @@ import { useTherapistReviews, TherapistReview } from "@/hooks/useTherapistReview
 import { useUnpaidSessions, type UnpaidSession } from "@/hooks/useUnpaidSessions";
 import { useSettlementRedirectReturn } from "@/hooks/useSettlementRedirectReturn";
 import { PaySessionModal } from "@/components/booking/PaySessionModal";
+import { bundleUsedFor } from "@/lib/bundles";
+import { useNavigate } from "react-router-dom";
+import { useTherapistRows } from "@/hooks/useTherapistDirectory";
+import { wizardLinkForCalendar } from "@/lib/booking/links";
 
 function AcuitySessionCard({
   appointment,
@@ -47,7 +51,7 @@ function AcuitySessionCard({
 }: {
   appointment: AcuityAppointment;
   onCancel?: () => void;
-  onRebook?: (calendarId: number, calendarName: string) => void;
+  onRebook?: (calendarId: number, calendarName: string, appointmentTypeId?: number) => void;
   clientEmail?: string;
   therapistImageUrl?: string;
   review?: TherapistReview;
@@ -64,6 +68,7 @@ function AcuitySessionCard({
   const { toast } = useToast();
 
   const dateTime = parseISO(appointment.datetime);
+  const paidByBundle = bundleUsedFor(appointment.notes);
   // Stays upcoming (with Join available) until the end of the session's day,
   // so late or reconnecting clients can still get into the call.
   const isUpcoming = isSessionActive(appointment.datetime) && !appointment.canceled;
@@ -205,6 +210,11 @@ function AcuitySessionCard({
                 </div>
                 <div className="shrink-0 flex flex-col items-end gap-1">
                   {getStatusBadge()}
+                  {paidByBundle && !unpaidSession && (
+                    <Badge variant="outline" className="bg-success/10 text-success border-success/30" title={`Paid with your ${paidByBundle}`}>
+                      Paid with bundle
+                    </Badge>
+                  )}
                   {unpaidSession && (
                     <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-900">
                       Unpaid
@@ -333,7 +343,7 @@ function AcuitySessionCard({
                         size="sm"
                         variant="outline"
                         className="gap-1.5 text-xs sm:text-sm"
-                        onClick={() => onRebook(appointment.calendarID, appointment.calendar)}
+                        onClick={() => onRebook(appointment.calendarID, appointment.calendar, appointment.appointmentTypeID)}
                       >
                         <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                         Rebook with {appointment.calendar.split(' ')[0]}
@@ -465,7 +475,17 @@ export default function Sessions() {
   const [rebookCalendarId, setRebookCalendarId] = useState<number | undefined>();
   const [rebookCalendarName, setRebookCalendarName] = useState<string | undefined>();
 
-  const handleRebook = (calendarId: number, calendarName: string) => {
+  const navigate = useNavigate();
+  const { data: therapistRows = [] } = useTherapistRows();
+
+  const handleRebook = (calendarId: number, calendarName: string, appointmentTypeId?: number) => {
+    // Therapists in the directory rebook in the /book wizard with the same
+    // service; anyone else (psychiatrists, assessment clinicians) keeps the modal.
+    const link = wizardLinkForCalendar(calendarId, therapistRows, appointmentTypeId);
+    if (link) {
+      navigate(link);
+      return;
+    }
     setRebookCalendarId(calendarId);
     setRebookCalendarName(calendarName);
     setRebookOpen(true);

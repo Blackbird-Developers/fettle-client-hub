@@ -14,6 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_notifications: {
+        Row: {
+          body: string | null
+          client_email: string | null
+          client_name: string | null
+          created_at: string
+          dedupe_key: string | null
+          details: Json
+          id: string
+          kind: string
+          read_at: string | null
+          read_by_email: string | null
+          title: string
+          user_id: string | null
+        }
+        Insert: {
+          body?: string | null
+          client_email?: string | null
+          client_name?: string | null
+          created_at?: string
+          dedupe_key?: string | null
+          details?: Json
+          id?: string
+          kind: string
+          read_at?: string | null
+          read_by_email?: string | null
+          title: string
+          user_id?: string | null
+        }
+        Update: {
+          body?: string | null
+          client_email?: string | null
+          client_name?: string | null
+          created_at?: string
+          dedupe_key?: string | null
+          details?: Json
+          id?: string
+          kind?: string
+          read_at?: string | null
+          read_by_email?: string | null
+          title?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       customer_contact_attempts: {
         Row: {
           attempt_number: number | null
@@ -390,6 +435,9 @@ export type Database = {
           completed_at: string | null
           completed_by: string | null
           completed_by_email: string | null
+          completion_outcome: string | null
+          contacted_by_email: boolean
+          contacted_by_whatsapp: boolean
           created_at: string
           created_on: string
           customer_email: string | null
@@ -425,6 +473,9 @@ export type Database = {
           completed_at?: string | null
           completed_by?: string | null
           completed_by_email?: string | null
+          completion_outcome?: string | null
+          contacted_by_email?: boolean
+          contacted_by_whatsapp?: boolean
           created_at?: string
           created_on?: string
           customer_email?: string | null
@@ -460,6 +511,9 @@ export type Database = {
           completed_at?: string | null
           completed_by?: string | null
           completed_by_email?: string | null
+          completion_outcome?: string | null
+          contacted_by_email?: boolean
+          contacted_by_whatsapp?: boolean
           created_at?: string
           created_on?: string
           customer_email?: string | null
@@ -720,7 +774,12 @@ export type Database = {
         Returns: Database["public"]["Tables"]["no_answer_sequences"]["Row"]
       }
       complete_sales_task: {
-        Args: { p_task_id: string }
+        Args: {
+          p_emailed?: boolean
+          p_outcome?: string
+          p_task_id: string
+          p_whatsapped?: boolean
+        }
         Returns: Database["public"]["Tables"]["sales_tasks"]["Row"]
       }
       has_role: {

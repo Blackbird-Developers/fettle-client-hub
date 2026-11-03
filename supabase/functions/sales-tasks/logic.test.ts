@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { LeadRow } from "../admin-leads/logic.ts";
 import type { AssessmentRow, PsychiatryRow } from "../admin-clinical/logic.ts";
+import type { ProgressionRow } from "../admin-customer-insights/logic.ts";
+import type { BundleRow } from "../admin-bundles/logic.ts";
 import {
+  type FollowupRow,
   type SavedTask,
+  type SequenceRow,
   type TaskCandidate,
+  arrangeCandidates,
   assessmentCandidates,
+  bundleTaskCandidates,
+  followupTaskCandidates,
+  noAnswerTaskCandidates,
+  progressionTaskCandidates,
   compareTasks,
   daysBetween,
   dedupeKey,
@@ -15,7 +24,6 @@ import {
   planDailyRun,
   priorityFor,
   psychiatryCandidates,
-  scopeCandidates,
   scoreTask,
 } from "./logic.ts";
 
@@ -304,34 +312,361 @@ describe("assessment and psychiatry candidates", () => {
   });
 });
 
-describe("Courtney's list", () => {
-  it("keeps hot leads on Courtney's calendar and drops everything else", () => {
-    const { candidates } = scopeCandidates({
-      candidates: [
-        candidate({ customerKey: "email:a@example.com", owner: "Courtney" }),
-        candidate({ customerKey: "email:b@example.com", owner: "Alex Hamm" }),
-        candidate({ customerKey: "email:c@example.com", owner: null }),
-        candidate({ customerKey: "email:d@example.com", kind: "psychiatry", owner: "Dr Rubeo" }),
-        // Even on her calendar, assessment and psychiatry stay off for now.
-        candidate({ customerKey: "email:e@example.com", kind: "assessment", owner: "Courtney" }),
+function progressionRow(overrides: Partial<ProgressionRow> = {}): ProgressionRow {
+  return {
+    key: "email:niamh@example.com",
+    name: "Niamh Ryan",
+    email: "niamh@example.com",
+    phone: "086 000 0000",
+    fromSessionAt: "2026-09-30T10:00:00Z",
+    fromSessionType: "Therapy Session with Dr Smith",
+    daysSinceFromSession: 16,
+    nextSessionStatus: "none",
+    nextSessionAt: null,
+    nextSessionType: null,
+    portalStatus: "has_account",
+    historyStatus: "verified",
+    historyNote: null,
+    grade: "A",
+    gradeReason: "Session 1 session 14+ days ago, no second session",
+    ...overrides,
+  };
+}
+
+function bundleRow(overrides: Partial<BundleRow> = {}): BundleRow {
+  return {
+    id: 1,
+    code: "ABC",
+    key: "email:ciara@example.com",
+    name: "Ciara Doyle",
+    email: "ciara@example.com",
+    phone: null,
+    bundleName: "6 Session Bundle",
+    knownProduct: true,
+    totalCredits: 6,
+    usedCredits: 2,
+    remainingCredits: 4,
+    utilisation: 33,
+    purchasedAt: "2026-07-01T10:00:00Z",
+    purchasedSource: "acuity",
+    expiresAt: null,
+    daysToExpiry: null,
+    lastSessionAt: "2026-08-20T10:00:00Z",
+    daysSinceLastSession: 57,
+    nextSessionAt: null,
+    sessionsMatchedBy: "code",
+    portalStatus: "has_account",
+    otherBundles: 0,
+    segment: "stalled",
+    ...overrides,
+  };
+}
+
+function followupRow(overrides: Partial<FollowupRow> = {}): FollowupRow {
+  return {
+    customer_key: "email:liam@example.com",
+    customer_name: "Liam Nolan",
+    outcome: "follow_up_later",
+    outcome_at: "2026-09-16T10:00:00Z",
+    follow_up_due: TODAY,
+    ...overrides,
+  };
+}
+
+function sequence(overrides: Partial<SequenceRow> = {}): SequenceRow {
+  return {
+    customer_key: "email:eoin@example.com",
+    customer_name: "Eoin Burke",
+    customer_phone: "085 111 2222",
+    status: "active",
+    attempts_done: 2,
+    started_at: "2026-10-13T10:00:00Z",
+    next_due_on: TODAY,
+    closed_at: null,
+    closed_reason: null,
+    ...overrides,
+  };
+}
+
+describe("progression tasks", () => {
+  const stage = (fromSession: number, rows: ProgressionRow[]) => ({ fromSession, rows });
+
+  it("lists grade A and B customers with nothing booked, and scores earlier stages higher", () => {
+    const { candidates } = progressionTaskCandidates(
+      [
+        stage(1, [progressionRow()]),
+        stage(4, [progressionRow({ key: "email:b@example.com", grade: "B", daysSinceFromSession: 9 })]),
       ],
-      resolutions: new Map(),
+      [],
+      new Map(),
+      NOW
+    );
+    expect(candidates).toHaveLength(2);
+    const [first, fourth] = candidates;
+    expect(first).toMatchObject({ kind: "progression", leadStatus: "session_1", dueOn: TODAY });
+    expect(first.reason).toBe("Session 1 on 30 Sept (16 days ago); session 2 not booked");
+    expect(first.nextAction).toBe("Call to book session 2");
+    // 60 (grade A) + 20 (1→2) + 15 (not contacted)
+    expect(scoreTask(first.baseParts, TODAY, TODAY).score).toBe(95);
+    // 45 (grade B) + 5 (4→5) + 15
+    expect(scoreTask(fourth.baseParts, TODAY, TODAY).score).toBe(65);
+  });
+
+  it("waits on grade C, skips unverified rows and closes once the next session is booked", () => {
+    const { candidates, resolutions } = progressionTaskCandidates(
+      [
+        stage(2, [
+          progressionRow({ grade: "C", daysSinceFromSession: 3 }),
+          progressionRow({ key: "email:u@example.com", grade: null, historyStatus: "unverified" }),
+          progressionRow({ key: "email:booked@example.com", grade: "D", nextSessionStatus: "booked" }),
+        ]),
+      ],
+      [],
+      new Map(),
+      NOW
+    );
+    expect(candidates).toEqual([]);
+    expect(resolutions.get("progression|email:booked@example.com")).toBe("Session 3 booked");
+  });
+
+  it("uses the customer's latest stage", () => {
+    const { candidates } = progressionTaskCandidates(
+      [
+        stage(1, [progressionRow({ fromSessionAt: "2026-09-20T10:00:00Z", nextSessionStatus: "completed" })]),
+        stage(2, [progressionRow({ fromSessionAt: "2026-10-01T10:00:00Z", daysSinceFromSession: 15 })]),
+      ],
+      [],
+      new Map(),
+      NOW
+    );
+    expect(candidates.map((c) => c.leadStatus)).toEqual(["session_2"]);
+  });
+
+  it("closes when staff recorded an outcome after the session", () => {
+    const followups = new Map([
+      ["email:niamh@example.com", { outcome: "not_continuing", outcome_at: "2026-10-05T10:00:00Z" }],
+    ]);
+    const { candidates, resolutions } = progressionTaskCandidates(
+      [stage(1, [progressionRow()])],
+      [],
+      followups,
+      NOW
+    );
+    expect(candidates).toEqual([]);
+    expect(resolutions.get("progression|email:niamh@example.com")).toBe("Not continuing recorded by staff");
+  });
+});
+
+describe("bundle tasks", () => {
+  it("lists stalled and nearly-done bundles, most urgent bundle per customer", () => {
+    const { candidates } = bundleTaskCandidates(
+      [
+        bundleRow(),
+        bundleRow({ id: 2, remainingCredits: 1, segment: "nearly_done", daysSinceLastSession: 5, lastSessionAt: "2026-10-11T10:00:00Z" }),
+        bundleRow({ id: 3, key: "email:other@example.com", segment: "on_track" }),
+      ],
+      [],
+      new Map(),
+      NOW
+    );
+    expect(candidates).toHaveLength(1);
+    const [task] = candidates;
+    expect(task).toMatchObject({ kind: "bundle", leadStatus: "stalled", serviceType: "6 Session Bundle" });
+    expect(task.reason).toBe("6 Session Bundle: 4 credits left, last session 20 Aug; nothing booked");
+    // 55 (57 days stalled) + 15 (4 credits) + 15 (not contacted)
+    expect(scoreTask(task.baseParts, TODAY, TODAY).score).toBe(85);
+  });
+
+  it("scores a nearly-done bundle as a renewal call", () => {
+    const { candidates } = bundleTaskCandidates(
+      [bundleRow({ segment: "nearly_done", remainingCredits: 1, daysSinceLastSession: 6, daysToExpiry: 40 })],
+      [],
+      new Map(),
+      NOW
+    );
+    // 45 (1 left) + 10 (recent session) + 10 (expires in 40 days) + 15 (not contacted)
+    expect(scoreTask(candidates[0].baseParts, TODAY, TODAY).score).toBe(80);
+    expect(candidates[0].nextAction).toBe("Call to offer a renewal before the last session");
+  });
+
+  it("closes the customer's task when no bundle needs a call any more", () => {
+    const { candidates, resolutions } = bundleTaskCandidates([bundleRow({ segment: "used_up" })], [], new Map(), NOW);
+    expect(candidates).toEqual([]);
+    expect(resolutions.get("bundle|email:ciara@example.com")).toBe("Bundle now used up");
+  });
+});
+
+describe("follow-up tasks", () => {
+  const directory = new Map([["email:liam@example.com", { name: "Liam N", email: "liam@example.com", phone: "087 1" }]]);
+
+  it("lists Continue later customers due today or overdue, due on their follow-up date", () => {
+    const { candidates } = followupTaskCandidates(
+      [followupRow(), followupRow({ customer_key: "email:old@example.com", follow_up_due: "2026-10-12" })],
+      directory,
+      NOW
+    );
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0]).toMatchObject({
+      kind: "followup",
+      name: "Liam Nolan",
+      email: "liam@example.com",
+      phone: "087 1",
+      dueOn: TODAY,
+      reason: "Said on 16 Sept they'd continue later; follow-up due 16 Oct",
     });
-    expect(candidates.map((c) => c.customerKey)).toEqual(["email:a@example.com"]);
+    // Contact details fall back to the key.
+    expect(candidates[1]).toMatchObject({ email: "old@example.com", dueOn: "2026-10-12" });
+  });
+
+  it("doesn't start tasks for long-overdue follow-ups", () => {
+    const { candidates } = followupTaskCandidates([followupRow({ follow_up_due: "2026-09-01" })], directory, NOW);
+    expect(candidates[0].canCreate).toBe(false);
+  });
+
+  it("closes when the date moves or the outcome changes", () => {
+    const { candidates, resolutions } = followupTaskCandidates(
+      [
+        followupRow({ follow_up_due: "2026-11-20" }),
+        followupRow({ customer_key: "email:b@example.com", outcome: "booked", follow_up_due: null }),
+        followupRow({ customer_key: "email:c@example.com", outcome: null, outcome_at: null, follow_up_due: null }),
+      ],
+      directory,
+      NOW
+    );
+    expect(candidates).toEqual([]);
+    expect(resolutions.get("followup|email:liam@example.com")).toBe("Follow-up moved to 20 Nov");
+    expect(resolutions.get("followup|email:b@example.com")).toBe("Booked recorded by staff");
+    expect(resolutions.get("followup|email:c@example.com")).toBe("Outcome cleared by staff");
+  });
+});
+
+describe("no-answer tasks", () => {
+  it("lists active sequences with an attempt due", () => {
+    const { candidates } = noAnswerTaskCandidates([sequence()], new Map(), NOW);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      kind: "no_answer",
+      email: "eoin@example.com",
+      phone: "085 111 2222",
+      leadStatus: "attempt_3",
+      reason: "No answer 2 times since 13 Oct; attempt 3 of 6 due",
+      dueOn: TODAY,
+    });
+  });
+
+  it("makes a new task for each attempt", () => {
+    const today = noAnswerTaskCandidates([sequence()], new Map(), NOW).candidates[0];
+    const later = noAnswerTaskCandidates([sequence({ attempts_done: 3, next_due_on: "2026-10-20" })], new Map(), NOW + 4 * DAY)
+      .candidates[0];
+    expect(later.dedupeKey).not.toBe(today.dedupeKey);
+  });
+
+  it("closes when an attempt is logged elsewhere or the sequence ends", () => {
+    const { candidates, resolutions } = noAnswerTaskCandidates(
+      [
+        sequence({ attempts_done: 3, next_due_on: "2026-10-20" }),
+        sequence({ customer_key: "email:b@example.com", status: "booked", next_due_on: null, closed_at: "2026-10-15T10:00:00Z" }),
+        // An old ended sequence doesn't close the customer's active one.
+        sequence({ customer_key: "email:c@example.com", status: "exhausted", next_due_on: null }),
+        sequence({ customer_key: "email:c@example.com" }),
+      ],
+      new Map(),
+      NOW
+    );
+    expect(candidates.map((c) => c.customerKey)).toEqual(["email:c@example.com"]);
+    expect(resolutions.get("no_answer|email:eoin@example.com")).toBe("Attempt logged; attempt 4 due 20 Oct");
+    expect(resolutions.get("no_answer|email:b@example.com")).toBe("Booked");
+    expect(resolutions.has("no_answer|email:c@example.com")).toBe(false);
+  });
+});
+
+describe("arranging the list", () => {
+  it("keeps hot leads on Courtney's calendar and every other kind", () => {
+    const { candidates } = arrangeCandidates(
+      {
+        candidates: [
+          candidate({ customerKey: "email:a@example.com", owner: "Courtney" }),
+          candidate({ customerKey: "email:b@example.com", owner: "Alex Hamm" }),
+          candidate({ customerKey: "email:c@example.com", owner: null }),
+          candidate({ customerKey: "email:d@example.com", kind: "psychiatry", owner: "Dr Rubeo" }),
+          candidate({ customerKey: "email:e@example.com", kind: "assessment", owner: "Dr Smith" }),
+          candidate({ customerKey: "email:f@example.com", kind: "progression", owner: null }),
+        ],
+        resolutions: new Map(),
+      },
+      new Set()
+    );
+    expect(candidates.map((c) => c.customerKey)).toEqual([
+      "email:f@example.com",
+      "email:a@example.com",
+      "email:d@example.com",
+      "email:e@example.com",
+    ]);
   });
 
   it("matches her calendar name loosely", () => {
     const owners = ["Courtney ", "courtney", "Courtney Byrne"];
-    const { candidates } = scopeCandidates({
-      candidates: owners.map((owner, i) => candidate({ customerKey: `email:${i}@example.com`, owner })),
-      resolutions: new Map(),
-    });
+    const { candidates } = arrangeCandidates(
+      {
+        candidates: owners.map((owner, i) => candidate({ customerKey: `email:${i}@example.com`, owner })),
+        resolutions: new Map(),
+      },
+      new Set()
+    );
     expect(candidates).toHaveLength(3);
   });
 
-  it("keeps resolutions so her open tasks still close when the client books", () => {
+  it("lists a customer once, in the first section, and closes their other open tasks", () => {
+    const key = "email:aoife@example.com";
+    const { candidates, resolutions } = arrangeCandidates(
+      {
+        candidates: [
+          candidate({ kind: "assessment", customerKey: key }),
+          candidate({ kind: "bundle", customerKey: key }),
+          candidate({ kind: "progression", customerKey: key }),
+        ],
+        resolutions: new Map(),
+      },
+      new Set()
+    );
+    expect(candidates.map((c) => c.kind)).toEqual(["progression"]);
+    expect(resolutions.get(`bundle|${key}`)).toBe("Listed under Progression");
+    expect(resolutions.get(`assessment|${key}`)).toBe("Listed under Progression");
+  });
+
+  it("doesn't let a task too old to start keep the customer out of later sections", () => {
+    const key = "email:aoife@example.com";
+    const { candidates } = arrangeCandidates(
+      {
+        candidates: [
+          candidate({ kind: "followup", customerKey: key, canCreate: false }),
+          candidate({ kind: "psychiatry", customerKey: key }),
+        ],
+        resolutions: new Map(),
+      },
+      new Set()
+    );
+    expect(candidates.map((c) => c.kind)).toEqual(["followup", "psychiatry"]);
+  });
+
+  it("leaves customers in a no-answer sequence to the No answers section", () => {
+    const key = "email:aoife@example.com";
+    const { candidates, resolutions } = arrangeCandidates(
+      {
+        candidates: [candidate({ kind: "progression", customerKey: key }), candidate({ customerKey: key })],
+        resolutions: new Map([[`hot_lead|${key}`, "Booked a session"]]),
+      },
+      new Set([key])
+    );
+    expect(candidates).toEqual([]);
+    expect(resolutions.get(`progression|${key}`)).toBe("In the no-answer call sequence");
+    // A reason from the source wins.
+    expect(resolutions.get(`hot_lead|${key}`)).toBe("Booked a session");
+  });
+
+  it("keeps resolutions so open tasks still close when the client books", () => {
     const resolutions = new Map([["hot_lead|email:aoife@example.com", "Booked a session"]]);
-    expect(scopeCandidates({ candidates: [], resolutions }).resolutions).toBe(resolutions);
+    expect(arrangeCandidates({ candidates: [], resolutions }, new Set()).resolutions).toEqual(resolutions);
   });
 });
 

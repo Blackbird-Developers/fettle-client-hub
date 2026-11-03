@@ -63,6 +63,11 @@ verify_jwt = false
 [functions.admin-bundles]
 verify_jwt = false
 
+# Called only by the admin-snapshots workflow, authenticated by the
+# x-cron-secret header.
+[functions.acuity-appointments-mirror]
+verify_jwt = false
+
 # Resend calls this server-to-server; every request is checked against the
 # Svix signature (RESEND_WEBHOOK_SECRET) instead of a JWT.
 [functions.resend-webhook]

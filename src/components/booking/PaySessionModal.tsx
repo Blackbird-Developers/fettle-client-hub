@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { CheckCircle, ExternalLink, Loader2 } from 'lucide-react';
+import { CheckCircle, CreditCard, ExternalLink, Gift, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -20,11 +20,15 @@ import {
   type UnpaidSession,
 } from '@/hooks/useUnpaidSessions';
 import { SettlePaymentForm, type SettlementResult } from './SettlePaymentForm';
+import { useActivePackages } from '@/hooks/useUserPackages';
+import { BundleCard } from '@/components/bundles/BundleCard';
+import { balanceMessage, bundlesUsableFor, deductionMessage } from '@/lib/bundles';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
 const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null;
 
-type Step = 'creating' | 'payment' | 'success' | 'settled' | 'error';
+// 'choose' (bundle credit or card) is only shown when a bundle fits the session.
+type Step = 'creating' | 'choose' | 'payment' | 'success' | 'credit-success' | 'settled' | 'error';
 
 const GENERIC_ERROR = 'Something went wrong. Please try again or contact hello@fettle.ie.';
 
@@ -63,6 +67,12 @@ export function PaySessionModal({ session, open, onOpenChange }: PaySessionModal
   const [settlement, setSettlement] = useState<SettlementResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Bundles that can pay for this session instead of a card.
+  const { packages: activePackages, isLoading: packagesLoading } = useActivePackages();
+  const usableBundles = session ? bundlesUsableFor(activePackages, session.type) : [];
+  const [selectedBundleId, setSelectedBundleId] = useState<string | null>(null);
+  const [creditBalance, setCreditBalance] = useState<string | null>(null);
 
   // Create one PaymentIntent per open, even if the parent re-renders.
   const startedForRef = useRef<number | null>(null);
@@ -114,6 +124,8 @@ export function PaySessionModal({ session, open, onOpenChange }: PaySessionModal
       startedForRef.current = null;
       return;
     }
+    // Wait for the bundles so we know whether to offer a credit.
+    if (packagesLoading) return;
     if (startedForRef.current === session.id) return;
     startedForRef.current = session.id;
 
@@ -122,9 +134,45 @@ export function PaySessionModal({ session, open, onOpenChange }: PaySessionModal
     setAmount(0);
     setSettlement(null);
     setIsProcessing(false);
-    createPayment(session.id);
+    setErrorMessage(null);
+    setCreditBalance(null);
+    if (usableBundles.length > 0) {
+      setSelectedBundleId(usableBundles[0].id);
+      setStep('choose');
+    } else {
+      createPayment(session.id);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, session]);
+  }, [open, session, packagesLoading]);
+
+  const payWithCredit = async () => {
+    if (!session || !selectedBundleId) return;
+    setIsProcessing(true);
+    setErrorMessage(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('pay-session', {
+        body: { action: 'use-credit', appointmentId: session.id, packageId: selectedBundleId },
+      });
+      if (error) throw new Error(await readFunctionError(error));
+      if (data?.alreadyPaid) {
+        setStep('settled');
+        refreshUnpaidSessions();
+        return;
+      }
+      if (!data?.success) throw new Error(data?.error || GENERIC_ERROR);
+
+      setCreditBalance(balanceMessage(data.packageName, data.remainingSessions ?? 0));
+      setStep('credit-success');
+      refreshUnpaidSessions();
+      queryClient.invalidateQueries({ queryKey: ['user-packages'] });
+      toast({ title: 'Session paid with your bundle' });
+    } catch (err) {
+      // Stay on the choice so the client can pay by card instead.
+      setErrorMessage(err instanceof Error ? err.message : GENERIC_ERROR);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const handlePaid = (result: SettlementResult) => {
     setSettlement(result);
@@ -162,6 +210,64 @@ export function PaySessionModal({ session, open, onOpenChange }: PaySessionModal
           <div className="flex flex-col items-center justify-center py-12 gap-3">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
             <p className="text-sm text-muted-foreground">Preparing secure payment...</p>
+          </div>
+        );
+
+      case 'choose': {
+        const chosen = usableBundles.find((pkg) => pkg.id === selectedBundleId);
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Gift className="h-4 w-4 text-success" />
+                Use a bundle credit
+              </p>
+              {usableBundles.map((pkg) => (
+                <BundleCard
+                  key={pkg.id}
+                  bundle={pkg}
+                  selected={pkg.id === selectedBundleId}
+                  onSelect={usableBundles.length > 1 ? () => setSelectedBundleId(pkg.id) : undefined}
+                />
+              ))}
+              {chosen && <p className="text-sm text-muted-foreground">{deductionMessage(chosen)}</p>}
+            </div>
+            {errorMessage && (
+              <p role="alert" className="text-sm text-destructive">
+                {errorMessage}
+              </p>
+            )}
+            <div className="flex flex-col gap-2">
+              <Button onClick={payWithCredit} disabled={!chosen || isProcessing} className="gap-2">
+                {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gift className="h-4 w-4" />}
+                Use a bundle credit
+              </Button>
+              <Button
+                variant="outline"
+                disabled={isProcessing}
+                onClick={() => session && createPayment(session.id)}
+                className="gap-2">
+                <CreditCard className="h-4 w-4" />
+                Pay by card{session ? ` (€${session.price})` : ''}
+              </Button>
+            </div>
+          </div>
+        );
+      }
+
+      case 'credit-success':
+        return (
+          <div className="flex flex-col items-center justify-center py-6 space-y-5 text-center">
+            <div className="h-16 w-16 rounded-full bg-green-100 flex items-center justify-center">
+              <CheckCircle className="h-8 w-8 text-green-600" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="font-semibold text-lg">Paid with 1 bundle credit</h3>
+              <p className="text-sm text-muted-foreground">{creditBalance}</p>
+            </div>
+            <Button onClick={() => onOpenChange(false)} className="w-full">
+              Done
+            </Button>
           </div>
         );
 

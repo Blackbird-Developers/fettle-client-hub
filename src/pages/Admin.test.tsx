@@ -19,6 +19,7 @@ vi.mock("@/components/layout/DashboardLayout", () => ({
   DashboardLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 vi.mock("@/components/admin/SalesTasks", () => ({ SalesTasks: () => <p>Sales tasks content</p> }));
+vi.mock("@/components/admin/AdminNotificationsBell", () => ({ AdminNotificationsBell: () => null }));
 
 function renderAt(path: string) {
   render(

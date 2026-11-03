@@ -1,7 +1,9 @@
-// sales-tasks — prepares the admin "Sales Tasks" list: works out from Acuity
-// who needs a call today (open hot leads, assessment clients whose next step
-// isn't booked, psychiatry clients due a follow-up) and saves the ones on
-// Courtney's list as tasks (see SALES_TASK_CALENDARS / _KINDS in logic.ts).
+// sales-tasks — prepares the admin "Sales Tasks" list: works out who needs a
+// call today and saves them as tasks, in seven sections (see logic.ts):
+// progressions 1→2 … 4→5 and hot leads, assessments and psychiatry from
+// Acuity; stalled and nearly-done bundles from admin-bundles' saved snapshot;
+// follow-ups and no-answer sequences from the hub's own tables. Hot leads
+// are only Courtney's (SALES_TASK_CALENDARS in logic.ts).
 //   - POST with x-cron-secret, from the sales-tasks GitHub Actions workflow
 //     every morning
 //   - POST from an admin ("Prepare today's list" / "Refresh" on the page);
@@ -14,44 +16,58 @@
 // PRIVACY: logs and the run summary stay counts-only — never names, emails,
 // phones or appointments.
 //
-// DEPLOY: imports ../admin-customer-insights, ../admin-leads and
-// ../admin-clinical, so deploy with the Supabase CLI
+// DEPLOY: imports ../admin-customer-insights, ../admin-leads,
+// ../admin-clinical and ../admin-bundles, so deploy with the Supabase CLI
 // (`supabase functions deploy sales-tasks`), which bundles them.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   type AcuityAppointment,
+  type HistoryCheck,
+  type HistoryLookup,
+  ACTIVE_WINDOW_DAYS,
+  PROGRESSION_RANGES,
   addDays,
   buildPortalEmailSet,
+  buildProgressionView,
+  evaluateHistory,
   fetchAppointmentsInWindows,
   groupCustomers,
   mapWithConcurrency,
+  progressionCandidates,
   toDateString,
 } from "../admin-customer-insights/logic.ts";
+import type { BundleRow } from "../admin-bundles/logic.ts";
 import {
   LEAD_LOOKBACK_DAYS,
   buildLeadsView,
   evaluateLeadHistory,
   leadCandidates,
 } from "../admin-leads/logic.ts";
-import type { LeadFollowup, RecentAttempt } from "../admin-leads/score.ts";
+import type { RecentAttempt } from "../admin-leads/score.ts";
 import {
   CLINICAL_LOOKBACK_DAYS,
   buildAssessmentView,
   buildPsychiatryView,
 } from "../admin-clinical/logic.ts";
 import {
+  type FollowupRow,
   type SavedTask,
+  type SequenceRow,
+  arrangeCandidates,
   assessmentCandidates,
+  bundleTaskCandidates,
   candidateKeys,
   createdEvent,
   dublinDate,
+  followupTaskCandidates,
   hotLeadCandidates,
   mergeCandidateSets,
+  noAnswerTaskCandidates,
   planDailyRun,
+  progressionTaskCandidates,
   psychiatryCandidates,
-  scopeCandidates,
 } from "./logic.ts";
 
 const corsHeaders = {
@@ -63,7 +79,12 @@ const corsHeaders = {
 
 const ACUITY_API_BASE = "https://acuityscheduling.com/api/v1";
 const WINDOW_LIMIT = 500;
-const LOOKBACK_DAYS = Math.max(LEAD_LOOKBACK_DAYS, CLINICAL_LOOKBACK_DAYS);
+const LOOKBACK_DAYS = Math.max(LEAD_LOOKBACK_DAYS, CLINICAL_LOOKBACK_DAYS, ACTIVE_WINDOW_DAYS);
+/** Results per progression history lookup (as admin-customer-insights). */
+const HISTORY_LIMIT = 200;
+const HISTORY_START_DATE = "2010-01-01";
+/** Ended no-answer sequences read, so their open tasks close. */
+const ENDED_SEQUENCE_DAYS = 60;
 /** How far ahead to look for bookings that resolve a task. */
 const FUTURE_DAYS = 180;
 const ACUITY_CONCURRENCY = 4;
@@ -197,7 +218,7 @@ serve(async (req) => {
       }
     }
 
-    // 1. One Acuity fetch shared by all three sources.
+    // 1. One Acuity fetch shared by the Acuity-based sources.
     const today = toDateString(now);
     const fetched = await fetchAppointmentsInWindows(
       (minDate, maxDate) =>
@@ -208,8 +229,9 @@ serve(async (req) => {
     );
     const customers = groupCustomers(fetched.appointments);
 
-    // 2. Hub data: portal accounts, contact attempts, staff outcomes.
-    const [profileEmails, attempts, followupRows] = await Promise.all([
+    // 2. Hub data: portal accounts, contact attempts, staff outcomes and
+    //    follow-up dates, no-answer sequences, the saved Bundles view.
+    const [profileEmails, attempts, followupRows, sequences, bundlesSnapshot] = await Promise.all([
       readAll<{ email: string | null }>(
         (from, to) => db.from("profiles").select("email").order("id").range(from, to),
         "profiles"
@@ -224,39 +246,107 @@ serve(async (req) => {
             .range(from, to),
         "contact attempts"
       ),
-      readAll<LeadFollowup & { customer_key: string }>(
+      readAll<FollowupRow>(
         (from, to) =>
           db
             .from("customer_followups")
-            .select("customer_key, outcome, outcome_at")
-            .not("outcome", "is", null)
+            // Every row: one whose outcome was cleared closes its follow-up task.
+            .select("customer_key, customer_name, outcome, outcome_at, follow_up_due")
             .order("customer_key")
             .range(from, to),
         "follow-ups"
       ),
+      readAll<SequenceRow>(
+        (from, to) =>
+          db
+            .from("no_answer_sequences")
+            .select(
+              "customer_key, customer_name, customer_phone, status, attempts_done, started_at, next_due_on, closed_at, closed_reason"
+            )
+            .or(
+              `status.eq.active,closed_at.gte."${new Date(now - ENDED_SEQUENCE_DAYS * 86_400_000).toISOString()}"`
+            )
+            .order("id")
+            .range(from, to),
+        "no-answer sequences"
+      ),
+      db
+        .from("admin_snapshots")
+        .select("data, generated_at")
+        .eq("source", "admin-bundles")
+        .maybeSingle()
+        .then(({ data, error }) => {
+          if (error) throw new Error(`Failed to read the Bundles snapshot: ${error.message}`);
+          return data as { data: { bundles?: { rows?: BundleRow[] } }; generated_at: string } | null;
+        }),
     ]);
 
-    // 3. The three sources. Hot leads skip admin-leads' per-lead history
+    // 3. Progression: number each recent customer's sessions from their
+    //    full history (one Acuity lookup each, as the Progression pages do).
+    const progression = progressionCandidates(customers, now);
+    const history = new Map(
+      await mapWithConcurrency(
+        progression,
+        ACUITY_CONCURRENCY,
+        async ({ customer, firstInWindowAt }): Promise<[string, HistoryCheck]> => {
+          let lookup: HistoryLookup | null = null;
+          if (customer.email) {
+            try {
+              const appointments = await acuityAppointments(
+                new URLSearchParams({
+                  email: customer.email,
+                  minDate: HISTORY_START_DATE,
+                  maxDate: addDays(toDateString(firstInWindowAt), 1),
+                  max: String(HISTORY_LIMIT),
+                  direction: "ASC",
+                })
+              );
+              lookup = { appointments, limit: HISTORY_LIMIT };
+            } catch {
+              lookup = { appointments: null, limit: HISTORY_LIMIT };
+            }
+          }
+          return [customer.key, evaluateHistory(lookup, firstInWindowAt)];
+        }
+      )
+    );
+
+    // 4. The seven sources. Hot leads skip admin-leads' per-lead history
     //    lookup (one Acuity call each) to keep the run short; the window's
     //    history is used instead, which only affects two small score parts.
+    const portalEmails = buildPortalEmailSet(profileEmails.map((p) => p.email));
     const leads = leadCandidates(customers, now);
     const leadRows = buildLeadsView(
       leads,
       new Map(leads.map((lead) => [lead.customer.key, evaluateLeadHistory(null, lead, now)])),
-      buildPortalEmailSet(profileEmails.map((p) => p.email)),
+      portalEmails,
       now
     ).rows;
+    const stages = PROGRESSION_RANGES.map((fromSession) =>
+      buildProgressionView(progression, history, portalEmails, now, fromSession)
+    );
+    // No snapshot yet: no bundle tasks, and open ones are left as they are.
+    const bundleRows = bundlesSnapshot?.data?.bundles?.rows ?? [];
     const followups = new Map(followupRows.map((row) => [row.customer_key, row]));
-    // Only Courtney's tasks are kept (see SALES_TASK_CALENDARS / _KINDS).
-    const { candidates, resolutions } = scopeCandidates(
+    const directory = new Map(customers.map((c) => [c.key, { name: c.name, email: c.email, phone: c.phone }]));
+    const inNoAnswerSequence = new Set(
+      sequences.filter((row) => row.status === "active").map((row) => row.customer_key)
+    );
+    // Each customer once, in their first section; hot leads only Courtney's.
+    const { candidates, resolutions } = arrangeCandidates(
       mergeCandidateSets(
+        progressionTaskCandidates(stages, attempts, followups, now),
+        bundleTaskCandidates(bundleRows, attempts, followups, now),
+        followupTaskCandidates(followupRows, directory, now),
+        noAnswerTaskCandidates(sequences, directory, now),
         hotLeadCandidates(leadRows, attempts, followups, now),
-        assessmentCandidates(buildAssessmentView(customers, now).rows, attempts, now),
-        psychiatryCandidates(buildPsychiatryView(customers, now).rows, attempts, now)
-      )
+        psychiatryCandidates(buildPsychiatryView(customers, now).rows, attempts, now),
+        assessmentCandidates(buildAssessmentView(customers, now).rows, attempts, now)
+      ),
+      inNoAnswerSequence
     );
 
-    // 4. Saved tasks: every pending one, plus any that already used a
+    // 5. Saved tasks: every pending one, plus any that already used a
     //    candidate's event (so finished tasks aren't recreated).
     const pending = await readAll<SavedTask>(
       (from, to) => db.from("sales_tasks").select(SAVED_COLUMNS).eq("status", "pending").order("id").range(from, to),
@@ -269,7 +359,7 @@ serve(async (req) => {
       for (const task of data ?? []) byId.set(task.id, task as SavedTask);
     }
 
-    // 5. Plan and apply.
+    // 6. Plan and apply.
     const plan = planDailyRun({
       candidates,
       resolutions,
@@ -317,6 +407,9 @@ serve(async (req) => {
       created: inserted,
       updatesSkipped: skipped.size,
       candidates: candidates.length,
+      historyLookups: progression.length,
+      bundleRows: bundleRows.length,
+      activeSequences: inNoAnswerSequence.size,
       windowAppointments: fetched.appointments.length,
       incompleteDates: fetched.incompleteDates.length,
       acuityRequests,

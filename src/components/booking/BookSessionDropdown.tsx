@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -54,12 +55,19 @@ export function BookSessionDropdown({
   const [packageOpen, setPackageOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [sessionCategory, setSessionCategory] = useState<SessionCategory>('individual');
+  const navigate = useNavigate();
 
   const handleBookingComplete = () => {
     onBookingComplete?.();
   };
 
   const openBookingModal = (category: SessionCategory) => {
+    // Therapy sessions book in the /book wizard; assessments and psychiatry
+    // keep the booking modal (docs/QUIZ_BOOKING_FLOW.md C3, Q5).
+    if (category === 'individual' || category === 'couples' || category === 'youth') {
+      navigate(`/book?service=${category}`);
+      return;
+    }
     setSessionCategory(category);
     setBookingOpen(true);
   };
