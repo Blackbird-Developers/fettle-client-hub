@@ -91,7 +91,11 @@ function historyIndex(): number {
 export function BookingWizard() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
+  // Sessions lists the bookings made with the signed-in email, so the wizard
+  // always books with it, and saved answers belong to this account only.
+  const accountEmail = (user?.email ?? profile?.email ?? '').trim();
+  const owner = user?.id ?? '';
   const dir = useTherapistDirectory();
   const { appointments, loading: appointmentsLoading } = useAcuityAppointments(profile?.email, 10 * 60_000);
 
@@ -116,7 +120,7 @@ export function BookingWizard() {
       : null
   );
   const pendingReturn = useRef(returnInfo.current ? loadPendingPayment(returnInfo.current.paymentIntentId) : null);
-  const forceMatching = !!(state ?? pendingReturn.current?.state ?? loadWizard(entry))?.switchedToMatching;
+  const forceMatching = !!(state ?? pendingReturn.current?.state ?? loadWizard(entry, owner))?.switchedToMatching;
   const [booked, setBookedState] = useState<BookedInfo | null>(null);
   const [message, setMessage] = useState<WizardMessage | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -182,14 +186,14 @@ export function BookingWizard() {
     if (back) {
       showLostReturn(back.paymentIntentId);
     }
-    let s = loadWizard(entry) ?? initialState();
+    let s = loadWizard(entry, owner) ?? initialState();
     s = {
       ...s,
       details: {
         ...s.details,
         firstName: s.details.firstName || profile?.first_name?.trim() || '',
         lastName: s.details.lastName || profile?.last_name?.trim() || '',
-        email: s.details.email || profile?.email?.trim() || '',
+        email: accountEmail || s.details.email,
         phone: s.details.phone || knownPhone,
       },
     };
@@ -223,10 +227,15 @@ export function BookingWizard() {
     if (knownPhone) setState((s) => (s && !s.details.phone ? { ...s, details: { ...s.details, phone: knownPhone } } : s));
   }, [knownPhone]);
 
+  // Restored answers (e.g. after a payment redirect) keep the account email.
+  useEffect(() => {
+    if (accountEmail) setState((s) => (s && s.details.email !== accountEmail ? { ...s, details: { ...s.details, email: accountEmail } } : s));
+  }, [accountEmail, state?.details.email]);
+
   // Save on every change; a refresh restores the answers (§8).
   useEffect(() => {
-    if (state && !booked) saveWizard(entry, state);
-  }, [state, booked, entry]);
+    if (state && !booked) saveWizard(entry, state, owner);
+  }, [state, booked, entry, owner]);
 
   // ---- Flow ----
   const serviceFromLink =
@@ -364,7 +373,7 @@ export function BookingWizard() {
       calendarName: therapist.name.trim(),
       firstName: d.firstName.trim(),
       lastName: d.lastName.trim(),
-      email: d.email.trim(),
+      email: accountEmail || d.email.trim(),
       phone: d.phone.trim(),
       notes: buildBookingNotes({
         service,

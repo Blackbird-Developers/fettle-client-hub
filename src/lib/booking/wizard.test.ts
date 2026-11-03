@@ -137,15 +137,21 @@ describe("saving and restoring", () => {
       history: "past",
       consents: { first: true, contact: true, terms: true },
     });
-    saveWizard("therapist=7", state, 1_000);
-    const restored = loadWizard("therapist=7", 1_000 + RESTORE_MAX_AGE_MS - 1);
+    saveWizard("therapist=7", state, "user-a", 1_000);
+    const restored = loadWizard("therapist=7", "user-a", 1_000 + RESTORE_MAX_AGE_MS - 1);
     expect(restored).toMatchObject({ who: "individual", history: "past", slot: null });
     expect(restored?.consents.terms).toBe(false);
   });
 
   it("starts fresh for another link or after 45 minutes", () => {
-    saveWizard("therapist=7", initialState({ started: true }), 1_000);
-    expect(loadWizard("therapist=8", 1_000)).toBeNull();
-    expect(loadWizard("therapist=7", 1_000 + RESTORE_MAX_AGE_MS + 1)).toBeNull();
+    saveWizard("therapist=7", initialState({ started: true }), "user-a", 1_000);
+    expect(loadWizard("therapist=8", "user-a", 1_000)).toBeNull();
+    expect(loadWizard("therapist=7", "user-a", 1_000 + RESTORE_MAX_AGE_MS + 1)).toBeNull();
+  });
+
+  it("starts fresh when another account signs in on the same tab", () => {
+    const state = initialState({ started: true });
+    saveWizard("therapist=7", { ...state, details: { ...state.details, email: "first@example.com" } }, "user-a", 1_000);
+    expect(loadWizard("therapist=7", "user-b", 1_000)).toBeNull();
   });
 });

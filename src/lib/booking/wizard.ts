@@ -265,12 +265,14 @@ interface SavedWizard {
   savedAt: number;
   /** The link the flow started from, so a different link starts fresh. */
   entry: string;
+  /** The signed-in account, so another account in the same tab starts fresh. */
+  owner: string;
   state: WizardState;
 }
 
-export function saveWizard(entry: string, state: WizardState, now = Date.now()): void {
+export function saveWizard(entry: string, state: WizardState, owner: string, now = Date.now()): void {
   try {
-    const saved: SavedWizard = { savedAt: now, entry, state };
+    const saved: SavedWizard = { savedAt: now, entry, owner, state };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
   } catch {
     // Storage full or blocked: the flow still works, it just won't survive a refresh.
@@ -286,15 +288,16 @@ export function clearWizard(): void {
 }
 
 /**
- * Restores answers saved less than 45 minutes ago for the same entry link.
- * The slot is never restored (it isn't held), so the client picks it again.
+ * Restores answers saved less than 45 minutes ago by the same account for the
+ * same entry link. The slot is never restored (it isn't held), so the client
+ * picks it again.
  */
-export function loadWizard(entry: string, now = Date.now()): WizardState | null {
+export function loadWizard(entry: string, owner: string, now = Date.now()): WizardState | null {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const saved = JSON.parse(raw) as SavedWizard;
-    if (!saved || saved.entry !== entry || now - saved.savedAt > RESTORE_MAX_AGE_MS) return null;
+    if (!saved || saved.entry !== entry || saved.owner !== owner || now - saved.savedAt > RESTORE_MAX_AGE_MS) return null;
     return {
       ...initialState(),
       ...saved.state,

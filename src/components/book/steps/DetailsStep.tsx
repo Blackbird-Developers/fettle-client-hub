@@ -49,8 +49,14 @@ export function DetailsStep() {
     w.goNext();
   };
 
-  const field = (key: FieldKey, label: string, placeholder: string, opts: { type?: string; autoComplete?: string; full?: boolean } = {}) => {
+  const field = (
+    key: FieldKey,
+    label: string,
+    placeholder: string,
+    opts: { type?: string; autoComplete?: string; full?: boolean; locked?: string } = {}
+  ) => {
     const error = errors[key as keyof DetailsErrors];
+    const describedBy = [error && `bw-${key}-err`, opts.locked && `bw-${key}-note`].filter(Boolean).join(' ');
     return (
       <div className={`bw-field${opts.full ? ' is-full' : ''}`}>
         <label className="bw-label" htmlFor={`bw-${key}`}>
@@ -63,10 +69,16 @@ export function DetailsStep() {
           autoComplete={opts.autoComplete}
           placeholder={placeholder}
           value={d[key]}
+          readOnly={!!opts.locked}
           aria-invalid={!!error}
-          aria-describedby={error ? `bw-${key}-err` : undefined}
+          aria-describedby={describedBy || undefined}
           onChange={(e) => set(key, e.target.value)}
         />
+        {opts.locked && (
+          <span className="bw-field-note" id={`bw-${key}-note`}>
+            {opts.locked}
+          </span>
+        )}
         {error && (
           <span className="bw-error" id={`bw-${key}-err`}>
             {error}
@@ -104,7 +116,12 @@ export function DetailsStep() {
             <>
               {field('firstName', 'First name', 'e.g. Sarah', { autoComplete: 'given-name' })}
               {field('lastName', 'Last name', 'e.g. Byrne', { autoComplete: 'family-name' })}
-              {field('email', 'Email', 'you@example.com', { type: 'email', autoComplete: 'email', full: true })}
+              {field('email', 'Email', 'you@example.com', {
+                type: 'email',
+                autoComplete: 'email',
+                full: true,
+                locked: 'This is your My Fettle email, so the session appears in My sessions.',
+              })}
               {field('phone', 'Mobile number', '+353 87 123 4567', { type: 'tel', autoComplete: 'tel', full: true })}
             </>
           )}

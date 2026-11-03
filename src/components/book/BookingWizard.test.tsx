@@ -17,7 +17,10 @@ const data = vi.hoisted(() => ({
 }));
 
 vi.mock("@/contexts/AuthContext", () => ({
-  useAuth: () => ({ profile: { first_name: "Sarah", last_name: "Byrne", email: "sarah@example.com" } }),
+  useAuth: () => ({
+    user: { id: "user-1", email: "sarah@example.com" },
+    profile: { first_name: "Sarah", last_name: "Byrne", email: "sarah@example.com" },
+  }),
 }));
 
 vi.mock("@/hooks/useAcuity", () => ({
@@ -128,6 +131,9 @@ describe("BookingWizard", () => {
     // Details: prefilled from the profile; phone is missing, so the form shows.
     expect(await screen.findByRole("heading", { name: "Great. Where should we send your confirmation?" })).toBeInTheDocument();
     expect(screen.getByLabelText("First name")).toHaveValue("Sarah");
+    // The account email can't be changed, so the booking shows in My sessions.
+    expect(screen.getByLabelText("Email")).toHaveValue("sarah@example.com");
+    expect(screen.getByLabelText("Email")).toHaveAttribute("readonly");
     await user.click(screen.getByRole("button", { name: "Continue to payment →" }));
     expect(screen.getByText("Please enter your mobile number")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Mobile number"), "087 123 4567");

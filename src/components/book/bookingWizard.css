@@ -600,6 +600,19 @@
 .bw-input.is-bad {
   border-color: var(--bw-red);
 }
+.bw-input[readonly] {
+  background: var(--bw-grey);
+  color: var(--bw-muted);
+}
+.bw-input[readonly]:focus {
+  border-color: var(--bw-line);
+  box-shadow: none;
+}
+.bw-field-note {
+  color: var(--bw-muted);
+  font-size: 13.5px;
+  font-weight: 700;
+}
 .bw-error {
   color: var(--bw-red);
   font-size: 13.5px;
