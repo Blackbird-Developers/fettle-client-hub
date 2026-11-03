@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchMonthDays, findEarliestSlot, findFirstOpenMonth, mapWithLimit, recheckSlot } from "./availability";
+import { MONTHS_AHEAD, fetchMonthDays, findEarliestSlot, findFirstOpenMonth, mapWithLimit, recheckSlot } from "./availability";
 
 // Thursday 29 October 2026, 10:00 in Dublin.
 const NOW = new Date("2026-10-29T10:00:00Z");
@@ -65,10 +65,10 @@ describe("findFirstOpenMonth", () => {
     expect(await findEarliestSlot(SOURCE, NOW)).toEqual({ date: "2026-12-03", time: "2026-12-03T18:00:00+0000" });
   });
 
-  it("gives up after 12 months", async () => {
+  it("gives up after MONTHS_AHEAD months", async () => {
     const fetchMock = mockAcuity(() => []);
     expect(await findFirstOpenMonth(SOURCE, NOW)).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(12);
+    expect(fetchMock).toHaveBeenCalledTimes(MONTHS_AHEAD);
   });
 });
 

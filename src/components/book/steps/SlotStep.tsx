@@ -155,7 +155,7 @@ export function SlotStep() {
         {header}
         <div className="bw-body">
           <p className="bw-note is-orange" role="status">
-            {w.therapistFirst} has no open times in the next 12 months.{' '}
+            {w.therapistFirst} has no open times in the next {MONTHS_AHEAD} months.{' '}
             {w.mode === 'chosen'
               ? 'We can match you with another therapist who has availability.'
               : 'Please choose another therapist.'}

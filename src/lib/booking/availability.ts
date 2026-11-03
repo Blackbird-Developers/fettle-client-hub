@@ -13,8 +13,12 @@ import { type AvailableDay, addMonthsToKey, cleanDays, dublinDateKey, isDayAllow
 const ACUITY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/acuity`;
 const ACUITY_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 
-/** Calendar range: this month and the next 11. */
-export const MONTHS_AHEAD = 12;
+/**
+ * Calendar range: this month and the next 5. My sessions only lists bookings up
+ * to the end of the 5th month ahead (the acuity function's get-appointments),
+ * so a later booking would not show there.
+ */
+export const MONTHS_AHEAD = 6;
 /** Parallel get-times calls when loading a month. */
 const TIMES_CONCURRENCY = 4;
 
@@ -92,8 +96,8 @@ export async function fetchMonthDays(source: SlotSource, month: string, now: Dat
 }
 
 /**
- * First month (from the current one, up to 12) that has an open time, with
- * its days; null when there is nothing in the next 12 months.
+ * First month (from the current one, up to MONTHS_AHEAD) that has an open
+ * time, with its days; null when there is nothing in that range.
  */
 export async function findFirstOpenMonth(
   source: SlotSource,
