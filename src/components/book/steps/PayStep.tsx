@@ -247,7 +247,7 @@ export function PayStep() {
         const res = await createBundleIntent(
           plan.bundle.id,
           { firstName: request.firstName, lastName: request.lastName, email: request.email, phone: request.phone },
-          { useReferralCredit: s.useReferral }
+          { couponCode: s.coupon || undefined, useReferralCredit: s.useReferral }
         );
         if (cancelled) return;
         setBusy(null);
@@ -266,16 +266,28 @@ export function PayStep() {
           return;
         }
         if (!('intent' in res)) return;
+        const bundleIntent = res.intent;
+        // Bundles take Stripe promotion codes only, so a refused code is never
+        // re-checked as a bundle certificate here.
+        const refused = s.coupon && !bundleIntent.discountApplied ? bundleIntent.couponRejected : null;
         setCheckout({
           mode: 'card',
           kind: 'bundle',
-          clientSecret: res.intent.clientSecret,
-          paymentIntentId: res.intent.paymentIntentId,
-          amountCents: res.intent.amount,
-          originalCents: res.intent.originalAmount,
-          discount: null,
-          rejected: null,
-          referralCents: res.intent.referralCreditApplied,
+          clientSecret: bundleIntent.clientSecret,
+          paymentIntentId: bundleIntent.paymentIntentId,
+          amountCents: bundleIntent.amount,
+          originalCents: bundleIntent.originalAmount,
+          discount:
+            bundleIntent.discountApplied && s.coupon
+              ? {
+                  code: s.coupon,
+                  savedCents: bundleIntent.originalAmount - bundleIntent.amount - bundleIntent.referralCreditApplied,
+                }
+              : null,
+          rejected: refused
+            ? { text: couponRejectionMessage(refused), problem: { code: s.coupon, reason: refused, title: '', message: '' } }
+            : null,
+          referralCents: bundleIntent.referralCreditApplied,
         });
         return;
       }

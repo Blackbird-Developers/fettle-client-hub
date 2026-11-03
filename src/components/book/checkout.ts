@@ -126,23 +126,32 @@ export interface BundleIntent {
   amount: number;
   originalAmount: number;
   referralCreditApplied: number;
+  discountApplied: boolean;
+  couponRejected: string | null;
 }
 
 /**
- * New bundle: the PaymentIntent for the package (§10.4). Referral credit is
- * taken off by the function and redeemed by confirm-package-payment. A bundle
- * has no no-charge purchase path, so `creditCoversAll` means "set it up again
- * without the credit".
+ * New bundle: the PaymentIntent for the package (§10.4). A discount code
+ * (Stripe promotion codes only) and referral credit are taken off by the
+ * function; the credit is redeemed by confirm-package-payment. A bundle has no
+ * no-charge purchase path, so `creditCoversAll` means "set it up again without
+ * the credit".
  */
 export async function createBundleIntent(
   bundleId: number,
   contact: { firstName: string; lastName: string; email: string; phone: string },
-  options: { useReferralCredit?: boolean } = {}
+  options: { couponCode?: string; useReferralCredit?: boolean } = {}
 ): Promise<
   { ok: true; creditCoversAll: true } | { ok: true; creditCoversAll: false; intent: BundleIntent } | { ok: false; message: string | null }
 > {
   const { data, error } = await supabase.functions.invoke('create-package-payment-intent', {
-    body: { packageId: bundleId, ...contact, phone: contact.phone || undefined, useReferralCredit: !!options.useReferralCredit },
+    body: {
+      packageId: bundleId,
+      ...contact,
+      phone: contact.phone || undefined,
+      couponCode: options.couponCode || undefined,
+      useReferralCredit: !!options.useReferralCredit,
+    },
   });
   if (!error && !hasError(data) && data?.fullyCovered) return { ok: true, creditCoversAll: true };
   if (error || hasError(data) || !data?.clientSecret) {
@@ -158,6 +167,8 @@ export async function createBundleIntent(
       amount,
       originalAmount: Number(data.originalAmount ?? amount),
       referralCreditApplied: Number(data.referralCreditApplied ?? 0),
+      discountApplied: !!data.discountApplied,
+      couponRejected: data.couponRejected ?? null,
     },
   };
 }

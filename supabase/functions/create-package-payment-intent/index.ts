@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { checkStripePromoCode } from "../_shared/stripePromoCode.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -80,9 +81,65 @@ serve(async (req) => {
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
 
+    // ── Discount code (optional) ──────────────────────────────────────────────
+    // Bundles take Stripe promotion codes only (Fettle, 3 Nov 2026). Loyalty
+    // rewards are per-session and Acuity coupons are tied to appointment
+    // types, so neither applies to a bundle. Like create-payment-intent, a code
+    // never blocks the purchase: a problem means full price plus a
+    // `couponRejected` reason for the UI.
+    let discountApplied = false;
+    let appliedDiscountPercent = 0;
+    let appliedDiscountAmount = 0;
+    let appliedPromotionCodeId = "";
+    let appliedCouponId = "";
+    let couponRejected: string | null = null;
+    const trimmedCoupon = (body.couponCode || "").toString().trim();
+    const normalizedCoupon = trimmedCoupon.toUpperCase();
+    if (normalizedCoupon) {
+      if (normalizedCoupon.startsWith("FETTLELOYALTY")) {
+        couponRejected = "not_for_bundles";
+      } else {
+        const promo = await checkStripePromoCode(stripe, trimmedCoupon, originalAmount);
+        if (promo.ok) {
+          appliedDiscountAmount = promo.offCents;
+          appliedDiscountPercent = promo.percentOff;
+          appliedPromotionCodeId = promo.promotionCodeId;
+          appliedCouponId = promo.couponId;
+          amountInCents = originalAmount - appliedDiscountAmount;
+          discountApplied = true;
+        } else {
+          couponRejected = promo.reason;
+        }
+      }
+      // Stripe can't charge under €0.50; a code that would do that is refused.
+      if (discountApplied && amountInCents < 50) {
+        amountInCents = originalAmount;
+        discountApplied = false;
+        appliedDiscountPercent = 0;
+        appliedDiscountAmount = 0;
+        appliedPromotionCodeId = "";
+        appliedCouponId = "";
+        couponRejected = "below_minimum";
+      }
+      logStep(discountApplied ? "Discount code applied" : "Discount code rejected", {
+        code: normalizedCoupon,
+        reason: couponRejected,
+        promotionCodeId: appliedPromotionCodeId || null,
+        originalAmount,
+        newAmount: amountInCents,
+      });
+    }
+    const discountFields = {
+      discountApplied,
+      discountPercent: appliedDiscountPercent,
+      discountAmount: appliedDiscountAmount,
+      couponRejected,
+    };
+
     // ── Referral credit (optional, opt-in via useReferralCredit) ──────────────
-    // Same semantics as create-payment-intent: applied here, redeemed in
-    // confirm-package-payment after the purchase succeeds. Dormant unless opted in.
+    // Same semantics as create-payment-intent: applied after any discount code,
+    // redeemed in confirm-package-payment after the purchase succeeds. Dormant
+    // unless opted in.
     let referralCreditApplied = 0;
     let referralFullyCovered = false;
     if (body.useReferralCredit === true) {
@@ -117,6 +174,7 @@ serve(async (req) => {
         fullyCovered: true,
         referralCreditApplied,
         originalAmount,
+        ...discountFields,
         amount: 0,
         packageName: packageInfo.name,
         sessions: packageInfo.sessions,
@@ -158,6 +216,14 @@ serve(async (req) => {
       email,
       phone: phone || "",
       referralCreditApplied: referralCreditApplied ? String(referralCreditApplied) : "",
+      // Discount audit trail (empty unless a code was actually applied), same
+      // keys as create-payment-intent.
+      couponCode: discountApplied ? normalizedCoupon : "",
+      discountPercent: discountApplied && appliedDiscountPercent ? String(appliedDiscountPercent) : "",
+      discountAmount: discountApplied ? String(appliedDiscountAmount) : "",
+      promotionCodeId: appliedPromotionCodeId,
+      couponId: appliedCouponId,
+      originalAmount: discountApplied ? String(originalAmount) : "",
     };
 
     // Create payment intent
@@ -187,6 +253,7 @@ serve(async (req) => {
       sessions: packageInfo.sessions,
       referralCreditApplied,
       originalAmount,
+      ...discountFields,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,

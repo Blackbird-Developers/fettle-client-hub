@@ -137,6 +137,27 @@ async function walkToPay(user: ReturnType<typeof userEvent.setup>, choosePlan: R
   expect(await screen.findByRole("heading", { name: "Confirm and pay" })).toBeInTheDocument();
 }
 
+/** Like walkToPay, with a discount code typed on the review step. */
+async function walkToPayWithCode(user: ReturnType<typeof userEvent.setup>, choosePlan: RegExp, code: string) {
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={["/book?therapist=7"]}>
+        <BookingWizard />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+  await user.click(await screen.findByRole("button", { name: "Let’s begin →" }));
+  await user.click(await screen.findByRole("button", { name: /Earliest time/ }));
+  await user.click(screen.getByRole("button", { name: "Continue →" }));
+  await user.click(await screen.findByRole("button", { name: "Continue to payment →" }));
+  await user.click(await screen.findByRole("radio", { name: choosePlan }));
+  await user.click(screen.getByRole("button", { name: "Continue →" }));
+  await user.type(await screen.findByLabelText("Have a discount code?"), `${code}{Enter}`);
+  for (const box of screen.getAllByRole("checkbox")) await user.click(box);
+  await user.click(screen.getByRole("button", { name: "Continue to payment →" }));
+  expect(await screen.findByRole("heading", { name: "Confirm and pay" })).toBeInTheDocument();
+}
+
 beforeEach(() => {
   clearWizard();
   vi.clearAllMocks();
@@ -299,6 +320,44 @@ describe("Pay step", () => {
     expect(checkout.confirmBundlePayment).toHaveBeenCalledWith("pi_b");
     expect(checkout.bookWithPackageCredit.mock.calls[0][0]).toBe("pkg-new");
     expect(await screen.findByText("5 sessions left in your bundle")).toBeInTheDocument();
+  });
+
+  it("takes a discount code off a new bundle", async () => {
+    const user = userEvent.setup();
+    checkout.createBundleIntent.mockResolvedValue({
+      ok: true,
+      creditCoversAll: false,
+      intent: {
+        clientSecret: "pi_b_secret",
+        paymentIntentId: "pi_b",
+        amount: 47520,
+        originalAmount: 52800,
+        referralCreditApplied: 0,
+        discountApplied: true,
+        couponRejected: null,
+      },
+    });
+    await walkToPayWithCode(user, /6-session bundle/, "spring10");
+
+    expect(checkout.createBundleIntent.mock.calls[0][2]).toEqual({ couponCode: "SPRING10", useReferralCredit: false });
+    expect(await screen.findByText(/Discount applied · SPRING10/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Pay €475\.20/ })).toBeInTheDocument();
+  });
+
+  it("explains a loyalty code can't be used on a bundle and charges the full price", async () => {
+    const user = userEvent.setup();
+    checkout.createBundleIntent.mockResolvedValue({
+      ok: true,
+      creditCoversAll: false,
+      intent: { ...bundleIntent(52800).intent, discountApplied: false, couponRejected: "not_for_bundles" },
+    });
+    await walkToPayWithCode(user, /6-session bundle/, "FETTLELOYALTY5");
+
+    expect(
+      await screen.findByText("Loyalty rewards can be used on single sessions, not on bundles. Proceeding at full price.")
+    ).toBeInTheDocument();
+    expect(checkout.redeemBundleCode).not.toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: /Pay €528\.00/ })).toBeInTheDocument();
   });
 
   it("takes referral credit off a new bundle", async () => {

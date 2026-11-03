@@ -39,9 +39,13 @@ function Row({
   );
 }
 
-/** Whether the discount-code field applies: single therapy sessions only (§3.5b hub notes). */
-function acceptsCoupon(service: string | null, isBundle: boolean): boolean {
-  return service !== 'psychologist' && !isBundle;
+/**
+ * Whether the discount-code field applies: therapy sessions and new bundles
+ * (Stripe promotion codes only on bundles), not psychologist consultations
+ * (§3.5b hub notes) or sessions paid with a bundle credit.
+ */
+function acceptsCoupon(service: string | null, usesCredit: boolean): boolean {
+  return service !== 'psychologist' && !usesCredit;
 }
 
 export function ReviewStep() {
@@ -157,18 +161,20 @@ export function ReviewStep() {
           <p className="bw-option-desc">{totalNote}</p>
         </div>
 
-        {acceptsCoupon(w.service, isBundle || isCredit) && (
+        {acceptsCoupon(w.service, isCredit) && (
           <div className="bw-field mt-6">
             <label className="bw-label" htmlFor="bw-coupon">
               Have a discount code?
             </label>
-            <span className="bw-option-desc">
-              Got a bundle code instead? Add it on the{' '}
-              <button type="button" className="bw-link" onClick={() => w.editFromReview('plan')}>
-                Plan step
-              </button>
-              .
-            </span>
+            {!isBundle && (
+              <span className="bw-option-desc">
+                Got a bundle code instead? Add it on the{' '}
+                <button type="button" className="bw-link" onClick={() => w.editFromReview('plan')}>
+                  Plan step
+                </button>
+                .
+              </span>
+            )}
             <div className="flex gap-2">
               <input
                 id="bw-coupon"
