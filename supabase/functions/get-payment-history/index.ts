@@ -1,10 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { getCaller, unauthorized } from "../_shared/auth.ts";
+import { requireSupportedAppVersion } from "../_shared/appVersion.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-version",
 };
 
 const logStep = (step: string, details?: any) => {
@@ -17,29 +18,20 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const tooOld = requireSupportedAppVersion(req, corsHeaders);
+  if (tooOld) return tooOld;
+
   try {
     logStep("Function started");
 
     const stripeKey = Deno.env.get("RESTRICTED_API_KEY");
     if (!stripeKey) throw new Error("RESTRICTED_API_KEY is not set");
 
-    // Create Supabase client to authenticate user
-    const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_ANON_KEY") ?? ""
-    );
+    // AUTH: user JWT. Only the caller's own Stripe payments are returned.
+    const user = await getCaller(req);
+    if (!user) return unauthorized(corsHeaders);
 
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("No authorization header provided");
-
-    const token = authHeader.replace("Bearer ", "");
-    const { data: userData, error: userError } = await supabaseClient.auth.getUser(token);
-    
-    if (userError) throw new Error(`Authentication error: ${userError.message}`);
-    const user = userData.user;
-    if (!user?.email) throw new Error("User not authenticated or email not available");
-    
-    logStep("User authenticated", { email: user.email });
+    logStep("User authenticated", { userId: user.userId });
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
 

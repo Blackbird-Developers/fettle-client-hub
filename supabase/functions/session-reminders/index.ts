@@ -1,6 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { Resend } from "https://esm.sh/resend@2.0.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isMachineRequest } from "../_shared/auth.ts";
+import { runUpcomingReminders } from "./upcoming.ts";
+
+// AUTH: machine only — x-cron-secret (REMINDER_CRON_SECRET) or the
+// service-role key. It emails every client, so the anon key must not reach it.
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 
@@ -16,12 +21,22 @@ interface SessionReminderRequest {
   userEmail?: string;
   // Days threshold for inactivity (default: 14)
   daysThreshold?: number;
+  // "upcoming": push reminders 24h / 1h before sessions instead of the
+  // inactivity email. Default (absent): the inactivity email, as before.
+  mode?: "upcoming";
 }
 
 serve(async (req: Request): Promise<Response> => {
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  if (!isMachineRequest(req)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    });
   }
 
   try {
@@ -40,7 +55,17 @@ serve(async (req: Request): Promise<Response> => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { userEmail, daysThreshold = 14 }: SessionReminderRequest = await req.json().catch(() => ({}));
+    const { userEmail, daysThreshold = 14, mode }: SessionReminderRequest = await req.json().catch(() => ({}));
+
+    // { mode: "upcoming" }: 24h / 1h push reminders (see upcoming.ts).
+    if (mode === "upcoming") {
+      const result = await runUpcomingReminders(supabase, btoa(`${acuityUserId}:${acuityApiKey}`));
+      console.log("Upcoming session push reminders", JSON.stringify(result));
+      return new Response(JSON.stringify({ message: "Upcoming reminders complete", ...result }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
 
     console.log(`Checking for inactive users (threshold: ${daysThreshold} days)`);
 

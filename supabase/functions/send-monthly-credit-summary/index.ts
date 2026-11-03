@@ -1,6 +1,13 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 import { Resend } from "https://esm.sh/resend@2.0.0";
+import { isMachineRequest } from "../_shared/auth.ts";
+
+// AUTH: machine only (x-cron-secret / service-role key). It emails every
+// bundle holder, so the anon key must not be able to trigger it. NOTE: the
+// old public.trigger_monthly_credit_summary() posts with no auth header; if a
+// pg_cron job calls it, move that schedule to a GitHub Actions workflow that
+// sends x-cron-secret (see docs/edge-function-auth.md).
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,6 +22,13 @@ const logStep = (step: string, details?: any) => {
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  if (!isMachineRequest(req)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   try {

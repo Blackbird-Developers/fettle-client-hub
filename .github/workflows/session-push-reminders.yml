@@ -1,0 +1,26 @@
+# Every 15 minutes: push reminders to the MyFettle app 24 hours and 1 hour
+# before each session (session-reminders, mode "upcoming"). The function
+# records every reminder it sends, so each one goes out once. Clients without
+# the app are skipped; Acuity's own reminder emails are unchanged.
+name: Session push reminders
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invoke session-reminders (upcoming)
+        run: |
+          set -euo pipefail
+          response=$(curl -sS -w "\n%{http_code}" -X POST \
+            -H "x-cron-secret: ${{ secrets.REMINDER_CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"mode":"upcoming"}' \
+            "https://gxeoillrmjezpehmcvrh.supabase.co/functions/v1/session-reminders")
+          status=$(echo "$response" | tail -1)
+          echo "$response" | head -n -1
+          test "$status" = "200"

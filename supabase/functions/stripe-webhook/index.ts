@@ -14,8 +14,10 @@ import Stripe from "https://esm.sh/stripe@18.5.0";
 //
 // This webhook is invoked by Stripe directly (server-to-server), so it fires
 // regardless of what the client does. On payment_intent.succeeded it completes
-// the work via the (idempotent) confirm-payment-and-book for sessions and
-// confirm-package-payment for bundles.
+// the work via the (idempotent) confirm-payment-and-book for sessions,
+// confirm-package-payment for bundles and pay-session `confirm` for settlements
+// of unpaid sessions. This matters most for the app: it can be killed mid-3DS
+// and has no sessionStorage recovery like the website's usePaymentRedirectReturn.
 //
 // ACTIVATION (one-time, outside this code):
 //   1. Stripe Dashboard → Developers → Webhooks → Add endpoint:
@@ -39,14 +41,15 @@ serve(async (req) => {
   const stripeKey = Deno.env.get("RESTRICTED_API_KEY");
   const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  // The confirm functions accept the service-role key as the webhook backstop.
+  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-  if (!stripeKey || !webhookSecret || !supabaseUrl || !supabaseAnonKey) {
+  if (!stripeKey || !webhookSecret || !supabaseUrl || !supabaseServiceKey) {
     logStep("ERROR: webhook not configured", {
       hasStripeKey: !!stripeKey,
       hasWebhookSecret: !!webhookSecret,
       hasSupabaseUrl: !!supabaseUrl,
-      hasAnonKey: !!supabaseAnonKey,
+      hasServiceKey: !!supabaseServiceKey,
     });
     // 500 → Stripe will retry once configured.
     return new Response("Webhook not configured", { status: 500 });
@@ -113,6 +116,37 @@ serve(async (req) => {
       return ack();
     }
 
+    // SETTLEMENTS (pay-session). The money settles an existing appointment,
+    // so there is nothing to book or refund. What can be lost is the PAID
+    // note on the Acuity appointment, which pay-session `confirm` writes after
+    // the client returns. The app can be killed mid-3DS (and has no
+    // sessionStorage recovery like the website), so record it from here.
+    // Checked before the acuity_appointment_id test below: settlement PIs
+    // carry that id from creation.
+    if (md.kind === "session_settlement") {
+      if (md.settlement_recorded === "true") {
+        logStep("Settlement already recorded — nothing to do", { paymentIntentId: pi.id });
+        return ack();
+      }
+      logStep("Backstop: recording settlement", { paymentIntentId: pi.id });
+      const settleResp = await fetch(`${supabaseUrl}/functions/v1/pay-session`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${supabaseServiceKey}`,
+        },
+        body: JSON.stringify({ action: "confirm", paymentIntentId: pi.id }),
+      });
+      const settleBody = await settleResp.text();
+      logStep("pay-session confirm responded", { status: settleResp.status, body: settleBody.slice(0, 300) });
+      const refreshedSettle = await stripe.paymentIntents.retrieve(pi.id);
+      if (refreshedSettle.metadata?.settlement_recorded === "true") return ack();
+      return new Response(JSON.stringify({ received: true, settled: false }), {
+        headers: { "Content-Type": "application/json" },
+        status: 500,
+      });
+    }
+
     // Already fulfilled or already settled-failed by confirm-payment-and-book?
     if (md.acuity_appointment_id) {
       logStep("Already booked — nothing to do", { paymentIntentId: pi.id, appointmentId: md.acuity_appointment_id });
@@ -141,7 +175,7 @@ serve(async (req) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${supabaseAnonKey}`,
+          Authorization: `Bearer ${supabaseServiceKey}`,
         },
         body: JSON.stringify({ paymentIntentId: pi.id }),
       });
@@ -178,7 +212,7 @@ serve(async (req) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${supabaseAnonKey}`,
+        Authorization: `Bearer ${supabaseServiceKey}`,
       },
       body: JSON.stringify({ paymentIntentId: pi.id }),
     });

@@ -36,6 +36,8 @@ export interface BookingConfirmationInput {
   /** e.g. "7:00pm GMT" */
   timeLabel: string;
   payment: BookingPayment;
+  /** A moved session (acuity reschedule): "Your session has moved" heading, no Paid row. */
+  rescheduled?: boolean;
 }
 
 export function escapeHtml(value: string): string {
@@ -107,7 +109,7 @@ export function bookingConfirmationHtml(input: BookingConfirmationInput): string
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-  <title>You&rsquo;re booked</title>
+  <title>${input.rescheduled ? "Session moved" : "You&rsquo;re booked"}</title>
   <style>
     body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
     table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
@@ -141,7 +143,7 @@ export function bookingConfirmationHtml(input: BookingConfirmationInput): string
           <!-- HEADING -->
           <tr>
             <td class="mobile-pad" align="center" style="padding:10px 40px 0 40px; font-family:${FONT};">
-              <div class="hero-title" style="font-size:28px; line-height:34px; font-weight:800; color:${INK};">You&rsquo;re booked, ${firstName}!</div>
+              <div class="hero-title" style="font-size:28px; line-height:34px; font-weight:800; color:${INK};">${input.rescheduled ? `Your session has moved, ${firstName}!` : `You&rsquo;re booked, ${firstName}!`}</div>
               <div style="font-size:16px; line-height:25px; color:${BODY}; padding-top:8px;">We&rsquo;ll text and email your session link before the session.</div>
             </td>
           </tr>
@@ -155,8 +157,8 @@ export function bookingConfirmationHtml(input: BookingConfirmationInput): string
                     <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
 ${detailRow("When", `${date} at ${time}`)}
 ${detailRow("Therapist", therapist)}
-${detailRow("Session", sessionType)}
-${detailRow("Paid", paymentValue(input.payment), true)}
+${input.rescheduled ? detailRow("Session", sessionType, true) : `${detailRow("Session", sessionType)}
+${detailRow("Paid", paymentValue(input.payment), true)}`}
                     </table>
                   </td>
                 </tr>
@@ -196,15 +198,16 @@ export function bookingConfirmationText(input: BookingConfirmationInput): string
     ? "Paid with your referral credit. Nothing was charged to your card."
     : `Paid with your bundle: ${p.remainingSessions} of ${p.totalSessions} sessions left (${p.packageName}).`;
   return [
-    `You're booked, ${input.firstName?.trim() || "there"}!`,
+    input.rescheduled
+      ? `Your session has moved, ${input.firstName?.trim() || "there"}!`
+      : `You're booked, ${input.firstName?.trim() || "there"}!`,
     "",
     `Date: ${input.dateLabel}`,
     `Time: ${input.timeLabel}`,
     `Therapist: ${input.therapistName || "Your therapist"}`,
     `Session: ${input.sessionType || "Therapy session"}`,
     "",
-    payment,
-    "",
+    ...(input.rescheduled ? [] : [payment, ""]),
     "We'll text and email your secure log-in details before the session.",
     `View your sessions: ${HUB_SESSIONS_URL}`,
     "",

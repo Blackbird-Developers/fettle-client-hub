@@ -1,6 +1,9 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { getCaller, isServiceRoleRequest } from "../_shared/auth.ts";
+import { requireSupportedAppVersion } from "../_shared/appVersion.ts";
+import { paymentSheetFields } from "../_shared/paymentSheet.ts";
 
 // pay-session — settle an EXISTING unpaid Acuity appointment by card, or
 // with a bundle credit. Companion to unpaid-sessions (which decides what
@@ -13,8 +16,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 // The appointment must belong to the signed-in caller (JWT email — never a
 // client-supplied one), and the amount is always re-derived from Acuity's own
 // price. The PaymentIntent carries kind:"session_settlement" and NO
-// appointmentTypeID/packageId, so the stripe-webhook backstop skips it and no
-// booking/refund machinery can ever touch it.
+// appointmentTypeID/packageId, so no booking/refund machinery can ever touch
+// it. The stripe-webhook backstop only calls `confirm` (service-role key) to
+// record the settlement if the client never did.
 //
 // Once the PI succeeds, unpaid-sessions stops flagging the appointment
 // automatically (it searches succeeded PIs by acuity_appointment_id), even if
@@ -24,7 +28,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-version",
 };
 
 const logStep = (step: string, details?: any) => {
@@ -80,6 +84,9 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const tooOld = requireSupportedAppVersion(req, corsHeaders);
+  if (tooOld) return tooOld;
+
   try {
     const acuityUserId = Deno.env.get("ACUITY_USER_ID");
     const acuityApiKey = Deno.env.get("ACUITY_API_KEY");
@@ -91,22 +98,17 @@ serve(async (req) => {
       return json({ error: "Payments are temporarily unavailable. Please contact hello@fettle.ie." }, 500);
     }
 
-    // Identity from the caller's JWT only.
-    let email: string | null = null;
-    let userId: string | null = null;
-    const bearer = req.headers.get("Authorization")?.replace("Bearer ", "").trim();
-    if (bearer && supabaseUrl && anonKey) {
-      try {
-        const authClient = createClient(supabaseUrl, anonKey);
-        const { data } = await authClient.auth.getUser(bearer);
-        email = data.user?.email ?? null;
-        userId = data.user?.id ?? null;
-      } catch (_e) { /* handled below */ }
-    }
-    if (!email) return json({ error: "Please sign in to pay for a session." }, 401);
-
     const body = await req.json();
     const action = body?.action;
+
+    // Identity from the caller's JWT only. The one exception: the
+    // stripe-webhook backstop (service-role key) may run `confirm`, so a
+    // settlement is recorded even if the app was killed before confirming.
+    const isBackstop = action === "confirm" && isServiceRoleRequest(req);
+    const caller = isBackstop ? null : await getCaller(req);
+    let email: string | null = caller?.email ?? null;
+    const userId: string | null = caller?.userId ?? null;
+    if (!email && !isBackstop) return json({ error: "Please sign in to pay for a session." }, 401);
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
     const acuityAuth = btoa(`${acuityUserId}:${acuityApiKey}`);
 
@@ -219,9 +221,13 @@ serve(async (req) => {
       });
 
       logStep("Settlement PI created", { appointmentId, pi: paymentIntent.id, amount: priceCents });
+      // For the app's PaymentSheet. The customer is always the caller's own here.
+      const sheet = await paymentSheetFields(stripe, customerId, email, email);
       return json({
         clientSecret: paymentIntent.client_secret,
         paymentIntentId: paymentIntent.id,
+        customerId: sheet.customerId,
+        ephemeralKey: sheet.ephemeralKey,
         amount: priceCents,
         currency: "eur",
         livemode: paymentIntent.livemode,
@@ -237,7 +243,9 @@ serve(async (req) => {
       if (pi.metadata?.kind !== "session_settlement") {
         return json({ error: "This payment is not a session settlement." }, 400);
       }
-      if ((pi.metadata?.email || "").toLowerCase() !== email.toLowerCase()) {
+      if (isBackstop) {
+        email = pi.metadata?.email || "";
+      } else if ((pi.metadata?.email || "").toLowerCase() !== (email || "").toLowerCase()) {
         return json({ error: "This payment doesn't belong to your account." }, 403);
       }
 
@@ -259,6 +267,20 @@ serve(async (req) => {
 
       if (pi.metadata?.settlement_recorded === "true") {
         return json({ success: true, alreadyRecorded: true, receiptUrl });
+      }
+
+      // The app, the website and the webhook backstop can confirm at the same
+      // time. Only the claim holder writes the Acuity note, so it isn't added
+      // twice. Fail-open: a missing lock must not stop a paid settlement.
+      const serviceKeyForClaim = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      if (supabaseUrl && serviceKeyForClaim) {
+        try {
+          const { data: claimed, error: claimError } = await createClient(supabaseUrl, serviceKeyForClaim)
+            .rpc("claim_booking", { p_payment_intent_id: paymentIntentId });
+          if (!claimError && claimed === false) {
+            return json({ success: true, pending: true, receiptUrl });
+          }
+        } catch (_e) { /* proceed without the lock */ }
       }
 
       // Paper trail for clinic staff: append a PAID note on the Acuity

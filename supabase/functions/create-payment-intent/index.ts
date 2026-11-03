@@ -1,10 +1,19 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { getCaller, unauthorized } from "../_shared/auth.ts";
+import { requireSupportedAppVersion } from "../_shared/appVersion.ts";
+import { paymentSheetFields } from "../_shared/paymentSheet.ts";
+import { lookUpSessionPrice } from "../_shared/sessionPrice.ts";
+import { isClinicalTypeName } from "../_shared/clinical.ts";
+
+// AUTH: user JWT. The caller's user id goes into the PaymentIntent metadata
+// (userId), and confirm-payment-and-book only books it for that same user (or
+// for the stripe-webhook backstop, which uses the service-role key).
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-version",
 };
 
 const logStep = (step: string, details?: any) => {
@@ -31,72 +40,24 @@ const LOYALTY_COUPONS: Record<string, { achievementId: string }> = {
 // booking still goes ahead.
 const WEBSITE_ONLY_CODES = new Set(["TENOFF"]);
 
-// Session types sold at a different price than their Acuity record lists.
-// Must match priceOverride in src/lib/assessments.ts.
-const PRICE_OVERRIDES: Record<string, string> = {
-  "94856237": "140.00", // Addiction Assessment
-};
-
-// The price always comes from Acuity (plus the overrides above), never from
-// the request, so a client can't change it in the browser and pay less.
-async function lookUpSessionPrice(
-  appointmentTypeID: string,
-): Promise<{ price: number; name: string } | null> {
-  const acuityUserId = Deno.env.get("ACUITY_USER_ID");
-  const acuityApiKey = Deno.env.get("ACUITY_API_KEY");
-  if (!acuityUserId || !acuityApiKey) {
-    throw new Error("Our booking system is temporarily unavailable. Please contact hello@fettle.ie for support.");
-  }
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
-  let types: any[];
-  try {
-    const resp = await fetch("https://acuityscheduling.com/api/v1/appointment-types", {
-      headers: {
-        Authorization: `Basic ${btoa(`${acuityUserId}:${acuityApiKey}`)}`,
-        "Content-Type": "application/json",
-      },
-      signal: controller.signal,
-    });
-    if (!resp.ok) throw new Error(`Acuity responded ${resp.status}`);
-    types = await resp.json();
-  } catch (e) {
-    logStep("Appointment type lookup failed", { error: String(e) });
-    throw new Error("We couldn't check the session price just now. Please try again in a moment.");
-  } finally {
-    clearTimeout(timeoutId);
-  }
-
-  const type = Array.isArray(types)
-    ? types.find((t) => String(t?.id) === appointmentTypeID)
-    : undefined;
-  if (!type) return null;
-
-  const price = parseFloat(PRICE_OVERRIDES[appointmentTypeID] ?? String(type.price ?? "0"));
-  return { price, name: String(type.name ?? "") };
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const tooOld = requireSupportedAppVersion(req, corsHeaders);
+  if (tooOld) return tooOld;
+
+  const caller = await getCaller(req);
+  if (!caller) return unauthorized(corsHeaders, "Please sign in to book a session.");
+
   try {
-    logStep("Function started");
+    logStep("Function started", { userId: caller.userId });
 
     const stripeKey = Deno.env.get("RESTRICTED_API_KEY");
-    logStep("RESTRICTED_API_KEY check", { 
-      exists: !!stripeKey, 
-      prefix: stripeKey ? stripeKey.substring(0, 10) + '...' : 'NOT SET' 
-    });
-    
     if (!stripeKey) throw new Error("Our payment system is temporarily unavailable. Please contact hello@fettle.ie for support.");
 
-    const rawBody = await req.text();
-    logStep("Raw request body", { body: rawBody });
-    
-    const body = JSON.parse(rawBody);
+    const body = await req.json();
     const {
       appointmentTypeID,
       appointmentTypeName,
@@ -197,6 +158,14 @@ serve(async (req) => {
     let couponRejected: string | null = null;
     const trimmedCoupon = (couponCode || "").toString().trim();
     const normalizedCoupon = trimmedCoupon.toUpperCase();
+
+    // Psychiatry and assessments are full price, card only (the website hides
+    // the code field and referral credit for them; this is the server check).
+    const clinicalSession = isClinicalTypeName(session.name);
+    if (clinicalSession && normalizedCoupon) {
+      couponRejected = "not_for_clinical";
+      logStep("Code refused: psychiatry and assessments are full price", { appointmentTypeID });
+    }
 
     if (WEBSITE_ONLY_CODES.has(normalizedCoupon)) {
       couponRejected = "website_only";
@@ -502,7 +471,7 @@ serve(async (req) => {
     // cannot affect normal bookings.
     let referralCreditApplied = 0;
     let referralFullyCovered = false;
-    if (body.useReferralCredit === true) {
+    if (body.useReferralCredit === true && !clinicalSession) {
       try {
         const supabaseUrl = Deno.env.get("SUPABASE_URL");
         const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -584,6 +553,8 @@ serve(async (req) => {
       // booking app; the stripe-webhook backstop must ONLY act on payments THIS
       // app created, or it tries to re-book (and refunds) [Website]'s bookings.
       source: "myfettlehub",
+      // Who paid. confirm-payment-and-book books this PI only for this user.
+      userId: caller.userId,
       appointmentTypeID: appointmentTypeID.toString(),
       appointmentTypeName: appointmentTypeName || "Therapy Session",
       datetime,
@@ -629,12 +600,17 @@ serve(async (req) => {
     logStep("PaymentIntent created", { 
       paymentIntentId: paymentIntent.id, 
       livemode: paymentIntent.livemode,
-      clientSecret: paymentIntent.client_secret?.slice(0, 20) + "..." 
     });
+
+    // For the app's PaymentSheet (saved cards, Apple/Google Pay). Null unless
+    // the booking email is the caller's own; the website ignores both.
+    const sheet = await paymentSheetFields(stripe, customerId, email, caller.email);
 
     return new Response(JSON.stringify({
       clientSecret: paymentIntent.client_secret,
       paymentIntentId: paymentIntent.id,
+      customerId: sheet.customerId,
+      ephemeralKey: sheet.ephemeralKey,
       amount: amountInCents,
       currency: "eur",
       livemode: paymentIntent.livemode,

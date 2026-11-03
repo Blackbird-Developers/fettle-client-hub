@@ -16,7 +16,6 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
-import BookingSuccess from "./pages/BookingSuccess";
 import NotFound from "./pages/NotFound";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsConditions from "./pages/TermsConditions";
@@ -54,7 +53,8 @@ const App = () => (
             <Route path="/feedback" element={<ProtectedRoute><CustomerOnly><Feedback /></CustomerOnly></ProtectedRoute>} />
             <Route path="/book" element={<ProtectedRoute><CustomerOnly><Book /></CustomerOnly></ProtectedRoute>} />
             <Route path="/get-started" element={<ProtectedRoute><CustomerOnly><GetStarted /></CustomerOnly></ProtectedRoute>} />
-            <Route path="/booking-success" element={<ProtectedRoute><CustomerOnly><BookingSuccess /></CustomerOnly></ProtectedRoute>} />
+            {/* Old Stripe Checkout return page (flow removed); keep old links working. */}
+            <Route path="/booking-success" element={<Navigate to="/sessions" replace />} />
             <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
             <Route path="/admin/:section" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
             <Route path="/admin/:section/:subsection" element={<ProtectedRoute><Admin /></ProtectedRoute>} />

@@ -1,9 +1,16 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
+import { forbidden, getCaller, sameEmail, unauthorized } from "../_shared/auth.ts";
+import { requireSupportedAppVersion } from "../_shared/appVersion.ts";
+import { hasSessionStarted, TOO_LATE_MESSAGE } from "../_shared/sessionTiming.ts";
+
+// AUTH: user JWT. The appointment's Acuity email must be the caller's own
+// email. A `clientEmail` in the body is ignored (older web builds still send
+// it); it used to be trusted, which let anyone cancel and refund any session.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-version",
 };
 
 const ACUITY_API_BASE = 'https://acuityscheduling.com/api/v1';
@@ -18,6 +25,12 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const tooOld = requireSupportedAppVersion(req, corsHeaders);
+  if (tooOld) return tooOld;
+
+  const caller = await getCaller(req);
+  if (!caller) return unauthorized(corsHeaders);
+
   try {
     logStep("Function started");
 
@@ -28,12 +41,12 @@ serve(async (req) => {
     if (!stripeKey) throw new Error("RESTRICTED_API_KEY is not set");
     if (!acuityUserId || !acuityApiKey) throw new Error("Acuity credentials not configured");
 
-    const { appointmentId, clientEmail } = await req.json();
-    
-    if (!appointmentId) throw new Error("Missing appointmentId");
-    if (!clientEmail) throw new Error("Missing clientEmail");
+    const { appointmentId } = await req.json();
+    const clientEmail = caller.email;
 
-    logStep("Processing cancellation", { appointmentId, clientEmail });
+    if (!appointmentId) throw new Error("Missing appointmentId");
+
+    logStep("Processing cancellation", { appointmentId, userId: caller.userId });
 
     const acuityAuthHeader = btoa(`${acuityUserId}:${acuityApiKey}`);
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
@@ -57,9 +70,9 @@ serve(async (req) => {
       email: appointment.email 
     });
 
-    // Verify the email matches (security check)
-    if (appointment.email?.toLowerCase() !== clientEmail.toLowerCase()) {
-      throw new Error("Unauthorized: Email does not match appointment");
+    // The appointment must be the signed-in caller's own.
+    if (!sameEmail(appointment.email, clientEmail)) {
+      return forbidden(corsHeaders, "This session doesn't belong to your account.");
     }
 
     // Check if already cancelled
@@ -71,6 +84,15 @@ serve(async (req) => {
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
+      });
+    }
+
+    // Same rule as the Sessions page (src/lib/sessionTiming.ts): cancel only
+    // before the start time. The page hid the button; now the server refuses too.
+    if (hasSessionStarted(appointment.datetime)) {
+      return new Response(JSON.stringify({ error: TOO_LATE_MESSAGE, code: "too_late" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400,
       });
     }
 

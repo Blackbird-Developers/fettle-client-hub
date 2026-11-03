@@ -1,5 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getCaller, isMachineRequest } from "../_shared/auth.ts";
+
+// AUTH: machine (x-cron-secret or service-role key) may sync everyone or one
+// `email`. A signed-in user may sync only their own account (the body email
+// is ignored). Anything else is refused.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -43,6 +48,17 @@ serve(async (req) => {
       userEmail = body.email || null;
     } catch {
       // No body or invalid JSON, sync all users
+    }
+
+    if (!isMachineRequest(req)) {
+      const caller = await getCaller(req);
+      if (!caller) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Unauthorized' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      userEmail = caller.email;
     }
 
     logStep("Fetching profiles to sync", { userEmail });

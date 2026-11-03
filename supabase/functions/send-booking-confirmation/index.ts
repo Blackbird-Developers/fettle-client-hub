@@ -42,7 +42,7 @@ const handler = async (req: Request): Promise<Response> => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Only our own functions (verify-payment-and-book) may send this email.
+  // Only our own functions (service-role key) may send this email.
   if (!isServiceRoleRequest(req)) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,

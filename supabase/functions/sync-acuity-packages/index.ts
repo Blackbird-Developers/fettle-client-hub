@@ -1,9 +1,15 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { getCaller, isMachineRequest } from "../_shared/auth.ts";
+import { requireSupportedAppVersion } from "../_shared/appVersion.ts";
+
+// AUTH: user JWT (syncs only the caller's own certificates; a body email is
+// ignored), or a machine caller (x-cron-secret / service-role key) for a
+// background sync of one `email` or everyone. Anonymous calls are refused.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-version",
 };
 
 const ACUITY_API_BASE = "https://acuityscheduling.com/api/v1";
@@ -204,6 +210,9 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const tooOld = requireSupportedAppVersion(req, corsHeaders);
+  if (tooOld) return tooOld;
+
   try {
     logStep("Function started");
 
@@ -221,21 +230,20 @@ serve(async (req) => {
       throw new Error("Supabase configuration missing");
     }
 
-    // Authenticate user (optional - can be called without auth for background sync)
+    // Authenticate: a signed-in user, or a machine caller for background sync.
     let userId: string | null = null;
     let userEmail: string | null = null;
 
-    const authHeader = req.headers.get("Authorization");
-    if (authHeader) {
-      const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
-      const token = authHeader.replace("Bearer ", "");
-      const { data: userData, error: userError } = await supabaseAuth.auth.getUser(token);
-
-      if (!userError && userData.user) {
-        userId = userData.user.id;
-        userEmail = userData.user.email || null;
-        logStep("User authenticated", { userId, email: userEmail });
-      }
+    const caller = await getCaller(req);
+    if (caller) {
+      userId = caller.userId;
+      userEmail = caller.email;
+      logStep("User authenticated", { userId });
+    } else if (!isMachineRequest(req)) {
+      return new Response(JSON.stringify({ error: "Please sign in again.", code: "unauthorized" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 401,
+      });
     }
 
     // Parse request body for specific email to sync (optional)

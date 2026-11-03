@@ -1,10 +1,15 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 import { Resend } from "https://esm.sh/resend@2.0.0";
+import { requireSupportedAppVersion } from "../_shared/appVersion.ts";
+import { claimOnce, findOwnAppointmentAt } from "../_shared/bookingRetry.ts";
+import { CLINICAL_CARD_ONLY_MESSAGE, isClinicalTypeName } from "../_shared/clinical.ts";
+import { sendPushToUser, sessionLink } from "../_shared/push.ts";
+import { formatSessionWhen } from "../_shared/bookingConfirmationEmail.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-version",
 };
 
 const ACUITY_API_BASE = "https://acuityscheduling.com/api/v1";
@@ -50,7 +55,7 @@ async function getAppointmentTypeCategory(
   acuityUserId: string,
   acuityApiKey: string,
   appointmentTypeID: number | string
-): Promise<PackageCategory | undefined> {
+): Promise<PackageCategory | "clinical" | undefined> {
   try {
     const authHeader = btoa(`${acuityUserId}:${acuityApiKey}`);
     const response = await fetch(`${ACUITY_API_BASE}/appointment-types`, {
@@ -73,6 +78,7 @@ async function getAppointmentTypeCategory(
     }
 
     const name = (match.name ?? "").trim();
+    if (isClinicalTypeName(name)) return "clinical";
     for (const [category, prefix] of Object.entries(CATEGORY_NAME_PREFIX)) {
       if (name.startsWith(prefix)) return category as PackageCategory;
     }
@@ -303,6 +309,9 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const tooOld = requireSupportedAppVersion(req, corsHeaders);
+  if (tooOld) return tooOld;
+
   try {
     logStep("Function started");
 
@@ -397,6 +406,12 @@ serve(async (req) => {
       acuityApiKey,
       appointmentTypeID
     );
+    // Bundles never pay for psychiatry or assessments (the website hides the
+    // option; this is the server-side check).
+    if (sessionTypeCategory === "clinical") {
+      throw new Error(`${CLINICAL_CARD_ONLY_MESSAGE} Your bundle credit was not used.`);
+    }
+
     if (packageCategory && sessionTypeCategory && packageCategory !== sessionTypeCategory) {
       logStep("Blocked cross-category package redemption", {
         packageId: userPackage.package_id,
@@ -423,6 +438,68 @@ serve(async (req) => {
     // Book appointment in Acuity
     const acuityAuth = btoa(`${acuityUserId}:${acuityApiKey}`);
 
+    const bookedResponse = (appt: any, remaining: number, extra: Record<string, unknown> = {}) =>
+      new Response(JSON.stringify({
+        success: true,
+        ...extra,
+        appointment: {
+          id: appt.id,
+          datetime: appt.datetime,
+          type: appt.type,
+          calendar: appt.calendar,
+          firstName: appt.firstName,
+          lastName: appt.lastName,
+          email: appt.email,
+        },
+        remainingSessions: remaining,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+
+    // ── Retry safety ─────────────────────────────────────────────────────────
+    // The app retries when the network drops. A retry after the first call
+    // finished finds that bundle booking and returns it (no second credit).
+    // Concurrent duplicates get 409 from the claim.
+    const prior = await findOwnAppointmentAt(acuityAuth, email, datetime);
+    if (prior.appointment && /\[Bundle: /.test(prior.appointment.notes || "")) {
+      logStep("Retry: already booked with this bundle — returning it", { appointmentId: prior.appointment.id });
+      return bookedResponse(prior.appointment, userPackage.remaining_sessions, { alreadyBooked: true });
+    }
+    if (!(await claimOnce(supabaseAdmin, `package:${userId}:${datetime}`))) {
+      return new Response(JSON.stringify({
+        error: "This booking is already being made. Please wait a moment and check your sessions.",
+        code: "in_progress",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 409 });
+    }
+
+    // ── Take the credit first, only if the balance hasn't moved ──────────────
+    // The old code booked first and then wrote remaining_sessions - 1, so two
+    // requests at once could both book on the last credit. Same pattern as
+    // pay-session use-credit: compare-and-set, given back if Acuity refuses.
+    const newRemaining = userPackage.remaining_sessions - 1;
+    const { data: taken, error: takeError } = await supabaseAdmin
+      .from('user_packages')
+      .update({ remaining_sessions: newRemaining, updated_at: new Date().toISOString() })
+      .eq('id', packageId)
+      .eq('user_id', userId)
+      .eq('remaining_sessions', userPackage.remaining_sessions)
+      .select('id');
+    if (takeError || !taken || taken.length === 0) {
+      return new Response(JSON.stringify({
+        error: "Your bundle balance just changed. Please refresh and try again.",
+        code: "balance_changed",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 409 });
+    }
+    const giveBack = async () => {
+      const { error } = await supabaseAdmin
+        .from('user_packages')
+        .update({ remaining_sessions: userPackage.remaining_sessions, updated_at: new Date().toISOString() })
+        .eq('id', packageId)
+        .eq('remaining_sessions', newRemaining);
+      if (error) logStep("CREDIT NOT RETURNED — fix by hand", { packageId, error: error.message });
+    };
+
     const appointmentData: Record<string, any> = {
       appointmentTypeID,
       datetime,
@@ -436,8 +513,7 @@ serve(async (req) => {
     if (calendarID) appointmentData.calendarID = calendarID;
 
     // Add bundle info to notes so it shows on the Acuity appointment
-    const creditsAfterBooking = userPackage.remaining_sessions - 1;
-    const bundleNote = `[Bundle: ${userPackage.package_name} | Credits remaining: ${creditsAfterBooking}/${userPackage.total_sessions}]`;
+    const bundleNote = `[Bundle: ${userPackage.package_name} | Credits remaining: ${newRemaining}/${userPackage.total_sessions}]`;
     appointmentData.notes = notes ? `${notes}\n\n${bundleNote}` : bundleNote;
 
     // If package is linked to Acuity certificate, include code for auto-deduction
@@ -446,19 +522,24 @@ serve(async (req) => {
       logStep("Adding certificate to appointment for auto-deduction", { certificate: acuityCertificateCode });
     }
 
-    // Add Acuity intake form fields if provided
-    // Filter out entries with empty/null values — Acuity treats empty strings as "not submitted"
-    if (intakeFormFields && Array.isArray(intakeFormFields)) {
-      const validFields = intakeFormFields.filter(
+    // Intake form fields: an array here, a JSON string for create-payment-intent
+    // and book-with-credit. Accept both so one client shape works everywhere.
+    // Acuity treats empty strings as "not submitted", so drop those.
+    let fieldList: unknown = intakeFormFields;
+    if (typeof fieldList === "string") {
+      try { fieldList = JSON.parse(fieldList); } catch { fieldList = null; }
+    }
+    if (Array.isArray(fieldList)) {
+      const validFields = fieldList.filter(
         (f: { id: number; value: any }) => f.value !== null && f.value !== undefined && f.value !== ''
       );
       if (validFields.length > 0) {
         appointmentData.fields = validFields;
-        logStep("Adding intake form fields", { fields: validFields });
+        logStep("Adding intake form fields", { count: validFields.length });
       }
     }
 
-    const acuityResponse = await fetch('https://acuityscheduling.com/api/v1/appointments', {
+    const postAcuity = () => fetch('https://acuityscheduling.com/api/v1/appointments', {
       method: 'POST',
       headers: {
         'Authorization': `Basic ${acuityAuth}`,
@@ -467,104 +548,37 @@ serve(async (req) => {
       body: JSON.stringify(appointmentData),
     });
 
-    if (!acuityResponse.ok) {
-      const errorText = await acuityResponse.text();
-      logStep("Acuity booking failed", { status: acuityResponse.status, error: errorText });
-
-      // Check if the error is about invalid intake form fields
-      // If so, retry WITHOUT the fields (they may not be required for this appointment type)
-      if (errorText.includes("invalid_fields") || errorText.includes("does not exist on this appointment")) {
-        logStep("Retrying without intake form fields");
-        delete appointmentData.fields;
-
-        const retryResponse = await fetch('https://acuityscheduling.com/api/v1/appointments', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Basic ${acuityAuth}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(appointmentData),
-        });
-
-        if (retryResponse.ok) {
-          const retryAppointment = await retryResponse.json();
-          logStep("Acuity appointment created on retry (without intake fields)", { appointmentId: retryAppointment.id });
-
-          // Deduct session from package
-          const { error: updateError } = await supabaseAdmin
-            .from('user_packages')
-            .update({
-              remaining_sessions: userPackage.remaining_sessions - 1,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', packageId)
-            .eq('user_id', userId);
-
-          if (updateError) {
-            logStep("Failed to deduct session", { error: updateError });
+    let appointment: any = null;
+    let errorText = "";
+    try {
+      const first = await postAcuity();
+      if (first.ok) {
+        appointment = await first.json();
+      } else {
+        errorText = await first.text();
+        logStep("Acuity booking failed", { status: first.status, error: errorText });
+        // Invalid intake fields: retry once WITHOUT them (they may not be
+        // required for this appointment type).
+        if (appointmentData.fields && (errorText.includes("invalid_fields") || errorText.includes("does not exist on this appointment"))) {
+          logStep("Retrying without intake form fields");
+          delete appointmentData.fields;
+          const retry = await postAcuity();
+          if (retry.ok) {
+            appointment = await retry.json();
+            logStep("Acuity appointment created on retry (without intake fields)", { appointmentId: appointment.id });
           } else {
-            logStep("Session deducted from package", {
-              newRemaining: userPackage.remaining_sessions - 1
-            });
-
-            // Note: Acuity certificate is auto-deducted when certificate code is passed to appointment
-            if (acuityCertificateCode) {
-              logStep("Acuity certificate was auto-deducted via appointment booking");
-            }
-
-            const newRemaining = userPackage.remaining_sessions - 1;
-
-            // Send emails
-            await sendCreditUsedConfirmation(
-              supabaseUrl,
-              supabaseServiceKey,
-              email,
-              firstName,
-              userPackage.package_name,
-              retryAppointment,
-              newRemaining,
-              userPackage.total_sessions,
-              timezone
-            );
-
-            if (newRemaining <= 2 && newRemaining > 0) {
-              await sendLowSessionsReminder(email, firstName, userPackage.package_name, newRemaining);
-            }
-
-            if (newRemaining === 0) {
-              await sendCreditsDepletedEmail(
-                supabaseUrl,
-                supabaseServiceKey,
-                email,
-                firstName,
-                userPackage.package_name,
-                userPackage.total_sessions
-              );
-            }
+            errorText = await retry.text();
+            logStep("Retry also failed", { error: errorText });
           }
-
-          return new Response(JSON.stringify({
-            success: true,
-            appointment: {
-              id: retryAppointment.id,
-              datetime: retryAppointment.datetime,
-              type: retryAppointment.type,
-              calendar: retryAppointment.calendar,
-              firstName: retryAppointment.firstName,
-              lastName: retryAppointment.lastName,
-              email: retryAppointment.email,
-            },
-            remainingSessions: userPackage.remaining_sessions - 1,
-          }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 200,
-          });
         }
-
-        // Retry also failed
-        const retryErrorText = await retryResponse.text();
-        logStep("Retry also failed", { error: retryErrorText });
       }
+    } catch (e) {
+      errorText = String(e);
+      logStep("Acuity request threw", { error: errorText });
+    }
+
+    if (!appointment) {
+      await giveBack();
 
       // Parse Acuity error for user-friendly message
       let userMessage = "We couldn't complete your booking at this time.";
@@ -577,86 +591,56 @@ serve(async (req) => {
       } else if (errorText.includes("required_field")) {
         userMessage = "Some required information is missing. Please try again or contact hello@fettle.ie for support.";
       }
+
       logStep("Acuity user-facing error", { original: errorText, userMessage });
-      throw new Error(`${userMessage} Please contact hello@fettle.ie for support.`);
+      throw new Error(`${userMessage} Your bundle credit was not used. Please contact hello@fettle.ie for support.`);
     }
 
-    const appointment = await acuityResponse.json();
-    logStep("Appointment booked in Acuity", { appointmentId: appointment.id });
+    logStep("Appointment booked in Acuity", { appointmentId: appointment.id, newRemaining });
+    // Note: an Acuity certificate is auto-deducted when its code is passed on the booking.
 
-    // Deduct session from package
-    const { error: updateError } = await supabaseAdmin
-      .from('user_packages')
-      .update({ 
-        remaining_sessions: userPackage.remaining_sessions - 1,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', packageId)
-      .eq('user_id', userId);
+    // Send credit used confirmation email
+    await sendCreditUsedConfirmation(
+      supabaseUrl,
+      supabaseServiceKey,
+      email,
+      firstName,
+      userPackage.package_name,
+      appointment,
+      newRemaining,
+      userPackage.total_sessions,
+      timezone
+    );
 
-    if (updateError) {
-      logStep("Failed to deduct session", { error: updateError });
-      // Note: appointment is already booked, log error but continue
-    } else {
-      logStep("Session deducted from package", {
-        newRemaining: userPackage.remaining_sessions - 1
+    // Push to the app next to the email (best-effort, never throws).
+    {
+      const { dateLabel, timeLabel } = formatSessionWhen(appointment.datetime, timezone);
+      await sendPushToUser(supabaseAdmin, userId, "booking_updates", {
+        title: "Session booked",
+        body: `${appointment.type || "Your session"}${appointment.calendar ? ` with ${appointment.calendar}` : ""}, ${dateLabel} at ${timeLabel}. ${newRemaining} bundle credit${newRemaining === 1 ? "" : "s"} left.`,
+        path: sessionLink(appointment.id),
+        data: { kind: "booking_confirmed", appointmentId: appointment.id },
       });
+    }
 
-      // Note: Acuity certificate is auto-deducted when certificate code is passed to appointment
-      if (acuityCertificateCode) {
-        logStep("Acuity certificate was auto-deducted via appointment booking");
-      }
+    // Send low credit reminder if 2 or fewer sessions remaining (but not 0)
+    if (newRemaining <= 2 && newRemaining > 0) {
+      await sendLowSessionsReminder(email, firstName, userPackage.package_name, newRemaining);
+    }
 
-      // Send emails for package bookings
-      const newRemaining = userPackage.remaining_sessions - 1;
-
-      // Send credit used confirmation email
-      await sendCreditUsedConfirmation(
+    // Send credits depleted email when they hit 0
+    if (newRemaining === 0) {
+      await sendCreditsDepletedEmail(
         supabaseUrl,
         supabaseServiceKey,
         email,
         firstName,
         userPackage.package_name,
-        appointment,
-        newRemaining,
-        userPackage.total_sessions,
-        timezone
+        userPackage.total_sessions
       );
-      
-      // Send low credit reminder if 2 or fewer sessions remaining (but not 0)
-      if (newRemaining <= 2 && newRemaining > 0) {
-        await sendLowSessionsReminder(email, firstName, userPackage.package_name, newRemaining);
-      }
-      
-      // Send credits depleted email when they hit 0
-      if (newRemaining === 0) {
-        await sendCreditsDepletedEmail(
-          supabaseUrl,
-          supabaseServiceKey,
-          email,
-          firstName,
-          userPackage.package_name,
-          userPackage.total_sessions
-        );
-      }
     }
 
-    return new Response(JSON.stringify({
-      success: true,
-      appointment: {
-        id: appointment.id,
-        datetime: appointment.datetime,
-        type: appointment.type,
-        calendar: appointment.calendar,
-        firstName: appointment.firstName,
-        lastName: appointment.lastName,
-        email: appointment.email,
-      },
-      remainingSessions: userPackage.remaining_sessions - 1,
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 200,
-    });
+    return bookedResponse(appointment, newRemaining);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logStep("ERROR", { message: errorMessage });

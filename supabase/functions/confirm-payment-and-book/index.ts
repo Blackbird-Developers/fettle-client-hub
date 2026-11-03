@@ -2,10 +2,13 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 import { bookingConfirmationHtml, bookingConfirmationText, formatSessionWhen } from "../_shared/bookingConfirmationEmail.ts";
+import { forbidden, getCaller, isServiceRoleRequest, sameEmail, unauthorized } from "../_shared/auth.ts";
+import { requireSupportedAppVersion } from "../_shared/appVersion.ts";
+import { sendPushToEmail, sessionLink } from "../_shared/push.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-version",
 };
 
 const logStep = (step: string, details?: any) => {
@@ -93,6 +96,9 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const tooOld = requireSupportedAppVersion(req, corsHeaders);
+  if (tooOld) return tooOld;
+
   // Cleanup state, visible to the top-level catch. The chosen model is:
   // book Acuity first; keep the money only if booking succeeds, otherwise
   // return it. This guarantees that if ANYTHING throws after we reach the
@@ -131,8 +137,22 @@ serve(async (req) => {
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
     logStep("Retrieved PaymentIntent", {
       status: paymentIntent.status,
-      metadata: paymentIntent.metadata
+      appointmentTypeID: paymentIntent.metadata?.appointmentTypeID,
     });
+
+    // AUTH: the stripe-webhook backstop (service-role key), or the user who
+    // created this PI. New PIs carry metadata.userId (create-payment-intent);
+    // older ones only the booking email.
+    if (!isServiceRoleRequest(req)) {
+      const caller = await getCaller(req);
+      if (!caller) return unauthorized(corsHeaders);
+      const md = paymentIntent.metadata || {};
+      const owns = md.userId ? md.userId === caller.userId : sameEmail(md.email, caller.email);
+      if (!owns) {
+        logStep("Refused: PaymentIntent belongs to another user", { paymentIntentId });
+        return forbidden(corsHeaders, "This payment doesn't belong to your account.");
+      }
+    }
 
     // IDEMPOTENCY GUARD — this function can be invoked more than once for the
     // same PaymentIntent: the client call, the redirect-return handler, and the
@@ -659,6 +679,17 @@ serve(async (req) => {
       } catch (emailError) {
         logStep("Error sending confirmation email", { error: emailError });
       }
+    }
+
+    // Push to the app next to the email (best-effort, never throws).
+    if (!recoveredExistingAppointment && supabaseUrl && supabaseServiceKey) {
+      const { dateLabel, timeLabel } = formatSessionWhen(datetime, userTimezone);
+      await sendPushToEmail(createClient(supabaseUrl, supabaseServiceKey), email, "booking_updates", {
+        title: "Session booked",
+        body: `${appointmentTypeName || "Your session"}${assignedCalendarName ? ` with ${assignedCalendarName}` : ""}, ${dateLabel} at ${timeLabel}.`,
+        path: sessionLink(appointment.id),
+        data: { kind: "booking_confirmed", appointmentId: appointment.id },
+      });
     }
 
     // ── Referral credits (best-effort; must NEVER block/break the booking) ───

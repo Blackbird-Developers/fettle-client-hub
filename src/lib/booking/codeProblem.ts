@@ -50,6 +50,7 @@ const COUPON_MESSAGES: Record<string, string> = {
     acuity_unsupported: `This code can't be applied here. Email ${SUPPORT_EMAIL} and we'll apply it for you.`,
     not_for_bundles: 'Loyalty rewards can be used on single sessions, not on bundles.',
     website_only: "This code can't be used in the client portal.",
+    not_for_clinical: "Psychiatry and assessment sessions are full price, so codes can't be used on them.",
 };
 
 export function couponProblem(code: string, couponRejected: string): CodeProblem {

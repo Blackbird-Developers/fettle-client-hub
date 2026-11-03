@@ -1,10 +1,12 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { getCaller, isServiceRoleRequest, unauthorized } from "../_shared/auth.ts";
+import { requireSupportedAppVersion } from "../_shared/appVersion.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-version",
 };
 
 const ACUITY_API_BASE = "https://acuityscheduling.com/api/v1";
@@ -254,6 +256,9 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const tooOld = requireSupportedAppVersion(req, corsHeaders);
+  if (tooOld) return tooOld;
+
   try {
     logStep("Function started");
 
@@ -267,28 +272,19 @@ serve(async (req) => {
       throw new Error("Supabase configuration missing");
     }
 
-    // Resolve the caller. Two legitimate callers exist:
-    //   1. The browser, presenting the buyer's JWT.
-    //   2. The stripe-webhook backstop, server-to-server with the anon key —
-    //      Stripe cannot mint a Supabase JWT, so there is no user token to send.
-    // When a real user token is present we bind to it (and reject mismatches
-    // below). Otherwise we fall back to the PaymentIntent's userId, which is
-    // trustworthy: only create-package-payment-intent writes that metadata, and
-    // we read it back from Stripe with our own secret key.
-    const authHeader = req.headers.get("Authorization");
-    let jwtUserId: string | null = null;
+    // AUTH. Two legitimate callers:
+    //   1. The browser / app, presenting the buyer's JWT. We bind to it and
+    //      reject a PaymentIntent that belongs to someone else (below).
+    //   2. The stripe-webhook backstop, server-to-server with the service-role
+    //      key (Stripe cannot mint a Supabase JWT). The buyer then comes from
+    //      the PaymentIntent's userId, which only create-package-payment-intent
+    //      writes and which we read back from Stripe with our own key.
+    // The bare anon key used to be accepted as case 2; it no longer is.
+    const isBackstop = isServiceRoleRequest(req);
+    const jwtUserId: string | null = isBackstop ? null : (await getCaller(req))?.userId ?? null;
+    if (!isBackstop && !jwtUserId) return unauthorized(corsHeaders);
 
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "").trim();
-      // The anon key is not a user token — don't waste a round trip on it.
-      if (token && token !== supabaseAnonKey) {
-        const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
-        const { data: userData } = await supabaseAuth.auth.getUser(token);
-        jwtUserId = userData?.user?.id ?? null;
-      }
-    }
-
-    logStep(jwtUserId ? "Authenticated via user JWT" : "No user JWT — server-to-server call", { jwtUserId });
+    logStep(jwtUserId ? "Authenticated via user JWT" : "Service-role call (webhook backstop)", { jwtUserId });
 
     const body = await req.json();
     const { paymentIntentId } = body;
