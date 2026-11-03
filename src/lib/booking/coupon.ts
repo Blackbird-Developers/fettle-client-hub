@@ -25,6 +25,7 @@ const COUPON_REJECTIONS: Record<string, string> = {
     "This is a session-bundle code, but we couldn't link it to your account just now — please try again or email hello@fettle.ie.",
   acuity_unsupported: "This code can't be applied here. Email hello@fettle.ie and we'll apply it for you.",
   not_for_bundles: 'Loyalty rewards can be used on single sessions, not on bundles.',
+  website_only: "This code can't be used in the client portal.",
 };
 
 export function couponRejectionMessage(reason: string | null | undefined): string {

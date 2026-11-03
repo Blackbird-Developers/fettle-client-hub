@@ -31,6 +31,11 @@ const PACKAGES: Record<number, { name: string; sessions: number; price: number }
   1967869: { name: "Couples 5 x 60 min", sessions: 5, price: 575 },
 };
 
+// Promotion codes meant for new website customers only. TENOFF has no Stripe
+// first-time restriction, so without this every portal client could take it
+// off a bundle (same list as create-payment-intent).
+const WEBSITE_ONLY_CODES = new Set(["TENOFF"]);
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -98,6 +103,8 @@ serve(async (req) => {
     if (normalizedCoupon) {
       if (normalizedCoupon.startsWith("FETTLELOYALTY")) {
         couponRejected = "not_for_bundles";
+      } else if (WEBSITE_ONLY_CODES.has(normalizedCoupon)) {
+        couponRejected = "website_only";
       } else {
         const promo = await checkStripePromoCode(stripe, trimmedCoupon, originalAmount);
         if (promo.ok) {
