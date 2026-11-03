@@ -31,6 +31,52 @@ const LOYALTY_COUPONS: Record<string, { achievementId: string }> = {
 // booking still goes ahead.
 const WEBSITE_ONLY_CODES = new Set(["TENOFF"]);
 
+// Session types sold at a different price than their Acuity record lists.
+// Must match priceOverride in src/lib/assessments.ts.
+const PRICE_OVERRIDES: Record<string, string> = {
+  "94856237": "140.00", // Addiction Assessment
+};
+
+// The price always comes from Acuity (plus the overrides above), never from
+// the request, so a client can't change it in the browser and pay less.
+async function lookUpSessionPrice(
+  appointmentTypeID: string,
+): Promise<{ price: number; name: string } | null> {
+  const acuityUserId = Deno.env.get("ACUITY_USER_ID");
+  const acuityApiKey = Deno.env.get("ACUITY_API_KEY");
+  if (!acuityUserId || !acuityApiKey) {
+    throw new Error("Our booking system is temporarily unavailable. Please contact hello@fettle.ie for support.");
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  let types: any[];
+  try {
+    const resp = await fetch("https://acuityscheduling.com/api/v1/appointment-types", {
+      headers: {
+        Authorization: `Basic ${btoa(`${acuityUserId}:${acuityApiKey}`)}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+    });
+    if (!resp.ok) throw new Error(`Acuity responded ${resp.status}`);
+    types = await resp.json();
+  } catch (e) {
+    logStep("Appointment type lookup failed", { error: String(e) });
+    throw new Error("We couldn't check the session price just now. Please try again in a moment.");
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  const type = Array.isArray(types)
+    ? types.find((t) => String(t?.id) === appointmentTypeID)
+    : undefined;
+  if (!type) return null;
+
+  const price = parseFloat(PRICE_OVERRIDES[appointmentTypeID] ?? String(type.price ?? "0"));
+  return { price, name: String(type.name ?? "") };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -91,14 +137,21 @@ serve(async (req) => {
       throw new Error("Please fill in all required booking details (name, email, session type, and time).");
     }
 
-    // Parse price - Acuity returns price as string like "72.99"
-    const priceValue = parseFloat(appointmentTypePrice || "0");
-    logStep("Price parsing", { 
-      rawPrice: appointmentTypePrice, 
-      parsedPrice: priceValue 
+    // Price from Acuity, not from the request. appointmentTypePrice is only
+    // logged, so a mismatch (an old page, or someone editing it) shows up.
+    const session = await lookUpSessionPrice(String(appointmentTypeID));
+    if (!session) {
+      throw new Error("This session type isn't available to book. Please contact hello@fettle.ie for support.");
+    }
+    const priceValue = session.price;
+    logStep("Price from Acuity", {
+      appointmentTypeID,
+      price: priceValue,
+      sentByBrowser: appointmentTypePrice,
+      mismatch: parseFloat(appointmentTypePrice || "0") !== priceValue,
     });
-    
-    if (priceValue <= 0) {
+
+    if (!(priceValue > 0)) {
       throw new Error("This session type does not have a valid price. Please contact hello@fettle.ie for support.");
     }
 
