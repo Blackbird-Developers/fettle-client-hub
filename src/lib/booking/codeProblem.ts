@@ -49,6 +49,7 @@ const COUPON_MESSAGES: Record<string, string> = {
     acuity_package_code: `This is a session-bundle code, but we couldn't link it to your account just now. Please try again or email ${SUPPORT_EMAIL}.`,
     acuity_unsupported: `This code can't be applied here. Email ${SUPPORT_EMAIL} and we'll apply it for you.`,
     not_for_bundles: 'Loyalty rewards can be used on single sessions, not on bundles.',
+    website_only: "This code can't be used in the client portal.",
 };
 
 export function couponProblem(code: string, couponRejected: string): CodeProblem {
