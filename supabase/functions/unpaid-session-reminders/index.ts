@@ -104,8 +104,9 @@ interface DueSession {
   firstName: string;
 }
 
-// Same structure, colors and footer as the house transactional template in
-// send-booking-confirmation — clients should not be able to tell these apart.
+// Kept from the earlier house transactional template (send-booking-confirmation
+// used to share it). Booking confirmations now use
+// _shared/bookingConfirmationEmail.ts in Fettle’s email style.
 function reminderEmailHtml(firstName: string, sessions: DueSession[]): string {
   const details = sessions.map((s) => `
       <div style="background: #faf8f5; border-radius: 12px; padding: 24px; margin-bottom: 24px;">

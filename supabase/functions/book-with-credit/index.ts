@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { bookingConfirmationHtml, bookingConfirmationText, formatSessionWhen } from "../_shared/bookingConfirmationEmail.ts";
 
 // ============================================================================
 // book-with-credit — book a session that is FULLY covered by referral credit
@@ -160,10 +161,15 @@ serve(async (req) => {
     // ── Confirmation email (best-effort) ──────────────────────────────────────
     if (resendApiKey) {
       try {
-        const tz = timezone || "Europe/Dublin";
-        const d = new Date(datetime);
-        const fDate = d.toLocaleDateString("en-IE", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: tz });
-        const fTime = d.toLocaleTimeString("en-IE", { hour: "2-digit", minute: "2-digit", timeZone: tz });
+        const { dateLabel: fDate, timeLabel } = formatSessionWhen(datetime, timezone);
+        const emailInput = {
+          firstName,
+          sessionType: appointmentTypeName || "Therapy Session",
+          therapistName: calendarName || "",
+          dateLabel: fDate,
+          timeLabel,
+          payment: { kind: "referral" as const },
+        };
         await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { "Authorization": `Bearer ${resendApiKey}`, "Content-Type": "application/json" },
@@ -171,22 +177,8 @@ serve(async (req) => {
             from: "Fettle <noreply@notifications.fettle.ie>",
             to: [email],
             subject: `Booking Confirmed: ${appointmentTypeName || "Therapy Session"} on ${fDate}`,
-            html: `
-              <div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333;">
-                <h2 style="color:#d2691e;">Booking Confirmed ✓</h2>
-                <p>Hi ${firstName},</p>
-                <p>Your therapy session has been booked.</p>
-                <div style="background:#f8f9fa;padding:16px;border-radius:8px;border-left:4px solid #d2691e;">
-                  <p style="margin:4px 0;"><strong>Session:</strong> ${appointmentTypeName || "Therapy Session"}</p>
-                  <p style="margin:4px 0;"><strong>Therapist:</strong> ${calendarName || "Your therapist"}</p>
-                  <p style="margin:4px 0;"><strong>Date:</strong> ${fDate}</p>
-                  <p style="margin:4px 0;"><strong>Time:</strong> ${fTime}</p>
-                </div>
-                <div style="background:#e8f5e9;padding:12px;border-radius:8px;margin-top:12px;color:#2e7d32;">
-                  <strong>Paid with referral credit</strong> — €0.00 charged.
-                </div>
-                <p style="font-size:13px;color:#666;margin-top:16px;">Need to reschedule or cancel? Contact us at least 24 hours before your appointment.</p>
-              </div>`,
+            html: bookingConfirmationHtml(emailInput),
+            text: bookingConfirmationText(emailInput),
           }),
         });
       } catch (e) { logStep("Email send failed (non-fatal)", { error: String(e) }); }

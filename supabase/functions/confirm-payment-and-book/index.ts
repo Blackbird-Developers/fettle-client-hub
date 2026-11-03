@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { bookingConfirmationHtml, bookingConfirmationText, formatSessionWhen } from "../_shared/bookingConfirmationEmail.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -624,62 +625,15 @@ serve(async (req) => {
     // confirmed it, so a second email would just confuse the customer.
     if (resendApiKey && !recoveredExistingAppointment) {
       try {
-        const sessionDate = new Date(datetime);
-        const formattedDate = sessionDate.toLocaleDateString('en-IE', {
-          weekday: 'long',
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-          timeZone: userTimezone,
-        });
-        const formattedTime = sessionDate.toLocaleTimeString('en-IE', {
-          hour: '2-digit',
-          minute: '2-digit',
-          timeZone: userTimezone,
-        });
-        const timezoneAbbr = sessionDate.toLocaleTimeString('en-IE', {
-          timeZoneName: 'short',
-          timeZone: userTimezone,
-        }).split(' ').pop() || '';
-
-        const amountPaid = (paymentIntent.amount / 100).toFixed(2);
-
-        const emailHtml = `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          </head>
-          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-              <h1 style="color: white; margin: 0; font-size: 24px;">Booking Confirmed ✓</h1>
-            </div>
-            <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 12px 12px;">
-              <p style="font-size: 16px; margin-bottom: 20px;">Hi ${firstName},</p>
-              <p style="font-size: 16px; margin-bottom: 20px;">Your ${appointmentTypeName || 'therapy session'} has been successfully booked and paid for.</p>
-
-              <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #667eea;">
-                <h3 style="margin: 0 0 15px 0; color: #667eea;">Session Details</h3>
-                <p style="margin: 5px 0;"><strong>Session:</strong> ${appointmentTypeName || 'Therapy Session'}</p>
-                <p style="margin: 5px 0;"><strong>Therapist:</strong> ${assignedCalendarName || 'Your therapist'}</p>
-                <p style="margin: 5px 0;"><strong>Date:</strong> ${formattedDate}</p>
-                <p style="margin: 5px 0;"><strong>Time:</strong> ${formattedTime} ${timezoneAbbr}</p>
-              </div>
-
-              <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                <p style="margin: 0; color: #2e7d32;"><strong>Amount Paid:</strong> €${amountPaid}</p>
-                ${receiptUrl ? `<p style="margin: 10px 0 0 0;"><a href="${receiptUrl}" style="color: #667eea;">View Receipt</a></p>` : ''}
-              </div>
-
-              <p style="font-size: 14px; color: #666;">If you need to reschedule or cancel, please contact us at least 24 hours before your appointment.</p>
-
-              <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-              <p style="font-size: 12px; color: #999; text-align: center;">Fettle Therapy</p>
-            </div>
-          </body>
-          </html>
-        `;
+        const { dateLabel: formattedDate, timeLabel } = formatSessionWhen(datetime, userTimezone);
+        const emailInput = {
+          firstName,
+          sessionType: appointmentTypeName || "Therapy Session",
+          therapistName: assignedCalendarName || "",
+          dateLabel: formattedDate,
+          timeLabel,
+          payment: { kind: "card" as const, amountCents: paymentIntent.amount, receiptUrl },
+        };
 
         const emailResponse = await fetch("https://api.resend.com/emails", {
           method: "POST",
@@ -691,7 +645,8 @@ serve(async (req) => {
             from: "Fettle <noreply@notifications.fettle.ie>",
             to: [email],
             subject: `Booking Confirmed: ${appointmentTypeName || 'Therapy Session'} on ${formattedDate}`,
-            html: emailHtml,
+            html: bookingConfirmationHtml(emailInput),
+            text: bookingConfirmationText(emailInput),
           }),
         });
 
