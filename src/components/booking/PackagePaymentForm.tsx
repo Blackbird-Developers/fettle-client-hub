@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Lock, CreditCard, CheckCircle, Gift } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { trackBundlePurchased } from '@/lib/booking/funnel';
 
 interface PackagePaymentFormProps {
   paymentIntentId: string;
@@ -94,6 +95,7 @@ export function PackagePaymentForm({
         if (error) throw error;
         if (data.error) throw new Error(data.error);
 
+        trackBundlePurchased(paymentIntentId, { package_id: data.package?.name ?? packageName, amount: amount / 100 });
         onSuccess(data);
       } else if (paymentIntent?.status === 'processing') {
         // Some payment methods (bank debits) take time to process
