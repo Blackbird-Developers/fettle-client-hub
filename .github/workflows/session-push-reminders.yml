@@ -2,11 +2,16 @@
 # before each session (session-reminders, mode "upcoming"). The function
 # records every reminder it sends, so each one goes out once. Clients without
 # the app are skipped; Acuity's own reminder emails are unchanged.
+#
+# The schedule is OFF until the new session-reminders function is deployed.
+# The live (old) version ignores "mode" and emails every inactive client, so
+# running it every 15 minutes would email them every 15 minutes. After the
+# deploy, uncomment the two schedule lines (docs/ernest-handoff.md, step 7).
 name: Session push reminders
 
 on:
-  schedule:
-    - cron: "*/15 * * * *"
+  # schedule:
+  #   - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 jobs:
