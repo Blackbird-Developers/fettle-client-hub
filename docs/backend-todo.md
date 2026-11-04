@@ -1,4 +1,4 @@
-# Handoff for Ernest: deploy the MyFettle app backend
+# Backend TODO: deploy the MyFettle app backend
 
 **From:** Buna, out for 2 days. **For:** Ernest (Supabase access).
 
