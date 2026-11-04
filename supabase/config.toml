@@ -89,3 +89,9 @@ verify_jwt = false
 # function checks itself.
 [functions.sales-tasks]
 verify_jwt = false
+
+# Public: the website's booking form and the hub send anonymous funnel step
+# events to it. Visitors aren't logged in; the function checks the origin,
+# only keeps known events/fields and rate-limits per IP instead.
+[functions.track-booking-funnel]
+verify_jwt = false

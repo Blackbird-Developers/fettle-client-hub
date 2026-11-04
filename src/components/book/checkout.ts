@@ -5,6 +5,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { IntakeField } from '@/lib/booking/intake';
 import { type BookingFailure, describeBookingFailure, functionErrorMessage } from '@/lib/booking/payment';
+import { trackBundlePurchased } from '@/lib/booking/funnel';
 
 /** Booking fields shared by every path (the functions read the same names). */
 export interface BookingRequest {
@@ -181,6 +182,7 @@ export async function confirmBundlePayment(
   if (error || hasError(data) || data?.success === false || !data?.package?.id) {
     return { ok: false, message: await functionErrorMessage(error, data) };
   }
+  trackBundlePurchased(paymentIntentId, { package_id: data.package.name ?? null });
   return { ok: true, packageId: String(data.package.id), remaining: Number(data.package.remaining ?? 0) };
 }
 

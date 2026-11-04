@@ -7,6 +7,7 @@ import { readCachedAdminData, writeCachedAdminData } from "@/lib/adminDataCache"
 import { type AdminDataSource, timeLoad } from "@/lib/adminLoadProgress";
 import { normalizeProgression } from "@/lib/customerInsights";
 import type { AnalyticsCustomersResponse, AnalyticsResponse } from "@/lib/adminAnalytics";
+import type { FunnelResponse } from "@/lib/adminFunnel";
 import {
   type CustomerFollowup,
   type FollowupPatch,
@@ -587,12 +588,26 @@ export function useClinical() {
 // The Overview analytics boards, counted from the saved copy of Acuity's
 // appointments (quick, so no progress loader). `query` is analyticsQuery()'s
 // output; the previous numbers stay on screen while new settings load.
-export function useAdminAnalytics(query: string) {
+export function useAdminAnalytics(query: string, enabled = true) {
   const { data: isAdmin } = useIsAdmin();
   return useQuery<AnalyticsResponse, ApiError>({
     queryKey: ["admin-analytics", query],
     queryFn: () => fetchAdminFunction("admin-analytics", query),
-    enabled: isAdmin === true,
+    enabled: isAdmin === true && enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+    retry: ACUITY_QUERY_OPTIONS.retry,
+  });
+}
+
+// The Booking funnel tab (admin-analytics?action=funnel).
+export function useAdminFunnel(query: string, enabled = true) {
+  const { data: isAdmin } = useIsAdmin();
+  return useQuery<FunnelResponse, ApiError>({
+    queryKey: ["admin-analytics-funnel", query],
+    queryFn: () => fetchAdminFunction("admin-analytics", query),
+    enabled: isAdmin === true && enabled,
     placeholderData: keepPreviousData,
     staleTime: 1000 * 60 * 5,
     refetchOnWindowFocus: false,
