@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { SETTLEMENT_RETURN_PARAM } from '@/hooks/useUnpaidSessions';
 import { WIZARD_RETURN_PARAM } from '@/lib/booking/payment';
+import { trackBundlePurchased } from '@/lib/booking/funnel';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
 
@@ -114,6 +115,7 @@ export function usePaymentRedirectReturn() {
 
           if (!packageResult.error && packageResult.data && !packageResult.data.error) {
             console.log('confirm-package-payment succeeded');
+            trackBundlePurchased(paymentIntentId, { package_id: packageResult.data.package?.name ?? null });
             toast({
               title: 'Package Confirmed!',
               description: 'Your package has been activated successfully.',
@@ -180,6 +182,7 @@ export function usePaymentRedirectReturn() {
       });
       if (fnError) throw fnError;
       if (data.error) throw new Error(data.error);
+      trackBundlePurchased(paymentIntentId, { package_id: data.package?.name ?? null });
 
       toast({
         title: 'Package Confirmed!',

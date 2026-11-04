@@ -38,6 +38,7 @@ import {
   isDate,
 } from "../../../../supabase/functions/admin-analytics/logic.ts";
 import { CustomersBoard } from "./CustomersBoard";
+import { FunnelBoard } from "./FunnelBoard";
 import { ProgressionBoard } from "./ProgressionBoard";
 
 const SETTINGS_KEYS = [
@@ -123,12 +124,14 @@ function BoardsSkeleton() {
   );
 }
 
-/** The Overview's analytics: shared controls, then the Progression and Customers boards. */
+/** The Overview's analytics: shared controls, then the Progression, Customers and Booking funnel boards. */
 export function AnalyticsBoards() {
   const [searchParams, setSearchParams] = useSearchParams();
   const today = todayInDublin();
   const settings = useMemo(() => readBoardSettings(searchParams, today), [searchParams, today]);
-  const { data, error, isPending, isFetching, refetch } = useAdminAnalytics(analyticsQuery(settings));
+  // The funnel tab has its own data and filters; only the date range is shared.
+  const isFunnel = settings.board === "funnel";
+  const { data, error, isPending, isFetching, refetch } = useAdminAnalytics(analyticsQuery(settings), !isFunnel);
   const calendars = [...(data?.data.calendars ?? [])];
   // A calendar from a shared link that the list no longer has still shows.
   if (settings.filters.calendarId !== null && !calendars.some((c) => c.id === settings.filters.calendarId)) {
@@ -157,7 +160,7 @@ export function AnalyticsBoards() {
             Analytics
           </h3>
           <p className="text-sm text-foreground">{formatRange(settings.range)}</p>
-          {settings.range.from === TRACKING_START && (
+          {!isFunnel && settings.range.from === TRACKING_START && (
             <p className="text-xs text-muted-foreground">Figures start on {formatFullDay(TRACKING_START)}.</p>
           )}
         </div>
@@ -179,92 +182,96 @@ export function AnalyticsBoards() {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-1">
-            <span id="analytics-group" className="block text-xs font-medium">
-              Group by
-            </span>
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              size="sm"
-              value={settings.groupBy}
-              onValueChange={(value) => value && update({ groupBy: value as BoardSettings["groupBy"], groupByChosen: true })}
-              aria-labelledby="analytics-group"
-            >
-              <ToggleGroupItem value="week" className="h-9 text-xs">
-                Week
-              </ToggleGroupItem>
-              <ToggleGroupItem value="month" className="h-9 text-xs">
-                Month
-              </ToggleGroupItem>
-            </ToggleGroup>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="analytics-type" className="text-xs">
-              Session type
-            </Label>
-            <Select
-              value={settings.filters.category ?? ALL}
-              onValueChange={(value) =>
-                update({
-                  filters: { ...settings.filters, category: value === ALL ? null : (value as SessionCategory) },
-                })
-              }
-            >
-              <SelectTrigger id="analytics-type" className="h-9 w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All types</SelectItem>
-                {SESSION_CATEGORIES.map((category) => (
-                  <SelectItem key={category} value={category}>
-                    {CATEGORY_LABELS[category]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="analytics-calendar" className="text-xs">
-              Calendar
-            </Label>
-            <Select
-              value={settings.filters.calendarId === null ? ALL : String(settings.filters.calendarId)}
-              onValueChange={(value) =>
-                update({ filters: { ...settings.filters, calendarId: value === ALL ? null : Number(value) } })
-              }
-              disabled={!data && settings.filters.calendarId === null}
-            >
-              <SelectTrigger id="analytics-calendar" className="h-9 w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All calendars</SelectItem>
-                {calendars.map((calendar) => (
-                  <SelectItem key={calendar.id} value={String(calendar.id)}>
-                    {calendar.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="analytics-compare" className="text-xs">
-              Compare to
-            </Label>
-            <Select
-              value={settings.compareTo}
-              onValueChange={(value) => update({ compareTo: value as BoardSettings["compareTo"] })}
-            >
-              <SelectTrigger id="analytics-compare" className="h-9 w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="previous">Previous period</SelectItem>
-                <SelectItem value="year">Same period last year</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {!isFunnel && (
+            <>
+              <div className="space-y-1">
+                <span id="analytics-group" className="block text-xs font-medium">
+                  Group by
+                </span>
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  size="sm"
+                  value={settings.groupBy}
+                  onValueChange={(value) => value && update({ groupBy: value as BoardSettings["groupBy"], groupByChosen: true })}
+                  aria-labelledby="analytics-group"
+                >
+                  <ToggleGroupItem value="week" className="h-9 text-xs">
+                    Week
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="month" className="h-9 text-xs">
+                    Month
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="analytics-type" className="text-xs">
+                  Session type
+                </Label>
+                <Select
+                  value={settings.filters.category ?? ALL}
+                  onValueChange={(value) =>
+                    update({
+                      filters: { ...settings.filters, category: value === ALL ? null : (value as SessionCategory) },
+                    })
+                  }
+                >
+                  <SelectTrigger id="analytics-type" className="h-9 w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>All types</SelectItem>
+                    {SESSION_CATEGORIES.map((category) => (
+                      <SelectItem key={category} value={category}>
+                        {CATEGORY_LABELS[category]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="analytics-calendar" className="text-xs">
+                  Calendar
+                </Label>
+                <Select
+                  value={settings.filters.calendarId === null ? ALL : String(settings.filters.calendarId)}
+                  onValueChange={(value) =>
+                    update({ filters: { ...settings.filters, calendarId: value === ALL ? null : Number(value) } })
+                  }
+                  disabled={!data && settings.filters.calendarId === null}
+                >
+                  <SelectTrigger id="analytics-calendar" className="h-9 w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>All calendars</SelectItem>
+                    {calendars.map((calendar) => (
+                      <SelectItem key={calendar.id} value={String(calendar.id)}>
+                        {calendar.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="analytics-compare" className="text-xs">
+                  Compare to
+                </Label>
+                <Select
+                  value={settings.compareTo}
+                  onValueChange={(value) => update({ compareTo: value as BoardSettings["compareTo"] })}
+                >
+                  <SelectTrigger id="analytics-compare" className="h-9 w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="previous">Previous period</SelectItem>
+                    <SelectItem value="year">Same period last year</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -281,7 +288,11 @@ export function AnalyticsBoards() {
           ))}
         </TabsList>
 
-        {isPending ? (
+        {isFunnel ? (
+          <TabsContent value="funnel" className="mt-0">
+            <FunnelBoard range={settings.range} />
+          </TabsContent>
+        ) : isPending ? (
           <BoardsSkeleton />
         ) : error && !data ? (
           <Alert variant="destructive">

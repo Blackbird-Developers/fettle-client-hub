@@ -8,6 +8,9 @@
 //       → the numbers for both boards (no names or contact details)
 //   GET ?action=customers&segment=…&from&to&basis[&returning][&type][&calendar]
 //       → the customers behind one number on the Customers board
+//   GET ?action=funnel&from&to[&flow][&device][&path][&service][&therapist]
+//       → the Booking funnel tab (anonymous counts from booking_funnel_events,
+//         see ./funnel.ts and docs/BOOKING_FUNNEL_TRACKING.md)
 //
 // PRIVACY: the customers response holds client names, emails and phones for
 // admins; logs stay counts-only. All definitions live in ./logic.ts (tested).
@@ -34,6 +37,7 @@ import {
   returningMinGapDays,
   segmentMembers,
 } from "./logic.ts";
+import { funnelReport, parseFunnelParams, parseFunnelRows, queryBounds } from "./funnel.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -134,6 +138,30 @@ serve(async (req) => {
     }
 
     const search = new URL(req.url).searchParams;
+
+    // Booking funnel tab: its own data (booking_funnel_events), not the Acuity copy.
+    if (search.get("action") === "funnel") {
+      const funnelParams = parseFunnelParams(search);
+      if (typeof funnelParams === "string") return json({ error: funnelParams }, 400);
+      const startedAt = Date.now();
+      const db = createClient(supabaseUrl, supabaseServiceKey);
+      const bounds = queryBounds(funnelParams.range);
+      const [{ data: raw, error: rowsError }, { data: trackingStart, error: startError }] = await Promise.all([
+        db.rpc("admin_funnel_sessions", { p_from: bounds.from, p_to: bounds.to }),
+        db.rpc("admin_funnel_tracking_start"),
+      ]);
+      if (rowsError) throw new Error(`Failed to read funnel sessions: ${rowsError.code}`);
+      if (startError) throw new Error(`Failed to read tracking start: ${startError.code}`);
+      const report = funnelReport(parseFunnelRows(raw), funnelParams);
+      console.log("admin-analytics funnel", { sessions: report.sessions, durationMs: Date.now() - startedAt });
+      return json({
+        generatedAt: new Date().toISOString(),
+        trackingStart: trackingStart ?? null,
+        params: funnelParams,
+        funnel: report,
+      });
+    }
+
     const params = parseAnalyticsParams(search);
     if (typeof params === "string") return json({ error: params }, 400);
 

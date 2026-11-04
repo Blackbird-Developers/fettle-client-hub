@@ -167,6 +167,7 @@ function presetDates(preset: RangePreset, today: string): DateRange | null {
 export const BOARDS = [
   { id: "progression", label: "Progression" },
   { id: "customers", label: "Customers" },
+  { id: "funnel", label: "Booking funnel" },
 ] as const;
 
 export type Board = (typeof BOARDS)[number]["id"];
