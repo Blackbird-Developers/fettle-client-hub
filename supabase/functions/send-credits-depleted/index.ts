@@ -1,5 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { Resend } from "https://esm.sh/resend@2.0.0";
+import { isServiceRoleRequest } from "../_shared/serviceAuth.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { sendPushToEmail } from "../_shared/push.ts";
+
+// AUTH: service-role key only. Called by book-with-package; with the anon key
+// it was an open relay for Fettle-branded email to any address.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -21,6 +27,13 @@ interface CreditsDepletedRequest {
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  if (!isServiceRoleRequest(req)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   try {
@@ -113,6 +126,18 @@ serve(async (req) => {
     });
 
     logStep("Credits depleted email sent successfully");
+
+    // Push to the app next to the email (best-effort, never throws).
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (supabaseUrl && serviceKey) {
+      await sendPushToEmail(createClient(supabaseUrl, serviceKey), email, "credit_updates", {
+        title: "Bundle complete",
+        body: `You've used all ${totalSessionsCompleted} sessions of your ${packageName}. Tap to book your next one.`,
+        path: "",
+        data: { kind: "credits_depleted" },
+      });
+    }
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

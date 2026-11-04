@@ -8,7 +8,7 @@ export type PackageCategory = 'individual' | 'youth' | 'couples';
 // This MUST stay in sync with:
 //   - the PACKAGES array in PackageBookingModal.tsx
 //   - the PACKAGE_CATEGORY maps in supabase/functions/confirm-package-payment,
-//     verify-package-payment, sync-acuity-packages, and book-with-package
+//     sync-acuity-packages, book-with-package and pay-session
 const PACKAGE_CATEGORY_BY_ID: Record<string, PackageCategory> = {
   '1122832': 'individual', // 3 Session Bundle
   '996385': 'individual',  // 6 Session Bundle

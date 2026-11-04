@@ -1,6 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 import { bookingConfirmationHtml, bookingConfirmationText, formatSessionWhen } from "../_shared/bookingConfirmationEmail.ts";
+import { requireSupportedAppVersion } from "../_shared/appVersion.ts";
+import { lookUpSessionPrice } from "../_shared/sessionPrice.ts";
+import { claimOnce, findOwnAppointmentAt } from "../_shared/bookingRetry.ts";
+import { CLINICAL_CARD_ONLY_MESSAGE, isClinicalTypeName } from "../_shared/clinical.ts";
+import { sendPushToEmail, sessionLink } from "../_shared/push.ts";
 
 // ============================================================================
 // book-with-credit — book a session that is FULLY covered by referral credit
@@ -17,7 +22,7 @@ import { bookingConfirmationHtml, bookingConfirmationText, formatSessionWhen } f
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-version",
 };
 
 const logStep = (step: string, details?: any) => {
@@ -29,6 +34,9 @@ serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  const tooOld = requireSupportedAppVersion(req, corsHeaders);
+  if (tooOld) return tooOld;
 
   try {
     logStep("Function started");
@@ -72,10 +80,50 @@ serve(async (req) => {
       throw new Error("Please fill in all required booking details.");
     }
 
-    const priceCents = Math.round(parseFloat(appointmentTypePrice || "0") * 100);
+    // Price from Acuity, not the request (it used to be trusted, so a client
+    // could book an expensive session for a little credit).
+    const session = await lookUpSessionPrice(String(appointmentTypeID));
+    if (!session) throw new Error("This session type isn't available to book. Please contact hello@fettle.ie for support.");
+    if (isClinicalTypeName(session.name)) throw new Error(CLINICAL_CARD_ONLY_MESSAGE);
+    const priceCents = Math.round(session.price * 100);
     if (priceCents <= 0) throw new Error("This session type does not have a valid price.");
+    if (appointmentTypePrice && Math.round(parseFloat(appointmentTypePrice) * 100) !== priceCents) {
+      logStep("Price sent by client differs from Acuity", { sent: appointmentTypePrice, priceCents });
+    }
 
     const admin = createClient(supabaseUrl, serviceKey);
+    const acuityAuth = btoa(`${acuityUserId}:${acuityApiKey}`);
+
+    // ── Retry safety ─────────────────────────────────────────────────────────
+    // A retry that arrives after the first call finished finds that booking
+    // and returns it instead of failing. Concurrent duplicates get 409 from
+    // the claim (one invocation per user + start time).
+    const prior = await findOwnAppointmentAt(acuityAuth, email, datetime);
+    if (prior.appointment) {
+      const { data: redemption } = await admin
+        .from("referral_redemptions").select("id")
+        .eq("booking_ref", String(prior.appointment.id)).limit(1);
+      if (redemption && redemption.length > 0) {
+        logStep("Retry: already booked with credit — returning it", { appointmentId: prior.appointment.id });
+        return new Response(JSON.stringify({
+          success: true,
+          alreadyBooked: true,
+          appointment: {
+            id: prior.appointment.id,
+            datetime: prior.appointment.datetime,
+            type: prior.appointment.type,
+            therapist: prior.appointment.calendar,
+          },
+          creditRedeemed: 0,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+      }
+    }
+    if (!(await claimOnce(admin, `credit:${userId}:${datetime}`))) {
+      return new Response(JSON.stringify({
+        error: "This booking is already being made. Please wait a moment and check your sessions.",
+        code: "in_progress",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 409 });
+    }
 
     // ── Server-side guard: credit must actually cover the full price ──────────
     const { data: balData, error: balErr } = await admin.rpc("referral_available_balance", { uid: userId });
@@ -86,7 +134,6 @@ serve(async (req) => {
     }
 
     // ── Create the Acuity appointment (adaptive intake-field retry) ───────────
-    const acuityAuth = btoa(`${acuityUserId}:${acuityApiKey}`);
     const appointmentBody: Record<string, any> = {
       appointmentTypeID: parseInt(appointmentTypeID),
       datetime,
@@ -182,6 +229,17 @@ serve(async (req) => {
           }),
         });
       } catch (e) { logStep("Email send failed (non-fatal)", { error: String(e) }); }
+    }
+
+    // Push to the app next to the email (best-effort, never throws).
+    {
+      const { dateLabel, timeLabel } = formatSessionWhen(datetime, timezone);
+      await sendPushToEmail(admin, email, "booking_updates", {
+        title: "Session booked",
+        body: `${appointmentTypeName || "Your session"}${calendarName ? ` with ${calendarName}` : ""}, ${dateLabel} at ${timeLabel}. Paid with referral credit.`,
+        path: sessionLink(appointment.id),
+        data: { kind: "booking_confirmed", appointmentId: appointment.id },
+      });
     }
 
     return new Response(JSON.stringify({

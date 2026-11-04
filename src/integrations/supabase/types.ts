@@ -746,20 +746,23 @@ export type Database = {
       user_roles: {
         Row: {
           created_at: string
+          created_by: string | null
           id: string
-          role: Database["public"]["Enums"]["app_role"]
+          role: string
           user_id: string
         }
         Insert: {
           created_at?: string
+          created_by?: string | null
           id?: string
-          role: Database["public"]["Enums"]["app_role"]
+          role?: string
           user_id: string
         }
         Update: {
           created_at?: string
+          created_by?: string | null
           id?: string
-          role?: Database["public"]["Enums"]["app_role"]
+          role?: string
           user_id?: string
         }
         Relationships: []
@@ -782,11 +785,12 @@ export type Database = {
         }
         Returns: Database["public"]["Tables"]["sales_tasks"]["Row"]
       }
+      get_user_roles: {
+        Args: never
+        Returns: { role: string }[]
+      }
       has_role: {
-        Args: {
-          _role: Database["public"]["Enums"]["app_role"]
-          _user_id: string
-        }
+        Args: { check_role: string }
         Returns: boolean
       }
       restart_no_answer_sequence: {
@@ -813,7 +817,6 @@ export type Database = {
         | "session_completed"
         | "session_cancelled"
         | "profile_updated"
-      app_role: "admin" | "moderator" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -947,7 +950,6 @@ export const Constants = {
         "session_cancelled",
         "profile_updated",
       ],
-      app_role: ["admin", "moderator", "user"],
     },
   },
 } as const

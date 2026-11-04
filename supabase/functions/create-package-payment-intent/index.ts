@@ -2,10 +2,12 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 import { checkStripePromoCode } from "../_shared/stripePromoCode.ts";
+import { requireSupportedAppVersion } from "../_shared/appVersion.ts";
+import { paymentSheetFields } from "../_shared/paymentSheet.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-version",
 };
 
 const logStep = (step: string, details?: any) => {
@@ -40,6 +42,9 @@ serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  const tooOld = requireSupportedAppVersion(req, corsHeaders);
+  if (tooOld) return tooOld;
 
   try {
     logStep("Function started");
@@ -251,9 +256,14 @@ serve(async (req) => {
       livemode: paymentIntent.livemode 
     });
 
+    // For the app's PaymentSheet; null unless the buyer email is the caller's own.
+    const sheet = await paymentSheetFields(stripe, customerId, email, userEmail);
+
     return new Response(JSON.stringify({ 
       clientSecret: paymentIntent.client_secret,
       paymentIntentId: paymentIntent.id,
+      customerId: sheet.customerId,
+      ephemeralKey: sheet.ephemeralKey,
       amount: amountInCents,
       livemode: paymentIntent.livemode,
       packageName: packageInfo.name,

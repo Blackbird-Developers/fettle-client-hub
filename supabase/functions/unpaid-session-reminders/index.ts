@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { Resend } from "https://esm.sh/resend@2.0.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { sendPushToEmail, sessionLink } from "../_shared/push.ts";
+import { formatSessionWhen } from "../_shared/bookingConfirmationEmail.ts";
 
 // unpaid-session-reminders — daily payment nudges for upcoming unpaid sessions,
 // 4/3/2/1 days before the appointment.
@@ -394,6 +396,18 @@ serve(async (req) => {
         const stamp = now.toISOString();
         for (const s of sessions) sentLog[`${s.id}:${s.daysBefore}`] = stamp;
         logStep("Reminder sent", { to: maskEmail(email), appointments: sessions.map((s) => s.id) });
+
+        // Same reminder as a push to the app (best-effort, never throws). It
+        // rides on the email's sent-log, so it goes out once per email.
+        const first = sessions[0];
+        await sendPushToEmail(admin, email, "payment_reminders", {
+          title: plural ? "Sessions waiting for payment" : "Session waiting for payment",
+          body: plural
+            ? `${sessions.length} upcoming sessions still need paying. Tap to pay.`
+            : `Your ${first.type || "session"} on ${formatSessionWhen(first.datetime).dateLabel} still needs paying. Tap to pay.`,
+          path: plural ? "sessions" : sessionLink(first.id),
+          data: { kind: "payment_reminder", appointmentIds: sessions.map((s) => s.id) },
+        });
       } catch (e) {
         failures.push(maskEmail(email));
         logStep("Send failed", { to: maskEmail(email), error: String(e).slice(0, 150) });

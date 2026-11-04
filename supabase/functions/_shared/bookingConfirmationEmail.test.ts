@@ -77,3 +77,15 @@ describe("bookingConfirmationHtml", () => {
     expect(text).toContain("Amount paid: €95.00");
   });
 });
+
+describe("rescheduled sessions", () => {
+  it("says the session moved and leaves out the payment", () => {
+    const input = { ...base, rescheduled: true };
+    const html = bookingConfirmationHtml(input);
+    expect(html).toContain("Your session has moved, Ernest!");
+    expect(html).not.toContain("Paid");
+    const text = bookingConfirmationText(input);
+    expect(text).toContain("Your session has moved, Ernest!");
+    expect(text).not.toContain("Amount paid");
+  });
+});

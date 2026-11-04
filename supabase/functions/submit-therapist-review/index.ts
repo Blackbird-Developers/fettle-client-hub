@@ -1,9 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { requireSupportedAppVersion } from "../_shared/appVersion.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-version",
 };
 
 const ACUITY_API_BASE = "https://acuityscheduling.com/api/v1";
@@ -44,6 +45,9 @@ serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  const tooOld = requireSupportedAppVersion(req, corsHeaders);
+  if (tooOld) return tooOld;
 
   if (req.method !== "POST") {
     return jsonResponse({ error: "Method not allowed" }, 405);
