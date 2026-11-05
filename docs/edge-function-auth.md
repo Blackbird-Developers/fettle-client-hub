@@ -65,6 +65,6 @@ Removed: `create-session-payment`, `create-package-payment`, `verify-payment-and
 
 1. Run the new migrations: `20261104090000` (user_packages), `20261104091000` (push) and `20261104092000` (referral functions).
 2. Redeploy every changed function, including `stripe-webhook`. The confirm functions no longer accept the anon key from an old webhook build.
-3. Delete the removed functions from the project: `supabase functions delete create-session-payment create-package-payment verify-payment-and-book verify-package-payment`.
+3. Delete the removed functions from the project: `supabase functions delete create-session-payment create-package-payment verify-payment-and-book verify-package-payment stripe-cancel stripe-capture`. The last two were removed from the repo in `2799d17` but are still deployed: they cancel or capture any PaymentIntent by id, with no ownership check.
 4. Run `select * from cron.job;`. If a job calls `trigger_monthly_credit_summary()`, it posts without auth and will now get a 401. Move that schedule to a GitHub Actions workflow that sends `x-cron-secret`, like `unpaid-session-reminders.yml`.
 5. Optional: `MIN_APP_VERSION` makes app builds older than that version show their "please update" screen.

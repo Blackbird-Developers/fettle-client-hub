@@ -53,11 +53,13 @@ Both new secrets are optional; set them in Supabase → Edge Functions → Secre
 supabase functions deploy
 ```
 
-This deploys every function. `supabase/config.toml` lists every function with `verify_jwt = false`, so the setting stays as it is on prod. Each function checks its own caller.
+This deploys every function. `supabase/config.toml` lists every function with `verify_jwt = false`, and each function checks its own caller.
+
+On live (checked 5 Nov), seven functions are still `verify_jwt = true`: `pay-session`, `unpaid-sessions`, `sync-acuity-packages`, `admin-analytics`, `admin-clinical`, `admin-leads` and `admin-customer-insights`. This deploy switches them to `false`. That's intended: each one checks its own caller, and those checks are stricter than the gateway's (the gateway accepts the public anon key; the functions don't).
 
 Changed functions: `acuity`, `book-with-credit`, `book-with-package`, `cancel-session-with-refund`, `confirm-package-payment`, `confirm-payment-and-book`, `create-package-payment-intent`, `create-payment-intent`, `delete-user-account`, `export-user-data`, `get-payment-history`, `pay-session`, `redeem-package-code`, `send-booking-confirmation`, `send-credit-used-confirmation`, `send-credits-depleted`, `send-monthly-credit-summary`, `send-package-confirmation`, `session-reminders`, `stripe-webhook`, `submit-therapist-review`, `sync-acuity-appointments`, `sync-acuity-packages`, `unpaid-session-reminders`, `unpaid-sessions`, plus `_shared`, which every function imports.
 
-### 5. Delete the retired Stripe Checkout functions
+### 5. Delete the retired functions
 
 Nothing calls them any more:
 
@@ -66,7 +68,11 @@ supabase functions delete create-session-payment
 supabase functions delete create-package-payment
 supabase functions delete verify-payment-and-book
 supabase functions delete verify-package-payment
+supabase functions delete stripe-cancel
+supabase functions delete stripe-capture
 ```
+
+`stripe-cancel` and `stripe-capture` were removed from the repo in `2799d17` (June) but never deleted from Supabase; they're still live with `verify_jwt = false`. They cancel or capture any PaymentIntent by id with no ownership check, so delete them even if the rest of this deploy waits.
 
 ### 6. Check the database cron jobs
 
@@ -102,12 +108,14 @@ On the website, signed in as a test client:
 
 ## Rolling back
 
-- **Functions:** check out the functions from before the merge and redeploy them:
+- **Functions:** check out the functions from before the lockdown and redeploy them:
 
   ```bash
-  git checkout 6b86a64 -- supabase/functions   # main before this merge
+  git checkout 93e3e09 -- supabase/functions   # before MA-1, with both TENOFF blocks
   supabase functions deploy
   ```
+
+  Use `93e3e09`, **not** `6b86a64` or `edc9f45`. Live was never one commit: `create-payment-intent` was deployed from the TENOFF branch (`d38213a`), which reached `main` only through PR #31. `6b86a64` and `edc9f45` don't have that block, so rolling back to either would let TENOFF work in the portal again. `93e3e09` has the same `create-payment-intent` as live, keeps the bundle TENOFF block (PR #29), and predates the MA-1 lockdown (`21b90da`).
 
   Redeploy the four deleted functions too if you need them.
 - **Migrations:** these don't undo themselves. To undo one, write a new migration that brings back the old policies or grants.

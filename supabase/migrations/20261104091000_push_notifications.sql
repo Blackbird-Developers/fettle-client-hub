@@ -29,10 +29,14 @@ ALTER TABLE public.device_tokens ENABLE ROW LEVEL SECURITY;
 
 -- Users see and remove their own devices. Writes go through the functions
 -- below, so there is no INSERT/UPDATE policy.
+-- DROP ... IF EXISTS keeps this file safe to re-run (e.g. after it was
+-- pasted into the SQL editor before `supabase db push`).
+DROP POLICY IF EXISTS "Users can view their own device tokens" ON public.device_tokens;
 CREATE POLICY "Users can view their own device tokens"
 ON public.device_tokens FOR SELECT
 USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete their own device tokens" ON public.device_tokens;
 CREATE POLICY "Users can delete their own device tokens"
 ON public.device_tokens FOR DELETE
 USING (auth.uid() = user_id);
