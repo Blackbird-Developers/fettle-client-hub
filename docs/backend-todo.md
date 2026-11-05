@@ -23,8 +23,17 @@ Make sure point-in-time recovery or a fresh backup exists. The migrations change
 ```bash
 supabase link --project-ref gxeoillrmjezpehmcvrh
 supabase migration list          # see what is pending on prod
+```
+
+**Live's migration history is empty** (checked 5 Nov 2026): every migration was applied by hand, so `migration list` shows all 32 as pending. **Don't `db push` like that**: it would replay every migration since December 2025 against a database that already has them. Record the 26 that are already on live first (history only, no schema change; checked by probing their tables and columns on live). `20260112133600` is left pending on purpose; it's a no-op.
+
+```bash
+supabase migration repair --status applied --linked 20251220161609 20251220163950 20251220165257 20251221094712 20251224084436 20251224115008 20260108100832 20260109185831 20260112100000 20260424120000 20260525120000 20260609083000 20260625120000 20260717120000 20261007120000 20261008120000 20261012120000 20261013120000 20261014120000 20261014120001 20261016120000 20261019120000 20261023120000 20261028120000 20261029120000 20261030120000
+supabase db push --dry-run       # must list exactly the 6 below
 supabase db push
 ```
+
+The dry run must show exactly: `20260112133600`, `20261103120000`, `20261104090000`, `20261104091000`, `20261104092000`, `20261104120000`. Stop if it shows anything else.
 
 New from this work:
 
@@ -34,7 +43,7 @@ New from this work:
 | `20261104091000_push_notifications` | Adds the `device_tokens` and `push_sends` tables, `profiles.notification_preferences`, and the `register_device_token` / `unregister_device_token` RPCs. |
 | `20261104092000_referral_rpcs_server_only` | Limits `qualify_referral`, `redeem_referral_credit`, `referral_available_balance`, `ensure_referral_code` and `link_referral` to the service role. Users keep `get_referral_overview()`. |
 
-`migration list` may also show `20261103120000_explicit_table_grants` and `20261104120000_booking_funnel_events` (PR #30) as pending. Both are already on `main`; apply them too if they haven't been.
+Also pending, and applied by the same push: `20261103120000_explicit_table_grants` (not yet on live: anon still has SELECT on those tables, though RLS returns nothing) and `20261104120000_booking_funnel_events` (PR #30).
 
 ### 3. Secrets (optional)
 
