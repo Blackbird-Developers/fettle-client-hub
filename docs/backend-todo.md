@@ -23,8 +23,17 @@ Make sure point-in-time recovery or a fresh backup exists. The migrations change
 ```bash
 supabase link --project-ref gxeoillrmjezpehmcvrh
 supabase migration list          # see what is pending on prod
+```
+
+**Live's migration history is empty** (checked 5 Nov 2026): every migration was applied by hand, so `migration list` shows all 32 as pending. **Don't `db push` like that**: it would replay every migration since December 2025 against a database that already has them. Record the 26 that are already on live first (history only, no schema change; checked by probing their tables and columns on live). `20260112133600` is left pending on purpose; it's a no-op.
+
+```bash
+supabase migration repair --status applied --linked 20251220161609 20251220163950 20251220165257 20251221094712 20251224084436 20251224115008 20260108100832 20260109185831 20260112100000 20260424120000 20260525120000 20260609083000 20260625120000 20260717120000 20261007120000 20261008120000 20261012120000 20261013120000 20261014120000 20261014120001 20261016120000 20261019120000 20261023120000 20261028120000 20261029120000 20261030120000
+supabase db push --dry-run       # must list exactly the 6 below
 supabase db push
 ```
+
+The dry run must show exactly: `20260112133600`, `20261103120000`, `20261104090000`, `20261104091000`, `20261104092000`, `20261104120000`. Stop if it shows anything else.
 
 New from this work:
 
@@ -34,7 +43,7 @@ New from this work:
 | `20261104091000_push_notifications` | Adds the `device_tokens` and `push_sends` tables, `profiles.notification_preferences`, and the `register_device_token` / `unregister_device_token` RPCs. |
 | `20261104092000_referral_rpcs_server_only` | Limits `qualify_referral`, `redeem_referral_credit`, `referral_available_balance`, `ensure_referral_code` and `link_referral` to the service role. Users keep `get_referral_overview()`. |
 
-`migration list` may also show `20261103120000_explicit_table_grants` and `20261104120000_booking_funnel_events` (PR #30) as pending. Both are already on `main`; apply them too if they haven't been.
+Also pending, and applied by the same push: `20261103120000_explicit_table_grants` (not yet on live: anon still has SELECT on those tables, though RLS returns nothing) and `20261104120000_booking_funnel_events` (PR #30).
 
 ### 3. Secrets (optional)
 
@@ -53,11 +62,13 @@ Both new secrets are optional; set them in Supabase → Edge Functions → Secre
 supabase functions deploy
 ```
 
-This deploys every function. `supabase/config.toml` lists every function with `verify_jwt = false`, so the setting stays as it is on prod. Each function checks its own caller.
+This deploys every function. `supabase/config.toml` lists every function with `verify_jwt = false`, and each function checks its own caller.
+
+On live (checked 5 Nov), seven functions are still `verify_jwt = true`: `pay-session`, `unpaid-sessions`, `sync-acuity-packages`, `admin-analytics`, `admin-clinical`, `admin-leads` and `admin-customer-insights`. This deploy switches them to `false`. That's intended: each one checks its own caller, and those checks are stricter than the gateway's (the gateway accepts the public anon key; the functions don't).
 
 Changed functions: `acuity`, `book-with-credit`, `book-with-package`, `cancel-session-with-refund`, `confirm-package-payment`, `confirm-payment-and-book`, `create-package-payment-intent`, `create-payment-intent`, `delete-user-account`, `export-user-data`, `get-payment-history`, `pay-session`, `redeem-package-code`, `send-booking-confirmation`, `send-credit-used-confirmation`, `send-credits-depleted`, `send-monthly-credit-summary`, `send-package-confirmation`, `session-reminders`, `stripe-webhook`, `submit-therapist-review`, `sync-acuity-appointments`, `sync-acuity-packages`, `unpaid-session-reminders`, `unpaid-sessions`, plus `_shared`, which every function imports.
 
-### 5. Delete the retired Stripe Checkout functions
+### 5. Delete the retired functions
 
 Nothing calls them any more:
 
@@ -67,6 +78,8 @@ supabase functions delete create-package-payment
 supabase functions delete verify-payment-and-book
 supabase functions delete verify-package-payment
 ```
+
+`stripe-cancel` and `stripe-capture` (removed from the repo in `2799d17`) were still deployed until 5 Nov 2026 and have now been deleted from live, so they aren't in this list.
 
 ### 6. Check the database cron jobs
 
@@ -102,12 +115,14 @@ On the website, signed in as a test client:
 
 ## Rolling back
 
-- **Functions:** check out the functions from before the merge and redeploy them:
+- **Functions:** check out the functions from before the lockdown and redeploy them:
 
   ```bash
-  git checkout 6b86a64 -- supabase/functions   # main before this merge
+  git checkout 93e3e09 -- supabase/functions   # before MA-1, with both TENOFF blocks
   supabase functions deploy
   ```
+
+  Use `93e3e09`, **not** `6b86a64` or `edc9f45`. Live was never one commit: `create-payment-intent` was deployed from the TENOFF branch (`d38213a`), which reached `main` only through PR #31. `6b86a64` and `edc9f45` don't have that block, so rolling back to either would let TENOFF work in the portal again. `93e3e09` has the same `create-payment-intent` as live, keeps the bundle TENOFF block (PR #29), and predates the MA-1 lockdown (`21b90da`).
 
   Redeploy the four deleted functions too if you need them.
 - **Migrations:** these don't undo themselves. To undo one, write a new migration that brings back the old policies or grants.

@@ -85,7 +85,15 @@ FOR UPDATE
 USING (EXISTS (SELECT 1 FROM public.user_roles ur WHERE ur.user_id = auth.uid() AND ur.role::text = 'admin'))
 WITH CHECK (EXISTS (SELECT 1 FROM public.user_roles ur WHERE ur.user_id = auth.uid() AND ur.role::text = 'admin'));
 
-REVOKE INSERT, DELETE ON public.admin_notifications FROM anon, authenticated;
+-- Explicit privileges: new public tables no longer get Supabase's default
+-- grants, so without these a fresh database gives admins a permission error
+-- on the bell. Same privileges as set by hand on live (2 Nov 2026):
+-- service_role everything; authenticated reads and sets read_at only (RLS
+-- still limits both to admins; the trigger stamps read_by_email); anon nothing.
+REVOKE ALL ON public.admin_notifications FROM anon, authenticated;
+GRANT ALL ON public.admin_notifications TO service_role;
+GRANT SELECT ON public.admin_notifications TO authenticated;
+GRANT UPDATE (read_at) ON public.admin_notifications TO authenticated;
 
 -- Make the API see the new table straight away.
 NOTIFY pgrst, 'reload schema';
