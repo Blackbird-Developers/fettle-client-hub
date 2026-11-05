@@ -68,11 +68,9 @@ supabase functions delete create-session-payment
 supabase functions delete create-package-payment
 supabase functions delete verify-payment-and-book
 supabase functions delete verify-package-payment
-supabase functions delete stripe-cancel
-supabase functions delete stripe-capture
 ```
 
-`stripe-cancel` and `stripe-capture` were removed from the repo in `2799d17` (June) but never deleted from Supabase; they're still live with `verify_jwt = false`. They cancel or capture any PaymentIntent by id with no ownership check, so delete them even if the rest of this deploy waits.
+`stripe-cancel` and `stripe-capture` (removed from the repo in `2799d17`) were still deployed until 5 Nov 2026 and have now been deleted from live, so they aren't in this list.
 
 ### 6. Check the database cron jobs
 
