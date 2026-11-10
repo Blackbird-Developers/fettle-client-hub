@@ -1,4 +1,6 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
+import { PhoneInput } from '@/components/PhoneInput';
+import { emailError, phoneError } from '@/lib/contactValidation';
 import { format, addMonths } from 'date-fns';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements } from '@stripe/react-stripe-js';
@@ -191,6 +193,9 @@ export function BookingModal({
     // shortcut, so Back on the date step returns to the session types.
     const [bookedFromRebookShortcut, setBookedFromRebookShortcut] =
         useState(false);
+    // Contact fields the client has left, so errors show after typing, not during.
+    const [touched, setTouched] = useState<Record<string, boolean>>({});
+    const touch = (key: string) => setTouched((t) => (t[key] ? t : { ...t, [key]: true }));
     const [formData, setFormData] = useState({
         firstName: '',
         lastName: '',
@@ -2388,8 +2393,15 @@ export function BookingModal({
                         !formData.phone.trim() ||
                         !psychiatryIntake.emergencyContactName.trim() ||
                         !psychiatryIntake.emergencyContactPhone.trim() ||
+                        !!phoneError(psychiatryIntake.emergencyContactPhone) ||
                         !psychiatryIntake.heardAbout ||
                         psychiatryNotesTooLong);
+                const emailProblem = formData.email.trim() ? emailError(formData.email) : undefined;
+                const phoneProblem = phoneError(formData.phone);
+                const emergencyPhoneProblem = phoneError(psychiatryIntake.emergencyContactPhone);
+                const showEmailProblem = touched.email ? emailProblem : undefined;
+                const showPhoneProblem = touched.phone ? phoneProblem : undefined;
+                const showEmergencyPhoneProblem = touched.emergencyContactPhone ? emergencyPhoneProblem : undefined;
                 const selectClassName =
                     'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2';
                 return (
@@ -2440,7 +2452,15 @@ export function BookingModal({
                                     }))
                                 }
                                 placeholder="john@example.com"
+                                onBlur={() => touch('email')}
+                                aria-invalid={!!showEmailProblem}
+                                aria-describedby={showEmailProblem ? 'email-error' : undefined}
                             />
+                            {showEmailProblem && (
+                                <p id="email-error" className="text-sm text-destructive">
+                                    {showEmailProblem}
+                                </p>
+                            )}
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="phone">
@@ -2448,18 +2468,23 @@ export function BookingModal({
                                     ? 'Phone'
                                     : 'Phone (optional)'}
                             </Label>
-                            <Input
+                            <PhoneInput
                                 id="phone"
-                                type="tel"
                                 value={formData.phone}
-                                onChange={(e) =>
-                                    setFormData((prev) => ({
-                                        ...prev,
-                                        phone: e.target.value,
-                                    }))
+                                onChange={(phone) =>
+                                    setFormData((prev) => ({ ...prev, phone }))
                                 }
-                                placeholder="+353 87 123 4567"
+                                selectClassName={selectClassName}
+                                inputClassName={selectClassName}
+                                onBlur={() => touch('phone')}
+                                invalid={!!showPhoneProblem}
+                                describedBy={showPhoneProblem ? 'phone-error' : undefined}
                             />
+                            {showPhoneProblem && (
+                                <p id="phone-error" className="text-sm text-destructive">
+                                    {showPhoneProblem}
+                                </p>
+                            )}
                         </div>
                         {sessionCategory === 'psychiatry' && (
                             <>
@@ -2574,19 +2599,26 @@ export function BookingModal({
                                         <Label htmlFor="emergencyContactPhone">
                                             Emergency contact phone
                                         </Label>
-                                        <Input
+                                        <PhoneInput
                                             id="emergencyContactPhone"
-                                            type="tel"
-                                            maxLength={20}
                                             value={psychiatryIntake.emergencyContactPhone}
-                                            onChange={(e) =>
+                                            onChange={(emergencyContactPhone) =>
                                                 setPsychiatryIntake((prev) => ({
                                                     ...prev,
-                                                    emergencyContactPhone: e.target.value,
+                                                    emergencyContactPhone,
                                                 }))
                                             }
-                                            placeholder="+353 87 123 4567"
+                                            selectClassName={selectClassName}
+                                            inputClassName={selectClassName}
+                                            onBlur={() => touch('emergencyContactPhone')}
+                                            invalid={!!showEmergencyPhoneProblem}
+                                            describedBy={showEmergencyPhoneProblem ? 'emergencyContactPhone-error' : undefined}
                                         />
+                                        {showEmergencyPhoneProblem && (
+                                            <p id="emergencyContactPhone-error" className="text-sm text-destructive">
+                                                {showEmergencyPhoneProblem}
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="space-y-2">
@@ -2781,6 +2813,8 @@ export function BookingModal({
                                     !formData.firstName ||
                                     !formData.lastName ||
                                     !formData.email ||
+                                    !!emailError(formData.email) ||
+                                    !!phoneProblem ||
                                     !allIntakeFieldsChecked ||
                                     (sessionCategory === 'couples' && !formData.partnerName) ||
                                     psychiatryDetailsIncomplete
