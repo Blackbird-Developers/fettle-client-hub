@@ -112,9 +112,10 @@ describe("validateDetails", () => {
       "Please enter a valid email address"
     );
     expect(validateDetails({ ...valid, phone: "" }, "individual").phone).toBe("Please enter your mobile number");
-    expect(validateDetails({ ...valid, phone: "087 12" }, "individual").phone).toBe("Please enter a valid phone number");
+    expect(validateDetails({ ...valid, phone: "087 12" }, "individual").phone).toMatch(/missed a digit/);
+    expect(validateDetails({ ...valid, phone: "+353 87 123 456" }, "individual").phone).toMatch(/missed a digit/);
     expect(validateDetails({ ...valid, phone: "087 123 456x" }, "individual").phone).toBe(
-      "Please enter a valid phone number"
+      "Phone numbers can only contain digits, spaces and +"
     );
   });
 

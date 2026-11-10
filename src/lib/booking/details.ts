@@ -2,6 +2,7 @@
 // (docs/QUIZ_BOOKING_FLOW.md §3.4). Rules and messages are the fettle.ie
 // booking page's.
 
+import { emailError, phoneError } from '../contactValidation';
 import type { TherapyService } from './therapists';
 
 export interface BookingDetails {
@@ -18,9 +19,6 @@ export type DetailsErrors = Partial<Record<'firstName' | 'lastName' | 'email' | 
 
 /** Field order, so the first error can be focused. */
 export const DETAILS_FIELD_ORDER = ['firstName', 'lastName', 'email', 'phone', 'partnerName'] as const;
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE_RE = /^[\d\s+\-()]+$/;
 
 function nameError(value: string, label: 'First' | 'Last'): string | undefined {
   if (!value) return `Please enter your ${label.toLowerCase()} name`;
@@ -42,12 +40,10 @@ export function validateDetails(details: BookingDetails, service: TherapyService
   if (first) errors.firstName = first;
   const last = nameError(d.lastName, 'Last');
   if (last) errors.lastName = last;
-  if (!d.email) errors.email = 'Please enter your email';
-  else if (!EMAIL_RE.test(d.email) || d.email.length > 100) errors.email = 'Please enter a valid email address';
-  if (!d.phone) errors.phone = 'Please enter your mobile number';
-  else if (!PHONE_RE.test(d.phone) || d.phone.replace(/\D/g, '').length < 8) {
-    errors.phone = 'Please enter a valid phone number';
-  }
+  const email = emailError(d.email);
+  if (email) errors.email = email;
+  const phone = phoneError(d.phone, { required: true });
+  if (phone) errors.phone = phone;
   if (service === 'couples' && !d.partnerName) errors.partnerName = 'Please add your partner’s name';
   return errors;
 }
