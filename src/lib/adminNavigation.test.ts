@@ -46,6 +46,12 @@ describe("resolveAdminRoute", () => {
     expect(resolveAdminRoute("team", "extra")).toEqual({ redirect: "/admin/team" });
   });
 
+  it("opens Notifications, which has no sidebar item", () => {
+    expect(resolveAdminRoute("notifications", undefined)).toMatchObject({
+      section: { id: "notifications", hidden: true },
+    });
+  });
+
   it("sends unknown sections to the overview", () => {
     expect(resolveAdminRoute("nope", undefined)).toEqual({ redirect: "/admin" });
     expect(resolveAdminRoute("nope", "1-2")).toEqual({ redirect: "/admin" });

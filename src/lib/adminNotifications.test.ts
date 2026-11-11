@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { notificationDetailLines, unreadCount } from './adminNotifications';
+import { notificationDetailLines, notificationSearchTerm, unreadCount } from './adminNotifications';
 
 describe('notificationDetailLines', () => {
   it('lists what staff need for a refused bundle code', () => {
@@ -32,5 +32,13 @@ describe('unreadCount', () => {
   it('counts rows without read_at', () => {
     expect(unreadCount(undefined)).toBe(0);
     expect(unreadCount([{ read_at: null }, { read_at: '2026-10-30T10:00:00Z' }, { read_at: null }])).toBe(2);
+  });
+});
+
+describe('notificationSearchTerm', () => {
+  it('drops characters that would break the database filter', () => {
+    expect(notificationSearchTerm('  NDH6T ')).toBe('NDH6T');
+    expect(notificationSearchTerm('a,b(c)%d*e')).toBe('a b c d e');
+    expect(notificationSearchTerm(',,,')).toBe('');
   });
 });

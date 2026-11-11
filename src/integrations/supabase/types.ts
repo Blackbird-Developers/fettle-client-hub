@@ -14,6 +14,48 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_activity: {
+        Row: {
+          action: string
+          actor_email: string | null
+          actor_id: string | null
+          created_at: string
+          customer_key: string | null
+          customer_name: string | null
+          details: Json
+          id: string
+          source_ref: string | null
+          task_id: string | null
+          tx_id: number
+        }
+        Insert: {
+          action: string
+          actor_email?: string | null
+          actor_id?: string | null
+          created_at?: string
+          customer_key?: string | null
+          customer_name?: string | null
+          details?: Json
+          id?: string
+          source_ref?: string | null
+          task_id?: string | null
+          tx_id?: number
+        }
+        Update: {
+          action?: string
+          actor_email?: string | null
+          actor_id?: string | null
+          created_at?: string
+          customer_key?: string | null
+          customer_name?: string | null
+          details?: Json
+          id?: string
+          source_ref?: string | null
+          task_id?: string | null
+          tx_id?: number
+        }
+        Relationships: []
+      }
       admin_notifications: {
         Row: {
           body: string | null
@@ -772,6 +814,21 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_activity_actors: {
+        Args: Record<PropertyKey, never>
+        Returns: { actor_email: string }[]
+      }
+      admin_activity_summary: {
+        Args: { p_from: string; p_to: string }
+        Returns: {
+          actor_email: string
+          total: number
+          tasks_completed: number
+          outcomes_logged: number
+          notes_edited: number
+          last_active: string
+        }[]
+      }
       close_no_answer_sequence: {
         Args: { p_reason: string; p_sequence_id: string }
         Returns: Database["public"]["Tables"]["no_answer_sequences"]["Row"]

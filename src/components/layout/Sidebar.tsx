@@ -55,7 +55,8 @@ const publicNavigation: NavItem[] = [
 ];
 
 // Admins only get the admin area — no customer pages or booking.
-const adminNavigation: NavItem[] = ADMIN_SECTIONS.map(({ name, href, icon, children }) => ({
+// Pages without a sidebar item (Notifications) are left out.
+const adminNavigation: NavItem[] = ADMIN_SECTIONS.filter((section) => !section.hidden).map(({ name, href, icon, children }) => ({
   name,
   href,
   icon,

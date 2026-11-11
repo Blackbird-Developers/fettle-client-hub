@@ -1,6 +1,8 @@
 import {
+  Bell,
   ClipboardList,
   Flame,
+  History,
   Pill,
   Package,
   LayoutDashboard,
@@ -29,7 +31,9 @@ export type AdminSectionId =
   | "progression"
   | "followups"
   | "feedback"
-  | "team";
+  | "activity"
+  | "team"
+  | "notifications";
 
 /** A page under a section, e.g. Progression → Session 2–3. */
 export interface AdminSubsection {
@@ -48,6 +52,8 @@ export interface AdminSection {
   description: string;
   /** Sections with children have no page of their own: they open the first child. */
   children?: AdminSubsection[];
+  /** Has a page but no sidebar item (e.g. Notifications, opened from the bell). */
+  hidden?: boolean;
 }
 
 /** URL segment for the "session N → N+1" view, e.g. 2 → "2-3". */
@@ -150,11 +156,26 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     description: "Feedback clients have sent from the hub, by category, with a status for each.",
   },
   {
+    id: "activity",
+    name: "Activity log",
+    href: "/admin/activity",
+    icon: History,
+    description: "What each staff member did in the admin area, and when.",
+  },
+  {
     id: "team",
     name: "Team",
     href: "/admin/team",
     icon: UserPlus,
     description: "Manage who has admin access.",
+  },
+  {
+    id: "notifications",
+    name: "Notifications",
+    href: "/admin/notifications",
+    icon: Bell,
+    description: "Problems the hub flagged for staff, newest first.",
+    hidden: true,
   },
 ];
 

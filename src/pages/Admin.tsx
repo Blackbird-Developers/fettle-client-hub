@@ -1,4 +1,5 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { ActivityLog } from "@/components/admin/ActivityLog";
 import { AdminDashboard } from "@/components/admin/AdminDashboard";
 import { AdminInvite } from "@/components/admin/AdminInvite";
 import { AdminNotificationsBell } from "@/components/admin/AdminNotificationsBell";
@@ -8,6 +9,7 @@ import { Feedback } from "@/components/admin/Feedback";
 import { FollowUpsReport } from "@/components/admin/FollowUpsReport";
 import { HotLeads } from "@/components/admin/HotLeads";
 import { NoAnswer } from "@/components/admin/NoAnswer";
+import { NotificationsPage } from "@/components/admin/NotificationsPage";
 import { PortalAdoption } from "@/components/admin/PortalAdoption";
 import { PsychiatryFollowUps } from "@/components/admin/PsychiatryFollowUps";
 import { SalesTasks } from "@/components/admin/SalesTasks";
@@ -37,7 +39,9 @@ const SECTION_CONTENT: Record<AdminSectionId, (props: { subsectionId?: string })
   ),
   followups: FollowUpsReport,
   feedback: Feedback,
+  activity: ActivityLog,
   team: AdminInvite,
+  notifications: NotificationsPage,
 };
 
 export default function Admin() {
