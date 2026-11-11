@@ -127,7 +127,7 @@ export function ActivityLog() {
                       setPage(1);
                     }}
                   >
-                    <TableCell className="font-medium break-all">{s.actor_email}</TableCell>
+                    <TableCell className="font-medium whitespace-nowrap">{s.actor_email}</TableCell>
                     <TableCell className="text-right">{s.total}</TableCell>
                     <TableCell className="text-right">{s.tasks_completed}</TableCell>
                     <TableCell className="text-right">{s.outcomes_logged}</TableCell>
@@ -216,9 +216,9 @@ export function ActivityLog() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-40">When</TableHead>
-                    <TableHead className="w-56">Staff</TableHead>
+                    <TableHead>Staff</TableHead>
                     <TableHead>What</TableHead>
-                    <TableHead className="w-48">Customer</TableHead>
+                    <TableHead>Customer</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -229,7 +229,7 @@ export function ActivityLog() {
                         <TableCell className="text-muted-foreground whitespace-nowrap align-top">
                           {formatDateTime(row.created_at)}
                         </TableCell>
-                        <TableCell className="break-all align-top">{row.actor_email ?? "Unknown"}</TableCell>
+                        <TableCell className="whitespace-nowrap align-top">{row.actor_email ?? "Unknown"}</TableCell>
                         <TableCell className="align-top">
                           <p>{what}</p>
                           {detail && (
@@ -238,7 +238,7 @@ export function ActivityLog() {
                             </p>
                           )}
                         </TableCell>
-                        <TableCell className="break-all align-top">{activityCustomer(row) ?? "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap align-top">{activityCustomer(row) ?? "—"}</TableCell>
                       </TableRow>
                     );
                   })}
