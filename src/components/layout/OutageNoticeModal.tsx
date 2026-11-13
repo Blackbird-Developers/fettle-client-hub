@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import { Phone, X } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -19,19 +20,22 @@ function track(event: string, extra: Record<string, unknown> = {}) {
   w.dataLayer.push({ event, outage_id: OUTAGE_NOTICE.OUTAGE_ID, ...extra });
 }
 
-const readDismissed = (key: string) => {
+// Remembered in localStorage (shared by every tab), keyed to the user's
+// current sign-in, so it shows once per login session: not on every page,
+// reload or new tab, but again after they sign out and back in.
+const readSeen = (key: string) => {
   try {
-    return sessionStorage.getItem(key) !== null;
+    return localStorage.getItem(key) !== null;
   } catch {
     return false;
   }
 };
 
-const writeDismissed = (key: string) => {
+const writeSeen = (key: string) => {
   try {
-    sessionStorage.setItem(key, String(Date.now()));
+    localStorage.setItem(key, String(Date.now()));
   } catch {
-    /* private mode: closes for this page view only */
+    /* private mode: shows once per page view */
   }
 };
 
@@ -47,24 +51,27 @@ function WhatsAppIcon({ className }: { className?: string }) {
  * Site-wide popup while Fettle's Outlook is down, steering clients to
  * WhatsApp or phone. Mirrors the fettle.ie popup in the dashboard's look.
  * Mounted by DashboardLayout for signed-in clients only, so it never shows
- * on login/signup or to admins. Once per browser session (per OUTAGE_ID).
+ * on login/signup or to admins. Once per login session (per OUTAGE_ID).
  */
 export function OutageNoticeModal() {
   const { pathname } = useLocation();
-  const key = outageDismissKey();
+  const { user } = useAuth();
+  const key = outageDismissKey(OUTAGE_NOTICE.OUTAGE_ID, user?.id, user?.last_sign_in_at);
   const excluded = isExcludedPath(pathname);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (!OUTAGE_NOTICE.ENABLED || excluded || readDismissed(key)) return;
+    if (!OUTAGE_NOTICE.ENABLED || !user || excluded || readSeen(key)) return;
     const timer = window.setTimeout(() => {
-      // Re-check: another tab or page may have dismissed it during the delay.
-      if (readDismissed(key)) return;
+      // Re-check: another tab may have shown it during the delay.
+      if (readSeen(key)) return;
+      // Counts as seen the moment it opens, so the next page never repeats it.
+      writeSeen(key);
       setOpen(true);
       track("outage_popup_shown");
     }, OUTAGE_NOTICE.DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [excluded, key]);
+  }, [excluded, key, user]);
 
   // Navigating into /admin while it's open closes it without counting as seen.
   useEffect(() => {
@@ -76,13 +83,11 @@ export function OutageNoticeModal() {
   if (!OUTAGE_NOTICE.ENABLED) return null;
 
   const dismiss = (method: string) => {
-    writeDismissed(key);
     setOpen(false);
     track("outage_popup_dismissed", { close_method: method });
   };
 
   const contacted = (channel: "whatsapp" | "call") => {
-    writeDismissed(key);
     track(`outage_popup_${channel}_click`);
   };
 

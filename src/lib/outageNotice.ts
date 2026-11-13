@@ -17,8 +17,15 @@ export const OUTAGE_NOTICE = {
   EXCLUDED_PATHS: ["/admin"],
 } as const;
 
-export const outageDismissKey = (id: string = OUTAGE_NOTICE.OUTAGE_ID) =>
-  `fettle:outage-closed:${id}`;
+/**
+ * Storage key for "already shown". Includes the user and their last sign-in
+ * time, so it's once per login session: signing in again starts a new one.
+ */
+export const outageDismissKey = (
+  id: string = OUTAGE_NOTICE.OUTAGE_ID,
+  userId: string = "anon",
+  signedInAt: string = "",
+) => `fettle:outage-seen:${id}:${userId}:${signedInAt}`;
 
 export function whatsappHref(
   number: string = OUTAGE_NOTICE.WHATSAPP_NUMBER,

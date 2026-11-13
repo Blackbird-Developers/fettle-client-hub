@@ -32,7 +32,11 @@ describe("outageNotice", () => {
     expect(dublinHour(new Date("2026-07-01T08:30:00Z"))).toBe(9);
   });
 
-  it("keys dismissals by outage", () => {
-    expect(outageDismissKey("a")).not.toBe(outageDismissKey("b"));
+  it("keys 'seen' by outage, user and sign-in", () => {
+    expect(outageDismissKey("a", "u1", "t1")).toBe(outageDismissKey("a", "u1", "t1"));
+    expect(outageDismissKey("a", "u1", "t1")).not.toBe(outageDismissKey("b", "u1", "t1"));
+    expect(outageDismissKey("a", "u1", "t1")).not.toBe(outageDismissKey("a", "u2", "t1"));
+    // signing in again = new login session = shown again
+    expect(outageDismissKey("a", "u1", "t1")).not.toBe(outageDismissKey("a", "u1", "t2"));
   });
 });
