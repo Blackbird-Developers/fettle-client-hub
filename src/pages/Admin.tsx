@@ -7,6 +7,8 @@ import { Bundles } from "@/components/admin/Bundles";
 import { Feedback } from "@/components/admin/Feedback";
 import { FollowUpsReport } from "@/components/admin/FollowUpsReport";
 import { HotLeads } from "@/components/admin/HotLeads";
+import { ChatAlerts } from "@/components/admin/inbox/ChatAlerts";
+import { Inbox } from "@/components/admin/inbox/Inbox";
 import { NoAnswer } from "@/components/admin/NoAnswer";
 import { PortalAdoption } from "@/components/admin/PortalAdoption";
 import { PsychiatryFollowUps } from "@/components/admin/PsychiatryFollowUps";
@@ -25,6 +27,7 @@ import { Loader2 } from "lucide-react";
 // already checked it's valid). Keyed by it, so each child page starts fresh.
 const SECTION_CONTENT: Record<AdminSectionId, (props: { subsectionId?: string }) => JSX.Element> = {
   overview: AdminDashboard,
+  inbox: Inbox,
   "sales-tasks": SalesTasks,
   leads: HotLeads,
   "no-answer": NoAnswer,
@@ -68,6 +71,8 @@ export default function Admin() {
 
   return (
     <DashboardLayout>
+      {/* Live chat alerts on every admin page, not just the Inbox. */}
+      <ChatAlerts onInbox={section.id === "inbox"} />
       <div className="space-y-6 w-full">
         <div className="flex items-start justify-between gap-4">
           <div>
