@@ -27,8 +27,10 @@ export const DATE_PRESETS = [
 export type DatePresetId = (typeof DATE_PRESETS)[number]["id"] | "custom";
 
 export const COMPARE_PRESETS = [
+  { id: "previousWeekday", label: "Previous period (match day of week)" },
   { id: "previous", label: "Previous period" },
   { id: "previousYear", label: "Same period last year" },
+  { id: "previousYearWeekday", label: "Previous year (match day of week)" },
   { id: "custom", label: "Custom" },
 ] as const;
 
@@ -137,6 +139,12 @@ export function matchingPreset(range: DayRange, today: string, offered: readonly
 /** The period a range is compared against. Null for "custom". */
 export function compareRange(range: DayRange, preset: ComparePresetId): DayRange | null {
   switch (preset) {
+    case "previousWeekday": {
+      // Move back a whole number of weeks so both boundaries keep their
+      // weekday. A 31-day range moves 28 days, matching the reference picker.
+      const weeks = Math.max(1, Math.floor(rangeLength(range) / 7));
+      return { from: addDays(range.from, -weeks * 7), to: addDays(range.to, -weeks * 7) };
+    }
     case "previous": {
       // The same number of days, ending the day before the range starts.
       const to = addDays(range.from, -1);
@@ -144,6 +152,10 @@ export function compareRange(range: DayRange, preset: ComparePresetId): DayRange
     }
     case "previousYear":
       return { from: shiftYears(range.from, -1), to: shiftYears(range.to, -1) };
+    case "previousYearWeekday":
+      // 52 weeks preserves weekdays and is the common year-on-year reporting
+      // comparison (calendar-year comparison above preserves month/day).
+      return { from: addDays(range.from, -364), to: addDays(range.to, -364) };
     case "custom":
       return null;
   }
