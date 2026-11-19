@@ -9,6 +9,7 @@ import {
   filterConversations,
   groupByDay,
   listTime,
+  relatedConversations,
   newClientId,
   seenByVisitor,
   shortUrl,
@@ -30,6 +31,8 @@ function conversation(overrides: Partial<ChatConversation> = {}): ChatConversati
     realtime_topic: `chat-${id}`,
     visitor_name: null,
     visitor_email: null,
+    visitor_phone: null,
+    started_offline: false,
     page_url: "https://fettle.ie/pricing/",
     page_title: "Pricing",
     referrer: null,
@@ -98,6 +101,7 @@ describe("filterConversations", () => {
       filterConversations(all, { status: "all", assignee: "all", search: text }, "me");
     expect(search("kate")).toEqual([unassigned]);
     expect(search("OLD@")).toEqual([closed]);
+    expect(filterConversations([conversation({ visitor_phone: "087 123 4567" })], { status: "all", assignee: "all", search: "087 123" }, "me")).toHaveLength(1);
     expect(search("pricing")).toHaveLength(3);
     expect(search("nothing here")).toEqual([]);
   });
@@ -112,6 +116,21 @@ describe("counts", () => {
     ];
     expect(countByStatus(list)).toEqual({ all: 3, open: 2, closed: 1 });
     expect(unreadConversationCount(list)).toBe(1);
+  });
+});
+
+describe("relatedConversations", () => {
+  it("finds other chats with the same email or phone, newest first", () => {
+    const current = conversation({ visitor_email: "Sam@b.ie", visitor_phone: "087 123 4567" });
+    const sameEmail = conversation({ visitor_email: "sam@b.ie", last_message_at: "2026-11-01T10:00:00.000Z" });
+    const samePhone = conversation({ visitor_phone: "0871234567", last_message_at: "2026-11-10T10:00:00.000Z" });
+    const other = conversation({ visitor_email: "kate@b.ie" });
+    expect(relatedConversations([current, sameEmail, samePhone, other], current)).toEqual([samePhone, sameEmail]);
+  });
+
+  it("finds nothing for a visitor who left no details", () => {
+    const current = conversation();
+    expect(relatedConversations([current, conversation()], current)).toEqual([]);
   });
 });
 

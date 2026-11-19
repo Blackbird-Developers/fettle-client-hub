@@ -8,6 +8,7 @@ import {
   email,
   line,
   parseRequest,
+  phone,
   randomHex,
   safeEqual,
   sha256Hex,
@@ -60,6 +61,14 @@ describe("cleaners", () => {
     expect(email(null)).toBeNull();
   });
 
+  it("phone keeps real-looking numbers only", () => {
+    expect(phone(" +353 87 123 4567 ")).toBe("+353 87 123 4567");
+    expect(phone("(01) 555-0199")).toBe("(01) 555-0199");
+    expect(phone("12345")).toBeNull();
+    expect(phone("call me")).toBeNull();
+    expect(phone(undefined)).toBeNull();
+  });
+
   it("url keeps http(s) only and drops the fragment", () => {
     expect(url("https://fettle.ie/pricing/?a=1#top")).toBe("https://fettle.ie/pricing/?a=1");
     expect(url("javascript:alert(1)")).toBeNull();
@@ -86,13 +95,28 @@ describe("parseRequest", () => {
         action: "start",
         body: "Hello",
         clientId: CLIENT_ID,
+        offline: false,
         name: "Sarah",
         email: "sarah@example.com",
+        phone: null,
         pageUrl: "https://fettle.ie/pricing/",
         pageTitle: "Pricing",
         referrer: "https://www.google.com/",
       },
     });
+  });
+
+  it("accepts an out-of-hours start with a phone number", () => {
+    expect(
+      parseRequest({
+        action: "start",
+        body: "Call me",
+        client_id: CLIENT_ID,
+        offline: true,
+        name: "Sam Ryan",
+        phone: "087 123 4567",
+      }),
+    ).toMatchObject({ ok: true, request: { offline: true, name: "Sam Ryan", phone: "087 123 4567", email: null } });
   });
 
   it("rejects empty and over-long messages and bad client ids", () => {
@@ -149,7 +173,14 @@ describe("parseRequest", () => {
     });
     expect(
       parseRequest({ action: "identify", conversation_id: ID, secret: SECRET, email: "a@b.ie" }),
-    ).toMatchObject({ ok: true, request: { name: null, email: "a@b.ie" } });
+    ).toMatchObject({ ok: true, request: { name: null, email: "a@b.ie", phone: null } });
+    expect(parseRequest({ action: "identify", conversation_id: ID, secret: SECRET, phone: "abc" })).toEqual({
+      ok: false,
+      error: "invalid_phone",
+    });
+    expect(
+      parseRequest({ action: "identify", conversation_id: ID, secret: SECRET, phone: "087 123 4567" }),
+    ).toMatchObject({ ok: true, request: { phone: "087 123 4567" } });
   });
 
   it("rejects unknown actions and non-objects", () => {
@@ -201,6 +232,21 @@ describe("staff alerts", () => {
     expect(mail.html).not.toContain("<script>");
     expect(mail.html).toContain("&lt;script&gt;");
     expect(mail.html).toContain("https://my.fettle.ie/admin/inbox?c=1");
+  });
+
+  it("says when a chat was left outside working hours, with the phone number", () => {
+    const mail = alertEmail({
+      isNew: true,
+      offline: true,
+      visitorName: "Sam Ryan",
+      visitorEmail: null,
+      visitorPhone: "087 123 4567",
+      pageUrl: null,
+      body: "Call me",
+      inboxUrl: "x",
+    });
+    expect(mail.subject).toBe("Sam Ryan left a message outside working hours");
+    expect(mail.html).toContain("Phone: 087 123 4567");
   });
 
   it("names a returning visitor by email, or generically", () => {

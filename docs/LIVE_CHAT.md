@@ -21,6 +21,21 @@ Status (19 Nov 2026): built on branch `feature/live-chat`. **Not deployed.** The
 
 Database triggers keep each conversation's summary current (last message, unread count), reopen a closed chat when the visitor writes again, assign an unassigned chat to the first admin who replies, and force messages sent from a staff session to be `admin` messages from that person.
 
+## Working hours
+
+The widget has a working-hours table in Irish time (`HOURS` at the top of `chat-widget.html`; currently Monday to Friday, 9:00 to 18:00, which is a placeholder until Fettle confirms the real hours).
+
+- **In hours:** the visitor chats straight away and is asked for an email after their first message.
+- **Out of hours:** the widget shows a form instead: first name, last name, phone number, optional email and a message. The conversation is saved with `started_offline = true` and a system note, "we will respond to you as soon as we can". The Inbox marks it "Out of hours" and shows the phone number.
+
+The hours live in the widget, not the database, so changing them means redeploying the widget.
+
+## Returning visitors
+
+A visitor's conversation stays in their browser. When they come back, days or weeks later, they see the whole history, and sending a message reopens the conversation in the Inbox with everything above it.
+
+That only works in the same browser: visitors aren't logged in, so a different device starts a new conversation. To connect them, the Inbox's visitor panel lists **Earlier conversations** from the same email or phone number.
+
 ## Protections
 
 - Only `https://fettle.ie` and `https://www.fettle.ie` may call `chat-visitor` (plus `CHAT_EXTRA_ORIGINS`).

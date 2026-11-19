@@ -11,6 +11,9 @@ export interface ChatConversation {
   realtime_topic: string;
   visitor_name: string | null;
   visitor_email: string | null;
+  visitor_phone: string | null;
+  /** Started outside working hours, from the widget's "leave your details" form. */
+  started_offline: boolean;
   page_url: string | null;
   page_title: string | null;
   referrer: string | null;
@@ -80,7 +83,7 @@ export function filterConversations(
       if (filters.assignee === "mine" && c.assigned_to !== currentUserId) return false;
       if (filters.assignee === "unassigned" && c.assigned_to !== null) return false;
       if (!needle) return true;
-      return [c.visitor_name, c.visitor_email, c.last_message_preview, c.page_url, c.page_title]
+      return [c.visitor_name, c.visitor_email, c.visitor_phone, c.last_message_preview, c.page_url, c.page_title]
         .some((value) => value?.toLowerCase().includes(needle));
     })
     .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at));
@@ -90,6 +93,28 @@ export function countByStatus(conversations: ChatConversation[]): Record<ChatSta
   const counts = { all: conversations.length, open: 0, closed: 0 };
   for (const c of conversations) counts[c.status] += 1;
   return counts;
+}
+
+/**
+ * Other conversations from the same person (same email or phone number),
+ * newest first. Each browser gets its own conversation, so this is how a
+ * returning visitor's earlier chats are found.
+ */
+export function relatedConversations(
+  conversations: ChatConversation[],
+  current: ChatConversation
+): ChatConversation[] {
+  const email = current.visitor_email?.trim().toLowerCase();
+  const phone = current.visitor_phone?.replace(/\D/g, "");
+  if (!email && !phone) return [];
+  return conversations
+    .filter(
+      (c) =>
+        c.id !== current.id &&
+        ((!!email && c.visitor_email?.trim().toLowerCase() === email) ||
+          (!!phone && c.visitor_phone?.replace(/\D/g, "") === phone))
+    )
+    .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at));
 }
 
 /** Open conversations with a visitor message nobody has read. */

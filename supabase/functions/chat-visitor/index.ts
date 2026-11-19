@@ -12,10 +12,12 @@
 //   - logs carry counts and error codes only, never names or message text
 //
 // Body is JSON sent as text/plain (no CORS preflight). Actions:
-//   start     { body, client_id, name?, email?, page_url?, page_title?, referrer? }
+//   start     { body, client_id, name?, email?, phone?, offline?, page_url?, page_title?, referrer? }
 //   send      { conversation_id, secret, body, client_id }
 //   history   { conversation_id, secret, read? }
-//   identify  { conversation_id, secret, name?, email? }
+//   identify  { conversation_id, secret, name?, email?, phone? }
+// "offline" is set by the widget's out-of-hours form: the chat is marked
+// and gets a system note saying staff will reply as soon as they can.
 //
 // Staff are told about a new chat, or a visitor message after a long
 // silence, under the admin bell and by email to CHAT_ALERT_EMAILS
@@ -30,6 +32,7 @@ import {
   HISTORY_LIMIT,
   MAX_BODY_BYTES,
   MESSAGES_PER_MINUTE,
+  OFFLINE_NOTE,
   REQUESTS_PER_MINUTE,
   RateLimiter,
   STARTS_PER_HOUR,
@@ -62,6 +65,7 @@ interface ConversationRow {
   realtime_topic: string;
   visitor_name: string | null;
   visitor_email: string | null;
+  visitor_phone: string | null;
   page_url: string | null;
   last_message_at: string | null;
 }
@@ -82,7 +86,7 @@ async function authorise(
 
   const { data, error } = await admin
     .from("chat_conversations")
-    .select("id, status, realtime_topic, visitor_name, visitor_email, page_url, last_message_at")
+    .select("id, status, realtime_topic, visitor_name, visitor_email, visitor_phone, page_url, last_message_at")
     .eq("id", conversationId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -106,9 +110,11 @@ async function alertStaff(
   admin: SupabaseClient,
   input: {
     isNew: boolean;
+    offline?: boolean;
     conversationId: string;
     visitorName: string | null;
     visitorEmail: string | null;
+    visitorPhone: string | null;
     pageUrl: string | null;
     body: string;
   },
@@ -121,7 +127,12 @@ async function alertStaff(
       client_name: input.visitorName,
       title: mail.subject,
       body: input.body.slice(0, 300),
-      details: { conversation_id: input.conversationId, page_url: input.pageUrl },
+      details: {
+        conversation_id: input.conversationId,
+        page_url: input.pageUrl,
+        phone: input.visitorPhone,
+        offline: input.offline === true,
+      },
     });
     if (error) console.error("chat-visitor: notification failed:", error.code ?? "unknown");
   } catch {
@@ -209,6 +220,8 @@ serve(async (req) => {
           realtime_topic: topic,
           visitor_name: request.name,
           visitor_email: request.email,
+          visitor_phone: request.phone,
+          started_offline: request.offline,
           page_url: request.pageUrl,
           page_title: request.pageTitle,
           referrer: request.referrer,
@@ -239,11 +252,22 @@ serve(async (req) => {
         throw new Error(messageError.message);
       }
 
+      if (request.offline) {
+        const { error: noteError } = await admin.from("chat_messages").insert({
+          conversation_id: conversation.id,
+          sender: "system",
+          body: OFFLINE_NOTE,
+        });
+        if (noteError) console.error("chat-visitor: offline note failed:", noteError.code ?? "unknown");
+      }
+
       await alertStaff(admin, {
         isNew: true,
+        offline: request.offline,
         conversationId: conversation.id,
         visitorName: request.name,
         visitorEmail: request.email,
+        visitorPhone: request.phone,
         pageUrl: request.pageUrl,
         body: request.body,
       });
@@ -254,6 +278,7 @@ serve(async (req) => {
         topic,
         status: "open",
         has_email: !!request.email,
+        has_contact: !!(request.email || request.phone),
         messages: await loadMessages(admin, conversation.id),
       });
     }
@@ -287,6 +312,7 @@ serve(async (req) => {
           conversationId: conversation.id,
           visitorName: conversation.visitor_name,
           visitorEmail: conversation.visitor_email,
+          visitorPhone: conversation.visitor_phone,
           pageUrl: conversation.page_url,
           body: request.body,
         });
@@ -297,9 +323,11 @@ serve(async (req) => {
       const changes: Record<string, string> = {};
       if (request.name) changes.visitor_name = request.name;
       if (request.email) changes.visitor_email = request.email;
+      if (request.phone) changes.visitor_phone = request.phone;
       const { error } = await admin.from("chat_conversations").update(changes).eq("id", conversation.id);
       if (error) throw new Error(error.message);
       if (request.email) conversation.visitor_email = request.email;
+      if (request.phone) conversation.visitor_phone = request.phone;
     }
 
     if (request.action === "history" && request.markRead) {
@@ -317,6 +345,7 @@ serve(async (req) => {
       topic: conversation.realtime_topic,
       status: request.action === "send" ? "open" : conversation.status,
       has_email: !!conversation.visitor_email,
+      has_contact: !!(conversation.visitor_email || conversation.visitor_phone),
       messages: await loadMessages(admin, conversation.id),
     });
   } catch (error) {
