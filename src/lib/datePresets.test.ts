@@ -66,6 +66,17 @@ describe("compareRange", () => {
     });
   });
 
+  it("offers weekday-aligned period and year comparisons", () => {
+    expect(compareRange({ from: "2025-01-01", to: "2025-01-31" }, "previousWeekday")).toEqual({
+      from: "2024-12-04",
+      to: "2025-01-03",
+    });
+    expect(compareRange({ from: "2026-11-01", to: "2026-11-07" }, "previousYearWeekday")).toEqual({
+      from: "2025-11-02",
+      to: "2025-11-08",
+    });
+  });
+
   it("has no dates for custom", () => {
     expect(compareRange({ from: "2026-10-01", to: "2026-10-31" }, "custom")).toBeNull();
   });

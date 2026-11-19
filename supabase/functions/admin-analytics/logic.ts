@@ -448,6 +448,38 @@ export interface ProgressionTotals {
   finalOn: string;
 }
 
+/** Operational Progression-page figures for one stage and date range.
+ * Unlike the Overview chart, any later booked/completed session counts; there
+ * is no conversion-window cutoff. */
+export interface ProgressionPeriodTotals {
+  cohort: number;
+  progressed: number;
+  notBooked: number;
+  unverified: number;
+  rate: number | null;
+}
+
+export function progressionPeriodTotals(
+  histories: CustomerHistory[],
+  range: DateRange,
+  stage: Stage
+): ProgressionPeriodTotals {
+  let cohort = 0;
+  let progressed = 0;
+  let unverified = 0;
+  for (const history of histories) {
+    const from = history.sessions[stage - 1];
+    if (!from || from.date < range.from || from.date > range.to) continue;
+    if (!history.verified) {
+      unverified++;
+      continue;
+    }
+    cohort++;
+    if (history.sessions[stage]) progressed++;
+  }
+  return { cohort, progressed, notBooked: cohort - progressed, unverified, rate: rate(progressed, cohort) };
+}
+
 export interface ProgressionPoint {
   period: Period;
   stages: StageResult[];
