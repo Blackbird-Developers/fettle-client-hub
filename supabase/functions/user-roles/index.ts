@@ -89,6 +89,18 @@
       // Use service role client for operations that need elevated privileges
       const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
+      // Admins added/removed go in the staff activity log. A failed log
+      // never fails the change itself.
+      const logActivity = async (action: string, details: Record<string, unknown>) => {
+        const { error: activityError } = await adminClient.from("admin_activity").insert({
+          actor_id: user.id,
+          actor_email: user.email ?? null,
+          action,
+          details,
+        });
+        if (activityError) console.warn("user-roles: activity log failed:", activityError.message);
+      };
+
       const url = new URL(req.url);
       const action = url.searchParams.get("action");
 
@@ -199,6 +211,7 @@
           }
 
           console.log(`Admin ${user.id} added ${role} role to user ${profile.user_id}`);
+          await logActivity("team.admin_added", { email: profile.email, role });
 
           // Return with profile info (we already have it from the query above)
           const data = {
@@ -243,6 +256,13 @@
             );
           }
 
+          // Their email, for the activity log (read before the role goes).
+          const { data: removedProfile } = await adminClient
+            .from("profiles")
+            .select("email")
+            .eq("user_id", userId)
+            .maybeSingle();
+
           const { error } = await adminClient
             .from("user_roles")
             .delete()
@@ -255,6 +275,7 @@
           }
 
           console.log(`Admin ${user.id} removed ${role} role from user ${userId}`);
+          await logActivity("team.admin_removed", { email: removedProfile?.email ?? null, userId, role });
 
           return new Response(JSON.stringify({ success: true }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },

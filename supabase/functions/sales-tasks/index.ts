@@ -421,6 +421,17 @@ serve(async (req) => {
       .eq("run_on", runOn);
     console.log("sales-tasks completed", { caller: caller === "cron" ? "cron" : "admin", ...summary });
 
+    // Staff runs ("Prepare today's list" / "Refresh") go in the activity log;
+    // the morning cron doesn't. A failed log never fails the run.
+    if (caller !== "cron") {
+      const { error: activityError } = await db.from("admin_activity").insert({
+        actor_email: caller,
+        action: "tasks.list_prepared",
+        details: { created: inserted, durationMs: summary.durationMs },
+      });
+      if (activityError) console.warn("sales-tasks: activity log failed:", activityError.message);
+    }
+
     return json({ runOn, summary });
   } catch (error) {
     // Messages here are built without client data (see acuityAppointments).

@@ -597,6 +597,11 @@
   border-color: var(--bw-orange);
   box-shadow: var(--bw-focus);
 }
+.bw-input.phone-prefix:focus-visible,
+.bw-input.phone-prefix[data-state='open'] {
+  border-color: var(--bw-orange);
+  box-shadow: var(--bw-focus);
+}
 .bw-input.is-bad {
   border-color: var(--bw-red);
 }

@@ -20,6 +20,8 @@ vi.mock("@/components/layout/DashboardLayout", () => ({
 }));
 vi.mock("@/components/admin/SalesTasks", () => ({ SalesTasks: () => <p>Sales tasks content</p> }));
 vi.mock("@/components/admin/AdminNotificationsBell", () => ({ AdminNotificationsBell: () => null }));
+// Opens a Realtime connection; not what this test is about.
+vi.mock("@/components/admin/inbox/ChatAlerts", () => ({ ChatAlerts: () => null }));
 
 function renderAt(path: string) {
   render(

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { PhoneInput } from '@/components/PhoneInput';
+import { emailError, phoneError } from '@/lib/contactValidation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements } from '@stripe/react-stripe-js';
 import {
@@ -58,6 +60,7 @@ export function PackageBookingModal({
   const [packageCategory, setPackageCategory] = useState<PackageCategory>('individual');
   const [selectedPackage, setSelectedPackage] = useState<typeof PACKAGES[0] | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -107,6 +110,11 @@ export function PackageBookingModal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const emailProblem = touched.email && formData.email.trim() ? emailError(formData.email) : undefined;
+  const phoneProblem = touched.phone ? phoneError(formData.phone) : undefined;
+  const fieldClassName =
+    'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2';
 
   const handleProceedToPayment = async () => {
     if (!selectedPackage) return;
@@ -164,6 +172,7 @@ export function PackageBookingModal({
     setPackageCategory('individual');
     setSelectedPackage(null);
     setFormData({ firstName: '', lastName: '', email: '', phone: '' });
+    setTouched({});
     setClientSecret(null);
     setPaymentIntentId(null);
     setPaymentAmount(0);
@@ -346,19 +355,27 @@ export function PackageBookingModal({
                 type="email"
                 value={formData.email}
                 onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                onBlur={() => setTouched(t => ({ ...t, email: true }))}
                 placeholder="john@example.com"
+                aria-invalid={!!emailProblem}
+                aria-describedby={emailProblem ? 'email-error' : undefined}
               />
+              {emailProblem && <p id="email-error" className="text-sm text-destructive">{emailProblem}</p>}
             </div>
             
             <div className="space-y-2">
               <Label htmlFor="phone">Phone (optional)</Label>
-              <Input
+              <PhoneInput
                 id="phone"
-                type="tel"
                 value={formData.phone}
-                onChange={e => setFormData(prev => ({ ...prev, phone: e.target.value }))}
-                placeholder="+353 1234567"
+                onChange={phone => setFormData(prev => ({ ...prev, phone }))}
+                onBlur={() => setTouched(t => ({ ...t, phone: true }))}
+                selectClassName={fieldClassName}
+                inputClassName={fieldClassName}
+                invalid={!!phoneProblem}
+                describedBy={phoneProblem ? 'phone-error' : undefined}
               />
+              {phoneProblem && <p id="phone-error" className="text-sm text-destructive">{phoneProblem}</p>}
             </div>
 
             <div className="flex gap-3 pt-2">
@@ -367,7 +384,7 @@ export function PackageBookingModal({
               </Button>
               <Button 
                 onClick={handleProceedToPayment}
-                disabled={!formData.firstName || !formData.lastName || !formData.email || isSubmitting}
+                disabled={!formData.firstName || !formData.lastName || !formData.email || !!emailError(formData.email) || !!phoneError(formData.phone) || isSubmitting}
                 className="flex-1 gap-2"
               >
                 {isSubmitting ? (

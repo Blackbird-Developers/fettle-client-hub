@@ -45,6 +45,18 @@ export function notificationDetailLines(n: Pick<AdminNotification, 'kind' | 'det
   return lines;
 }
 
+/** How many the bell shows; the rest are on the Notifications page. */
+export const BELL_LIMIT = 10;
+export const NOTIFICATIONS_PAGE_SIZE = 25;
+
+/**
+ * Search text made safe for a PostgREST `or(...ilike...)` filter: commas,
+ * brackets and wildcards would break or widen the filter, so they're dropped.
+ */
+export function notificationSearchTerm(raw: string): string {
+  return raw.replace(/[,()%*\\]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 export function unreadCount(rows: Pick<AdminNotification, 'read_at'>[] | undefined): number {
   return rows ? rows.filter((r) => !r.read_at).length : 0;
 }

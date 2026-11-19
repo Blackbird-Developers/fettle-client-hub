@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { track } from '@/lib/booking/analytics';
 import { type BookingDetails, DETAILS_FIELD_ORDER, type DetailsErrors, hasCompleteContact, validateDetails } from '@/lib/booking/details';
+import { PhoneInput } from '@/components/PhoneInput';
 import { useWizard } from '../context';
 import { ActionBar, StepHeader } from '../parts';
 
@@ -122,7 +123,28 @@ export function DetailsStep() {
                 full: true,
                 locked: 'This is your My Fettle email, so the session appears in My sessions.',
               })}
-              {field('phone', 'Mobile number', '+353 87 123 4567', { type: 'tel', autoComplete: 'tel', full: true })}
+              <div className="bw-field is-full">
+                <label className="bw-label" htmlFor="bw-phone">
+                  Mobile number
+                </label>
+                <PhoneInput
+                  id="bw-phone"
+                  value={d.phone}
+                  onChange={(v) => set('phone', v)}
+                  selectClassName={`bw-input${errors.phone ? ' is-bad' : ''}`}
+                  inputClassName={`bw-input${errors.phone ? ' is-bad' : ''}`}
+                  invalid={!!errors.phone}
+                  describedBy={errors.phone ? 'bw-phone-err bw-phone-note' : 'bw-phone-note'}
+                />
+                <span className="bw-field-note" id="bw-phone-note">
+                  We may call this number about your booking, so please double-check it.
+                </span>
+                {errors.phone && (
+                  <span className="bw-error" id="bw-phone-err">
+                    {errors.phone}
+                  </span>
+                )}
+              </div>
             </>
           )}
           {couples && field('partnerName', 'Your partner’s name (and pronouns)', 'e.g. Alex Byrne (he/him)', { full: true })}
