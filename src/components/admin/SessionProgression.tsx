@@ -19,6 +19,7 @@ import {
   useContactOutcomesAvailable,
   useCustomerFollowups,
   useCustomerInsights,
+  useProgressionPeriod,
 } from "@/hooks/useAdmin";
 import {
   type OutcomeFilter,
@@ -203,6 +204,8 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
       direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
     }));
 
+  const comparison = useProgressionPeriod(dateRange.compare?.range ?? null, fromSession);
+
   if (isLoading) return <InsightsLoading source="admin-customer-insights" />;
   if (error || !data) {
     return error ? <InsightsError error={error} onRetry={() => refetch()} /> : null;
@@ -231,6 +234,12 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
   const notBooked = verified.length - progressed;
   const unverified = inPeriod.length - verified.length;
   const conversion = verified.length > 0 ? Math.round((progressed / verified.length) * 100) : 0;
+  const compared = comparison.data?.totals;
+  const comparisonHint = comparison.isPending
+    ? "Loading comparisonâ€¦"
+    : comparison.error
+      ? "Comparison unavailable"
+      : null;
 
   const headerState = headerCheckboxState(visibleKeys, selected);
 
@@ -245,8 +254,8 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
         onChange={setDateRange}
         today={today}
         min={earliestDay}
+        compareMin="2010-01-01"
         presets={["today", "yesterday", "thisWeek", "lastWeek", "last7", "last14", "last28", "last30"]}
-        allowCompare={false}
       />
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
@@ -257,14 +266,27 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
               : `Had their ${from} session`
           }
           value={String(verified.length)}
+          hint={compared ? `${compared.cohort} in comparison period` : comparisonHint ?? undefined}
         />
         <StatTile
           label={`Progressed to a ${next} session`}
           value={`${conversion}%`}
-          hint={`${progressed} completed or booked`}
+          hint={
+            compared
+              ? `${progressed} completed or booked Â· comparison ${Math.round((compared.rate ?? 0) * 100)}%`
+              : comparisonHint ?? `${progressed} completed or booked`
+          }
         />
-        <StatTile label={`No ${next} session booked`} value={String(notBooked)} />
-        <StatTile label="Unable to verify" value={String(unverified)} hint="Not included in the rates" />
+        <StatTile
+          label={`No ${next} session booked`}
+          value={String(notBooked)}
+          hint={compared ? `${compared.notBooked} in comparison period` : comparisonHint ?? undefined}
+        />
+        <StatTile
+          label="Unable to verify"
+          value={String(unverified)}
+          hint={compared ? `${compared.unverified} in comparison period; not included in rates` : "Not included in the rates"}
+        />
       </div>
 
       <DataIssuesPanel data={data} />

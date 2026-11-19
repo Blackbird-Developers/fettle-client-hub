@@ -601,6 +601,30 @@ export function useAdminAnalytics(query: string, enabled = true) {
   });
 }
 
+export interface ProgressionPeriodResponse {
+  range: { from: string; to: string };
+  stage: number;
+  totals: { cohort: number; progressed: number; notBooked: number; unverified: number; rate: number | null };
+}
+
+export function useProgressionPeriod(
+  range: { from: string; to: string } | null,
+  stage: number
+) {
+  const { data: isAdmin } = useIsAdmin();
+  const query = range
+    ? new URLSearchParams({ action: "progression-period", from: range.from, to: range.to, stage: String(stage) }).toString()
+    : "";
+  return useQuery<ProgressionPeriodResponse, ApiError>({
+    queryKey: ["admin-progression-period", query],
+    queryFn: () => fetchAdminFunction("admin-analytics", query),
+    enabled: isAdmin === true && range !== null,
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+    retry: ACUITY_QUERY_OPTIONS.retry,
+  });
+}
+
 // The Booking funnel tab (admin-analytics?action=funnel).
 export function useAdminFunnel(query: string, enabled = true) {
   const { data: isAdmin } = useIsAdmin();

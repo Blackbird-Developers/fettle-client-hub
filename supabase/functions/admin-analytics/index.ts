@@ -33,6 +33,7 @@ import {
   parseCalendars,
   parseSessionRows,
   progressionSeries,
+  progressionPeriodTotals,
   progressionTotals,
   returningMinGapDays,
   segmentMembers,
@@ -138,6 +139,24 @@ serve(async (req) => {
     }
 
     const search = new URL(req.url).searchParams;
+
+    // Comparison figures for the operational Session Nâ€“N+1 Progression pages.
+    // These use the saved full history, so comparing with last year never
+    // expands the live Acuity request made by admin-customer-insights.
+    if (search.get("action") === "progression-period") {
+      const from = search.get("from");
+      const to = search.get("to");
+      const stage = Number(search.get("stage"));
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from ?? "") || !/^\d{4}-\d{2}-\d{2}$/.test(to ?? "") || from! > to!) {
+        return json({ error: "from and to must be dates, from first" }, 400);
+      }
+      if (![1, 2, 3, 4].includes(stage)) return json({ error: "stage must be 1, 2, 3 or 4" }, 400);
+      const db = createClient(supabaseUrl, supabaseServiceKey);
+      const { data: raw, error: rowsError } = await db.rpc("admin_analytics_sessions");
+      if (rowsError) throw new Error(`Failed to read sessions: ${rowsError.code}`);
+      const totals = progressionPeriodTotals(buildHistories(parseSessionRows(raw)), { from: from!, to: to! }, stage as 1 | 2 | 3 | 4);
+      return json({ range: { from, to }, stage, totals });
+    }
 
     // Booking funnel tab: its own data (booking_funnel_events), not the Acuity copy.
     if (search.get("action") === "funnel") {

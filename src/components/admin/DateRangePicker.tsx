@@ -196,6 +196,7 @@ export function DateRangePicker({
   onChange,
   today = toDay(new Date()),
   min,
+  compareMin,
   max = today,
   presets = ALL_PRESETS,
   allowCompare = true,
@@ -208,6 +209,8 @@ export function DateRangePicker({
   today?: string;
   /** Earliest day that can be picked. */
   min?: string;
+  /** Earliest comparison day; defaults to the main period's minimum. */
+  compareMin?: string;
   /** Latest day that can be picked; defaults to today. */
   max?: string;
   /** The presets on offer, in DATE_PRESETS order. */
@@ -386,7 +389,7 @@ export function DateRangePicker({
                   range={draft.compareRange}
                   active={draft.target === "compare"}
                   swatch="bg-secondary-foreground"
-                  min={min}
+                  min={compareMin ?? min}
                   max={max}
                   onFocus={() => setDraft((c) => ({ ...c, target: "compare", anchor: null }))}
                   onChange={setCompare}
@@ -406,7 +409,7 @@ export function DateRangePicker({
               numberOfMonths={isMobile ? 1 : 2}
               weekStartsOn={1}
               showOutsideDays={false}
-              fromDate={min ? toDate(min) : undefined}
+              fromDate={(draft.target === "compare" ? compareMin ?? min : min) ? toDate((draft.target === "compare" ? compareMin ?? min : min)!) : undefined}
               toDate={max ? toDate(max) : undefined}
               onDayClick={(date, modifiers) => !modifiers.disabled && onDayClick(date)}
               onDayMouseEnter={(date) => setHovered(toDay(date))}

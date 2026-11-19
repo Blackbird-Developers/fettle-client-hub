@@ -15,6 +15,7 @@ import {
   parseSessionRows,
   periodsInRange,
   progressionPage,
+  progressionPeriodTotals,
   progressionSeries,
   progressionTotals,
   segmentMembers,
@@ -124,6 +125,24 @@ describe("buildHistories", () => {
       session("phone:353871234567", "2026-10-01T10:00:00Z"),
     ]);
     expect(histories.map((h) => h.verified)).toEqual([true, false]);
+  });
+});
+
+describe("progressionPeriodTotals", () => {
+  it("compares one session stage without a conversion-window cutoff", () => {
+    const histories = buildHistories([
+      session("progressed", "2026-09-05T10:00:00Z"),
+      session("progressed", "2026-12-05T10:00:00Z"),
+      session("waiting", "2026-09-12T10:00:00Z"),
+      session("phone:353871234567", "2026-09-15T10:00:00Z"),
+    ]);
+    expect(progressionPeriodTotals(histories, SEPTEMBER, 1)).toEqual({
+      cohort: 2,
+      progressed: 1,
+      notBooked: 1,
+      unverified: 1,
+      rate: 0.5,
+    });
   });
 });
 
