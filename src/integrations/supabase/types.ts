@@ -117,12 +117,14 @@ export type Database = {
           page_url: string | null
           realtime_topic: string
           referrer: string | null
+          started_offline: boolean
           status: string
           updated_at: string
           user_agent: string | null
           visitor_email: string | null
           visitor_last_read_at: string | null
           visitor_name: string | null
+          visitor_phone: string | null
         }
         Insert: {
           admin_unread_count?: number
@@ -139,12 +141,14 @@ export type Database = {
           page_url?: string | null
           realtime_topic: string
           referrer?: string | null
+          started_offline?: boolean
           status?: string
           updated_at?: string
           user_agent?: string | null
           visitor_email?: string | null
           visitor_last_read_at?: string | null
           visitor_name?: string | null
+          visitor_phone?: string | null
         }
         Update: {
           admin_unread_count?: number
@@ -161,12 +165,14 @@ export type Database = {
           page_url?: string | null
           realtime_topic?: string
           referrer?: string | null
+          started_offline?: boolean
           status?: string
           updated_at?: string
           user_agent?: string | null
           visitor_email?: string | null
           visitor_last_read_at?: string | null
           visitor_name?: string | null
+          visitor_phone?: string | null
         }
         Relationships: []
       }

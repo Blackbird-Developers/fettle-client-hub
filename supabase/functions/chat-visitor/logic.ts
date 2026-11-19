@@ -77,6 +77,13 @@ export function email(value: unknown): string | null {
   return cleaned && EMAIL.test(cleaned) ? cleaned.toLowerCase() : null;
 }
 
+/** A phone number as typed (digits, spaces, + - ( )), with at least 7 digits; else null. */
+export function phone(value: unknown): string | null {
+  const cleaned = line(value, 40);
+  if (!cleaned || !/^[0-9+\-() ]+$/.test(cleaned)) return null;
+  return cleaned.replace(/\D/g, "").length >= 7 ? cleaned : null;
+}
+
 /** An http(s) URL without its fragment, or null. */
 export function url(value: unknown, max = 500): string | null {
   const cleaned = line(value, 2000);
@@ -103,6 +110,7 @@ export interface Credentials {
 export interface VisitorDetails {
   name: string | null;
   email: string | null;
+  phone: string | null;
 }
 
 export interface PageContext {
@@ -112,7 +120,7 @@ export interface PageContext {
 }
 
 export type ChatRequest =
-  | ({ action: "start"; body: string; clientId: string } & VisitorDetails & PageContext)
+  | ({ action: "start"; body: string; clientId: string; offline: boolean } & VisitorDetails & PageContext)
   | ({ action: "send"; body: string; clientId: string } & Credentials)
   | ({ action: "history"; markRead: boolean } & Credentials)
   | ({ action: "identify" } & Credentials & VisitorDetails);
@@ -153,8 +161,10 @@ export function parseRequest(input: unknown): ParseResult {
         request: {
           action: "start",
           ...msg,
+          offline: body.offline === true,
           name: line(body.name, 100),
           email: email(body.email),
+          phone: phone(body.phone),
           pageUrl: url(body.page_url),
           pageTitle: line(body.page_title, 200),
           referrer: url(body.referrer),
@@ -178,9 +188,11 @@ export function parseRequest(input: unknown): ParseResult {
       if (!creds) return { ok: false, error: "invalid_credentials" };
       const name = line(body.name, 100);
       const mail = email(body.email);
+      const tel = phone(body.phone);
       if (body.email && !mail) return { ok: false, error: "invalid_email" };
-      if (!name && !mail) return { ok: false, error: "nothing_to_save" };
-      return { ok: true, request: { action: "identify", ...creds, name, email: mail } };
+      if (body.phone && !tel) return { ok: false, error: "invalid_phone" };
+      if (!name && !mail && !tel) return { ok: false, error: "nothing_to_save" };
+      return { ok: true, request: { action: "identify", ...creds, name, email: mail, phone: tel } };
     }
     default:
       return { ok: false, error: "unknown_action" };
@@ -214,6 +226,10 @@ export function shouldAlert(previousMessageAt: string | null, nowMs: number): bo
   return !Number.isFinite(previous) || nowMs - previous >= ALERT_GAP_MS;
 }
 
+/** The note added to a chat started outside working hours. */
+export const OFFLINE_NOTE =
+  "Thanks for your message. We're outside our working hours right now, and we will respond to you as soon as we can.";
+
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -226,21 +242,35 @@ export function escapeHtml(value: string): string {
 /** The staff alert email for a new chat (or a chat that woke up again). */
 export function alertEmail(input: {
   isNew: boolean;
+  offline?: boolean;
   visitorName: string | null;
   visitorEmail: string | null;
+  visitorPhone?: string | null;
   pageUrl: string | null;
   body: string;
   inboxUrl: string;
 }): { subject: string; html: string } {
   const who = input.visitorName ?? input.visitorEmail ?? "A website visitor";
-  const subject = input.isNew ? `New live chat from ${who}` : `${who} replied in live chat`;
+  const subject = input.isNew
+    ? input.offline
+      ? `${who} left a message outside working hours`
+      : `New live chat from ${who}`
+    : `${who} replied in live chat`;
+  const contact = [
+    input.visitorPhone ? `Phone: ${input.visitorPhone}` : null,
+    input.visitorEmail ? `Email: ${input.visitorEmail}` : null,
+  ]
+    .filter((row): row is string => !!row)
+    .map((row) => `<p style="margin:0 0 4px;font-size:14px">${escapeHtml(row)}</p>`)
+    .join("");
   const page = input.pageUrl
     ? `<p style="margin:0 0 16px;color:#6b6a68;font-size:14px">Page: ${escapeHtml(input.pageUrl)}</p>`
     : "";
   const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#2d2c2b">
   <h2 style="margin:0 0 8px;font-size:20px">${escapeHtml(subject)}</h2>
   ${page}
-  <div style="background:#fdf5eb;border-radius:12px;padding:16px;white-space:pre-wrap;font-size:15px;line-height:1.5">${escapeHtml(input.body)}</div>
+  ${contact}
+  <div style="margin-top:12px;background:#fdf5eb;border-radius:12px;padding:16px;white-space:pre-wrap;font-size:15px;line-height:1.5">${escapeHtml(input.body)}</div>
   <p style="margin:24px 0 0"><a href="${escapeHtml(input.inboxUrl)}" style="background:#ff7300;color:#fff;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:bold;display:inline-block">Reply in the Inbox</a></p>
 </div>`;
   return { subject, html };

@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS public.chat_conversations (
   -- What the visitor told us, if anything.
   visitor_name TEXT CHECK (char_length(visitor_name) <= 100),
   visitor_email TEXT CHECK (char_length(visitor_email) <= 200),
+  visitor_phone TEXT CHECK (char_length(visitor_phone) <= 40),
+  -- True when the chat was started outside working hours, from the widget's
+  -- "leave your details" form.
+  started_offline BOOLEAN NOT NULL DEFAULT false,
   -- Where they started the chat.
   page_url TEXT CHECK (char_length(page_url) <= 500),
   page_title TEXT CHECK (char_length(page_title) <= 200),
@@ -43,6 +47,11 @@ CREATE TABLE IF NOT EXISTS public.chat_conversations (
   closed_at TIMESTAMP WITH TIME ZONE,
   closed_by_email TEXT
 );
+
+-- Added after the first draft; does nothing on a fresh database.
+ALTER TABLE public.chat_conversations
+  ADD COLUMN IF NOT EXISTS visitor_phone TEXT CHECK (char_length(visitor_phone) <= 40),
+  ADD COLUMN IF NOT EXISTS started_offline BOOLEAN NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS chat_conversations_last_message_idx
   ON public.chat_conversations (last_message_at DESC);
@@ -116,6 +125,8 @@ CREATE TRIGGER stamp_chat_message
 --   visitor message: one more unread for staff, and a closed chat reopens
 --   admin message:   staff have read it, and an unassigned chat goes to
 --                    whoever replied
+--   system message:  (e.g. the out-of-hours note) changes nothing, so the
+--                    list keeps showing what the visitor wrote
 -- SECURITY DEFINER because staff may only update a few columns themselves.
 CREATE OR REPLACE FUNCTION public.apply_chat_message()
 RETURNS TRIGGER
@@ -124,6 +135,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  IF NEW.sender = 'system' THEN
+    RETURN NULL;
+  END IF;
+
   UPDATE public.chat_conversations c
   SET
     last_message_at = NEW.created_at,

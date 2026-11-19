@@ -10,6 +10,8 @@ import {
   Mail,
   MessagesSquare,
   Monitor,
+  Moon,
+  Phone,
   RefreshCw,
   RotateCcw,
   Search,
@@ -51,6 +53,7 @@ import {
   listTime,
   messageTime,
   newClientId,
+  relatedConversations,
   seenByVisitor,
   shortUrl,
   visitorInitials,
@@ -154,7 +157,7 @@ export function Inbox() {
               <Input
                 value={filters.search}
                 onChange={(event) => setFilters((f) => ({ ...f, search: event.target.value }))}
-                placeholder="Search name, email or message"
+                placeholder="Search name, email, phone or message"
                 aria-label="Search conversations"
                 className="pl-9"
               />
@@ -240,6 +243,8 @@ export function Inbox() {
           key={selected.id}
           conversation={selected}
           admins={admins}
+          related={relatedConversations(conversations, selected)}
+          onOpenConversation={select}
           currentUserId={user?.id}
           currentUserEmail={user?.email ?? null}
           onBack={() => select(undefined)}
@@ -336,6 +341,12 @@ function ConversationRow({
               Closed
             </Badge>
           )}
+          {conversation.started_offline && (
+            <Badge variant="outline" className="h-5 gap-1 px-1.5 text-[11px] font-normal text-muted-foreground">
+              <Moon className="h-3 w-3" />
+              Out of hours
+            </Badge>
+          )}
           {conversation.assigned_to ? (
             <Badge variant="secondary" className="h-5 px-1.5 text-[11px] font-normal">
               {mine ? "Mine" : (conversation.assigned_to_email?.split("@")[0] ?? "Assigned")}
@@ -356,12 +367,16 @@ function ConversationRow({
 function Thread({
   conversation,
   admins,
+  related,
+  onOpenConversation,
   currentUserId,
   currentUserEmail,
   onBack,
 }: {
   conversation: ChatConversation;
   admins: AdminOption[];
+  related: ChatConversation[];
+  onOpenConversation: (id: string) => void;
   currentUserId: string | undefined;
   currentUserEmail: string | null;
   onBack: () => void;
@@ -592,7 +607,7 @@ function Thread({
       </section>
 
       <aside className="hidden w-72 shrink-0 overflow-y-auto border-l border-border/60 p-4 xl:block">
-        <VisitorDetails conversation={conversation} />
+        <VisitorDetails conversation={conversation} related={related} onOpenConversation={onOpenConversation} />
       </aside>
 
       <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
@@ -601,7 +616,14 @@ function Thread({
             <SheetTitle className="text-left">Visitor details</SheetTitle>
           </SheetHeader>
           <div className="mt-4">
-            <VisitorDetails conversation={conversation} />
+            <VisitorDetails
+              conversation={conversation}
+              related={related}
+              onOpenConversation={(id) => {
+                setDetailsOpen(false);
+                onOpenConversation(id);
+              }}
+            />
           </div>
         </SheetContent>
       </Sheet>
@@ -646,7 +668,15 @@ function MessageBubble({ message, next }: { message: ChatMessage; next: ChatMess
   );
 }
 
-function VisitorDetails({ conversation }: { conversation: ChatConversation }) {
+function VisitorDetails({
+  conversation,
+  related,
+  onOpenConversation,
+}: {
+  conversation: ChatConversation;
+  related: ChatConversation[];
+  onOpenConversation: (id: string) => void;
+}) {
   const device = describeDevice(conversation.user_agent);
   return (
     <div className="space-y-5 text-sm">
@@ -654,7 +684,9 @@ function VisitorDetails({ conversation }: { conversation: ChatConversation }) {
         <Avatar conversation={conversation} className="h-14 w-14 text-base" />
         <div>
           <p className="font-semibold">{visitorLabel(conversation)}</p>
-          <p className="text-xs text-muted-foreground">Website visitor</p>
+          <p className="text-xs text-muted-foreground">
+            {conversation.started_offline ? "Left a message outside working hours" : "Website visitor"}
+          </p>
         </div>
       </div>
 
@@ -667,6 +699,19 @@ function VisitorDetails({ conversation }: { conversation: ChatConversation }) {
             conversation.visitor_email ? (
               <a href={`mailto:${conversation.visitor_email}`} className="break-all text-primary hover:underline">
                 {conversation.visitor_email}
+              </a>
+            ) : (
+              "Not given"
+            )
+          }
+        />
+        <DetailRow
+          icon={Phone}
+          label="Phone"
+          value={
+            conversation.visitor_phone ? (
+              <a href={`tel:${conversation.visitor_phone.replace(/[^0-9+]/g, "")}`} className="text-primary hover:underline">
+                {conversation.visitor_phone}
               </a>
             ) : (
               "Not given"
@@ -720,6 +765,33 @@ function VisitorDetails({ conversation }: { conversation: ChatConversation }) {
           </div>
         )}
       </dl>
+
+      {related.length > 0 && (
+        <div className="border-t border-border/60 pt-4">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">
+            Earlier conversations ({related.length})
+          </p>
+          <ul className="space-y-1.5">
+            {related.map((other) => (
+              <li key={other.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpenConversation(other.id)}
+                  className="w-full rounded-lg border border-border/60 px-2.5 py-2 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>{formatDateTime(other.last_message_at)}</span>
+                    <span>{other.status === "closed" ? "Closed" : "Open"}</span>
+                  </span>
+                  <span className="mt-0.5 block truncate text-sm">
+                    {other.last_message_preview ?? "No messages"}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
