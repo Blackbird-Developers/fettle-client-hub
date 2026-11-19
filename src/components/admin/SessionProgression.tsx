@@ -12,7 +12,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CalendarX, Search } from "lucide-react";
 import {
@@ -29,7 +28,10 @@ import {
 } from "@/lib/contactOutcomes";
 import { headerCheckboxState, pruneSelection, toggleAllVisible, toggleSelected } from "@/lib/bulkFollowups";
 import { indexFollowups, isMissingTableError } from "@/lib/customerFollowups";
+import { todayInDublin } from "@/lib/adminAnalytics";
+import { addDays, presetRange } from "@/lib/datePresets";
 import { BulkActionBar } from "./BulkActionBar";
+import { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
 import { FollowupActions } from "./FollowupActions";
 import { daysAgoLabel, formatDate, formatDateTime, matchesSearch } from "@/lib/customerInsights";
 import { initialSearchFromUrl } from "@/lib/salesTasks";
@@ -128,7 +130,13 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
         : "Couldn't load contact outcomes. Refresh the page to try again."
       : null;
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("all");
-  const [period, setPeriod] = useState(30);
+  const today = todayInDublin();
+  const earliestDay = addDays(today, -(data?.activeWindowDays ?? 30) + 1);
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => ({
+    preset: "last30",
+    range: presetRange("last30", today)!,
+    compare: null,
+  }));
   const [search, setSearch] = useState(initialSearchFromUrl);
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
     key: "grade",
@@ -140,13 +148,17 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
   const next = sessionOrdinal(fromSession + 1);
   const fromLabel = fromSession === 1 ? "first-ever" : from;
 
-  // Rows whose session N falls inside the selected period. The server
-  // already limits rows to the full active window, so that period shows all.
+  // The server currently supplies the latest active window, so the picker is
+  // constrained to dates for which this view has complete data.
   const inPeriod = useMemo(() => {
     const all = view?.rows ?? [];
-    if (!data || period >= data.activeWindowDays) return all;
-    return all.filter((row) => row.daysSinceFromSession < period);
-  }, [data, view, period]);
+    return all.filter((row) => {
+      // The server calculates this in the same reporting clock as its active
+      // window, avoiding UTC-midnight shifts in the appointment timestamp.
+      const day = addDays(today, -row.daysSinceFromSession);
+      return day >= dateRange.range.from && day <= dateRange.range.to;
+    });
+  }, [view, today, dateRange.range.from, dateRange.range.to]);
 
   const rows = useMemo(() => {
     const compare = COMPARATORS[sort.key];
@@ -227,26 +239,22 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
     <div className={`space-y-6 animate-fade-in ${selectedKeys.length > 0 ? "pb-24" : ""}`}>
       <InsightsHeader data={data} isFetching={isFetching} onRefresh={() => refetch()} />
 
-      <ToggleGroup
-        type="single"
-        value={String(period)}
-        onValueChange={(value) => value && setPeriod(Number(value))}
-        className="justify-start"
-        aria-label={`${capitalize(from)} session within`}
-      >
-        {data.progressionPeriods.map((days) => (
-          <ToggleGroupItem key={days} value={String(days)} variant="outline" size="sm">
-            Last {days} days
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
+      <DateRangePicker
+        id={`progression-${fromSession}-dates`}
+        value={dateRange}
+        onChange={setDateRange}
+        today={today}
+        min={earliestDay}
+        presets={["today", "yesterday", "thisWeek", "lastWeek", "last7", "last14", "last28", "last30"]}
+        allowCompare={false}
+      />
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <StatTile
           label={
             fromSession === 1
-              ? `First-time customers (last ${period} days)`
-              : `Had their ${from} session (last ${period} days)`
+              ? "First-time customers"
+              : `Had their ${from} session`
           }
           value={String(verified.length)}
         />
@@ -268,7 +276,7 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
               {capitalize(from)}-to-{next}-session progression
             </CardTitle>
             <CardDescription>
-              Customers whose {fromLabel} session was in the last {period} days, and whether
+              Customers whose {fromLabel} session was in the selected date range, and whether
               they've completed or booked a {next} one. Intro calls, therapy, assessments and
               psychiatry all count as sessions; free consultations don't.
             </CardDescription>
@@ -309,8 +317,8 @@ export function SessionProgression({ fromSession }: { fromSession: number }) {
                 {search || outcomeFilter !== "all"
                   ? "No customers match your search or filter."
                   : fromSession === 1
-                    ? `No first-time customers in the last ${period} days.`
-                    : `No customers had their ${from} session in the last ${period} days.`}
+                    ? "No first-time customers in the selected date range."
+                    : `No customers had their ${from} session in the selected date range.`}
               </p>
             </div>
           ) : (
