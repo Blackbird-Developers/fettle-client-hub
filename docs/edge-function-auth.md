@@ -51,6 +51,7 @@ Functions the app calls also check `x-app-version` (`_shared/appVersion.ts`). Th
 | `resend-webhook` | Signature (Svix, `RESEND_WEBHOOK_SECRET`) | |
 | `email-unsubscribe` | Signature (signed link token) | Opened by people who aren't signed in. |
 | `send-password-reset` | Public | It has to work for people who aren't signed in. GoTrue only accepts a `redirectTo` that is on the Auth redirect allow-list. |
+| `chat-visitor` | Public (fettle.ie origins only) | The live chat widget. A conversation can only be read or written with the secret created for it; rate-limited per IP and per conversation. See `LIVE_CHAT.md`. |
 
 Removed: `create-session-payment`, `create-package-payment`, `verify-payment-and-book` and `verify-package-payment`. These were the old Stripe Checkout redirect flow, and nothing called them any more.
 

@@ -3,6 +3,7 @@ import {
   ClipboardList,
   Flame,
   History,
+  Inbox,
   Pill,
   Package,
   LayoutDashboard,
@@ -21,6 +22,7 @@ import { PROGRESSION_RANGES } from "../../supabase/functions/admin-customer-insi
 // page; add new admin features here.
 export type AdminSectionId =
   | "overview"
+  | "inbox"
   | "sales-tasks"
   | "leads"
   | "no-answer"
@@ -80,6 +82,13 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     href: "/admin",
     icon: LayoutDashboard,
     description: "Business metrics across sessions, packages and retention.",
+  },
+  {
+    id: "inbox",
+    name: "Inbox",
+    href: "/admin/inbox",
+    icon: Inbox,
+    description: "Live chat with visitors on fettle.ie: reply, assign and close conversations.",
   },
   {
     id: "sales-tasks",

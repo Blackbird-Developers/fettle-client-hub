@@ -27,6 +27,7 @@ import {
 } from "@/hooks/useAdmin";
 import { ADMIN_SECTIONS, hasActiveChild } from "@/lib/adminNavigation";
 import { useSalesTasksDueCount } from "@/hooks/useSalesTasks";
+import { useChatUnreadCount } from "@/hooks/useChatInbox";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -125,6 +126,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const noAnswerDue = useNoAnswerDueCount();
   const newFeedback = useNewFeedbackCount();
   const salesTasksDue = useSalesTasksDueCount();
+  const unreadChats = useChatUnreadCount();
 
   const handleSignOut = async () => {
     await signOut();
@@ -137,8 +139,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   const navigation = adminMode
     ? adminNavigation.map((item) =>
-        // Sales tasks, Follow-ups and No answer attempts due today or earlier; unread feedback.
-        item.href === "/admin/sales-tasks" && salesTasksDue > 0
+        // Sales tasks, Follow-ups and No answer attempts due today or earlier; unread feedback;
+        // live chats with an unread visitor message.
+        item.href === "/admin/inbox" && unreadChats > 0
+          ? { ...item, badge: String(unreadChats) }
+          : item.href === "/admin/sales-tasks" && salesTasksDue > 0
           ? { ...item, badge: String(salesTasksDue) }
           : item.href === "/admin/followups" && followUpsDue > 0
           ? { ...item, badge: String(followUpsDue) }

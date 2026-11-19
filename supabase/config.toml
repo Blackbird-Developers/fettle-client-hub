@@ -153,3 +153,9 @@ verify_jwt = false
 # only keeps known events/fields and rate-limits per IP instead.
 [functions.track-booking-funnel]
 verify_jwt = false
+
+# Public: the live chat widget on fettle.ie. Visitors aren't logged in; the
+# function checks the origin, needs the conversation's own secret to read or
+# write it, and rate-limits per IP and per conversation instead.
+[functions.chat-visitor]
+verify_jwt = false

@@ -101,6 +101,116 @@ export type Database = {
         }
         Relationships: []
       }
+      chat_conversations: {
+        Row: {
+          admin_unread_count: number
+          assigned_to: string | null
+          assigned_to_email: string | null
+          closed_at: string | null
+          closed_by_email: string | null
+          created_at: string
+          id: string
+          last_message_at: string
+          last_message_preview: string | null
+          last_message_sender: string | null
+          page_title: string | null
+          page_url: string | null
+          realtime_topic: string
+          referrer: string | null
+          status: string
+          updated_at: string
+          user_agent: string | null
+          visitor_email: string | null
+          visitor_last_read_at: string | null
+          visitor_name: string | null
+        }
+        Insert: {
+          admin_unread_count?: number
+          assigned_to?: string | null
+          assigned_to_email?: string | null
+          closed_at?: string | null
+          closed_by_email?: string | null
+          created_at?: string
+          id?: string
+          last_message_at?: string
+          last_message_preview?: string | null
+          last_message_sender?: string | null
+          page_title?: string | null
+          page_url?: string | null
+          realtime_topic: string
+          referrer?: string | null
+          status?: string
+          updated_at?: string
+          user_agent?: string | null
+          visitor_email?: string | null
+          visitor_last_read_at?: string | null
+          visitor_name?: string | null
+        }
+        Update: {
+          admin_unread_count?: number
+          assigned_to?: string | null
+          assigned_to_email?: string | null
+          closed_at?: string | null
+          closed_by_email?: string | null
+          created_at?: string
+          id?: string
+          last_message_at?: string
+          last_message_preview?: string | null
+          last_message_sender?: string | null
+          page_title?: string | null
+          page_url?: string | null
+          realtime_topic?: string
+          referrer?: string | null
+          status?: string
+          updated_at?: string
+          user_agent?: string | null
+          visitor_email?: string | null
+          visitor_last_read_at?: string | null
+          visitor_name?: string | null
+        }
+        Relationships: []
+      }
+      chat_messages: {
+        Row: {
+          body: string
+          client_id: string | null
+          conversation_id: string
+          created_at: string
+          id: string
+          sender: string
+          sender_name: string | null
+          sender_user_id: string | null
+        }
+        Insert: {
+          body: string
+          client_id?: string | null
+          conversation_id: string
+          created_at?: string
+          id?: string
+          sender?: string
+          sender_name?: string | null
+          sender_user_id?: string | null
+        }
+        Update: {
+          body?: string
+          client_id?: string | null
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          sender?: string
+          sender_name?: string | null
+          sender_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "chat_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_contact_attempts: {
         Row: {
           attempt_number: number | null
