@@ -23,7 +23,10 @@
 // ALERT_GAP_MS) under the admin bell and by email, with a link that opens
 // that chat in the Inbox. The email goes to CHAT_ALERT_EMAILS
 // (comma-separated), or to DEFAULT_ALERT_EMAILS when that isn't set;
-// CHAT_ALERT_EMAILS=off sends none.
+// CHAT_ALERT_EMAILS=off sends none. At most ALERT_EMAILS_PER_HOUR emails go
+// out in any hour across all chats (they share the Resend account with
+// booking emails); past that, alerts are bell-only. The email has no
+// reply-to: the visitor's address is unverified, so staff reply in the Inbox.
 //
 // DEPLOY: `supabase functions deploy chat-visitor` (needs the
 // [functions.chat-visitor] verify_jwt = false entry in config.toml).
@@ -39,6 +42,7 @@ import {
   RateLimiter,
   STARTS_PER_HOUR,
   alertEmail,
+  alertEmailDecision,
   alertRecipients,
   allowedOrigins,
   parseRequest,
@@ -122,7 +126,39 @@ async function alertStaff(
     body: string;
   },
 ) {
-  const mail = alertEmail({ ...input, inboxUrl: `${INBOX_URL}?c=${input.conversationId}` });
+  const apiKey = Deno.env.get("RESEND_API_KEY");
+  const to = alertRecipients(Deno.env.get("CHAT_ALERT_EMAILS"));
+  const wantsEmail = !!apiKey && to.length > 0;
+
+  // The hourly cap is counted from the bell rows themselves (details.emailed),
+  // so it holds across function instances without another table. Two alerts
+  // at the same moment can both pass the check; the cap may overshoot by a
+  // few under a burst, which is fine for its purpose.
+  let decision = { send: false, last: false };
+  if (wantsEmail) {
+    let sentLastHour: number | null = null;
+    try {
+      const { count, error } = await admin
+        .from("admin_notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("kind", "live_chat")
+        .gte("created_at", new Date(Date.now() - 60 * 60 * 1000).toISOString())
+        .eq("details->>emailed", "true");
+      if (error) console.error("chat-visitor: alert count failed:", error.code ?? "unknown");
+      else sentLastHour = count ?? 0;
+    } catch {
+      console.error("chat-visitor: alert count failed");
+    }
+    decision = alertEmailDecision(sentLastHour);
+    if (!decision.send && sentLastHour !== null) console.log("chat-visitor: alert email skipped, hourly cap reached");
+  }
+
+  const mail = alertEmail({
+    ...input,
+    inboxUrl: `${INBOX_URL}?c=${input.conversationId}`,
+    lastThisHour: decision.last,
+  });
+  let recorded = false;
   try {
     const { error } = await admin.from("admin_notifications").insert({
       kind: "live_chat",
@@ -135,16 +171,18 @@ async function alertStaff(
         page_url: input.pageUrl,
         phone: input.visitorPhone,
         offline: input.offline === true,
+        emailed: decision.send,
       },
     });
     if (error) console.error("chat-visitor: notification failed:", error.code ?? "unknown");
+    else recorded = true;
   } catch {
     console.error("chat-visitor: notification failed");
   }
 
-  const apiKey = Deno.env.get("RESEND_API_KEY");
-  const to = alertRecipients(Deno.env.get("CHAT_ALERT_EMAILS"));
-  if (!apiKey || to.length === 0) return;
+  // No bell row means this email wouldn't be counted towards the cap, so
+  // it isn't sent either.
+  if (!decision.send || !recorded) return;
   try {
     const resp = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -152,7 +190,6 @@ async function alertStaff(
       body: JSON.stringify({
         from: "Fettle Hub <noreply@notifications.fettle.ie>",
         to,
-        ...(input.visitorEmail ? { reply_to: input.visitorEmail } : {}),
         subject: mail.subject,
         html: mail.html,
       }),
