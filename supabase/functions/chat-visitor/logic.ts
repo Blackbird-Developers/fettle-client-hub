@@ -17,8 +17,27 @@ export const REQUESTS_PER_MINUTE = 120;
 export const STARTS_PER_HOUR = 5;
 /** Messages a visitor may send in one conversation in a minute. */
 export const MESSAGES_PER_MINUTE = 15;
-/** A visitor message after this long a silence emails staff again. */
-export const ALERT_GAP_MS = 30 * 60 * 1000;
+/**
+ * Staff are emailed about every visitor message, except one that follows
+ * another message in the same chat this closely: a visitor sending three
+ * lines in a row, or answering someone who is replying right now, is one
+ * email, not three.
+ */
+export const ALERT_GAP_MS = 2 * 60 * 1000;
+
+/** Who is emailed when CHAT_ALERT_EMAILS isn't set. */
+export const DEFAULT_ALERT_EMAILS = ["alex@fettle.ie"];
+
+/** The addresses to email: CHAT_ALERT_EMAILS (comma-separated), else the default; "off" sends none. */
+export function alertRecipients(setting: string | undefined | null): string[] {
+  const value = (setting ?? "").trim();
+  if (value.toLowerCase() === "off") return [];
+  const list = value
+    .split(",")
+    .map((address) => address.trim())
+    .filter((address) => EMAIL_SHAPE.test(address));
+  return list.length > 0 ? list : [...DEFAULT_ALERT_EMAILS];
+}
 
 export function allowedOrigins(extra: string | undefined | null): Set<string> {
   const list = [...DEFAULT_ORIGINS];
@@ -70,6 +89,7 @@ export function line(value: unknown, max: number): string | null {
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_SHAPE = EMAIL;
 
 /** Lower-cased email, or null when it isn't one. */
 export function email(value: unknown): string | null {

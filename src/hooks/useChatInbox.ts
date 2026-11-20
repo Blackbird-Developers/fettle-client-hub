@@ -217,10 +217,21 @@ function showDesktopAlert(title: string, body: string, conversationId: string) {
     notification.onclick = () => {
       window.focus();
       notification.close();
+      // Open that chat, unless this was only the test notification.
+      if (conversationId !== "test") {
+        window.history.pushState({}, "", `/admin/inbox?c=${conversationId}`);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      }
     };
   } catch {
     // Some browsers only allow notifications from a service worker.
   }
+}
+
+/** Shows a sample notification and plays the sound, so staff can check alerts reach them. */
+export function testDesktopAlert() {
+  playChatSound();
+  showDesktopAlert("Fettle chat", "Desktop notifications are working.", "test");
 }
 
 /** The conversation open in the Inbox, read from the URL (?c=…). */

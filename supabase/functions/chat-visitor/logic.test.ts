@@ -4,6 +4,7 @@ import {
   MAX_MESSAGE_LENGTH,
   RateLimiter,
   alertEmail,
+  alertRecipients,
   allowedOrigins,
   email,
   line,
@@ -213,7 +214,14 @@ describe("tokens", () => {
 describe("staff alerts", () => {
   const NOW = Date.parse("2026-11-19T12:00:00Z");
 
-  it("alerts for a first message and after a long silence only", () => {
+  it("emails the default address unless others are set, and none when off", () => {
+    expect(alertRecipients(undefined)).toEqual(["alex@fettle.ie"]);
+    expect(alertRecipients("  ")).toEqual(["alex@fettle.ie"]);
+    expect(alertRecipients("a@fettle.ie, b@fettle.ie ,nonsense")).toEqual(["a@fettle.ie", "b@fettle.ie"]);
+    expect(alertRecipients("OFF")).toEqual([]);
+  });
+
+  it("alerts for a first message and after a short pause, not for quick follow-ups", () => {
     expect(shouldAlert(null, NOW)).toBe(true);
     expect(shouldAlert(new Date(NOW - ALERT_GAP_MS).toISOString(), NOW)).toBe(true);
     expect(shouldAlert(new Date(NOW - 60_000).toISOString(), NOW)).toBe(false);
