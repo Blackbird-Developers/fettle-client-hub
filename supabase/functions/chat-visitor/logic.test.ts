@@ -9,6 +9,7 @@ import {
   alertRecipients,
   allowedOrigins,
   email,
+  hmacSha256Hex,
   line,
   parseRequest,
   phone,
@@ -206,6 +207,14 @@ describe("tokens", () => {
     );
   });
 
+  it("hmacSha256Hex matches a known HMAC and depends on the key", async () => {
+    expect(await hmacSha256Hex("key", "The quick brown fox jumps over the lazy dog")).toBe(
+      "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8",
+    );
+    expect(await hmacSha256Hex("a", "fettle-chat:1.2.3.4")).not.toBe(await hmacSha256Hex("b", "fettle-chat:1.2.3.4"));
+    expect(await hmacSha256Hex("a", "fettle-chat:1.2.3.4")).not.toBe(await sha256Hex("fettle-chat:1.2.3.4"));
+  });
+
   it("safeEqual compares whole strings", () => {
     expect(safeEqual("abc", "abc")).toBe(true);
     expect(safeEqual("abc", "abd")).toBe(false);
@@ -255,6 +264,13 @@ describe("staff alerts", () => {
     expect(normal.html).not.toContain("alerts are paused");
     expect(alertEmail({ ...base, lastThisHour: true }).html).toContain("email alerts are paused");
     expect(alertEmail({ ...base, visitorEmail: null }).html).not.toContain("not verified");
+  });
+
+  it("keeps a long visitor email in the subject (the bell title is cut where it is saved)", () => {
+    const long = `${"a".repeat(180)}@example.com`;
+    const mail = alertEmail({ isNew: true, visitorName: null, visitorEmail: long, pageUrl: null, body: "hi", inboxUrl: "x" });
+    expect(mail.subject.length).toBeGreaterThan(200);
+    expect(mail.subject.slice(0, 200)).toHaveLength(200);
   });
 
   it("escapes visitor text in the email", () => {

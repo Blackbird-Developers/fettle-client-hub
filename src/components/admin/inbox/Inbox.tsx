@@ -822,7 +822,7 @@ function VisitorDetails({
       {related.length > 0 && (
         <div className="border-t border-border/60 pt-4">
           <p className="mb-2 text-xs font-medium text-muted-foreground">
-            Earlier conversations ({related.length})
+            Same email/phone typed — not verified ({related.length})
           </p>
           <ul className="space-y-1.5">
             {related.map((other) => (

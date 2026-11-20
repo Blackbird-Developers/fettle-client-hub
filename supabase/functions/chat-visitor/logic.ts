@@ -246,6 +246,30 @@ export async function sha256Hex(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * HMAC-SHA-256 of value, as hex. Used for the visitor's IP: a plain hash of
+ * an IPv4 address can be reversed by trying every address, a keyed one can't
+ * without the key.
+ */
+export async function hmacSha256Hex(key: string, value: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(key),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(value));
+  return Array.from(new Uint8Array(signature), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The hashed IP is only needed for the hourly new-chat limit; it is blanked after this long. */
+export const IP_HASH_KEEP_MS = 24 * 60 * 60 * 1000;
+
+/** Longest title admin_notifications accepts. */
+export const NOTIFICATION_TITLE_MAX = 200;
+
 /** Compares two strings without stopping at the first difference. */
 export function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;

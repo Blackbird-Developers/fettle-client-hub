@@ -9,6 +9,9 @@
 //     for it at "start"; the database keeps a SHA-256 of it, never the secret
 //   - body size and message length caps, a per-IP request limit, at most
 //     STARTS_PER_HOUR new chats per IP and MESSAGES_PER_MINUTE per chat
+//   - the visitor's IP is only kept as an HMAC (keyed with
+//     CHAT_IP_HASH_SECRET, else the service-role key), for the new-chat
+//     limit, and is blanked after a day
 //   - logs carry counts and error codes only, never names or message text
 //
 // Body is JSON sent as text/plain (no CORS preflight). Actions:
@@ -35,8 +38,10 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 import {
   HISTORY_LIMIT,
+  IP_HASH_KEEP_MS,
   MAX_BODY_BYTES,
   MESSAGES_PER_MINUTE,
+  NOTIFICATION_TITLE_MAX,
   OFFLINE_NOTE,
   REQUESTS_PER_MINUTE,
   RateLimiter,
@@ -44,6 +49,7 @@ import {
   alertEmail,
   alertEmailDecision,
   alertRecipients,
+  hmacSha256Hex,
   allowedOrigins,
   parseRequest,
   randomHex,
@@ -164,7 +170,9 @@ async function alertStaff(
       kind: "live_chat",
       client_email: input.visitorEmail,
       client_name: input.visitorName,
-      title: mail.subject,
+      // The subject can carry a long visitor name or email; the column
+      // takes 200 characters, and a failed insert would lose the alert.
+      title: mail.subject.slice(0, NOTIFICATION_TITLE_MAX),
       body: input.body.slice(0, 300),
       details: {
         conversation_id: input.conversationId,
@@ -239,7 +247,16 @@ serve(async (req) => {
     const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
     if (request.action === "start") {
-      const ipHash = await sha256Hex(`fettle-chat:${ip}`);
+      const ipHash = await hmacSha256Hex(Deno.env.get("CHAT_IP_HASH_SECRET") || serviceKey, `fettle-chat:${ip}`);
+
+      // Hashed IPs older than a day are no longer needed for the limit below.
+      const { error: blankError } = await admin
+        .from("chat_conversation_secrets")
+        .update({ ip_hash: null })
+        .lt("created_at", new Date(Date.now() - IP_HASH_KEEP_MS).toISOString())
+        .not("ip_hash", "is", null);
+      if (blankError) console.error("chat-visitor: ip hash clean-up failed:", blankError.code ?? "unknown");
+
       const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       const { count, error: countError } = await admin
         .from("chat_conversation_secrets")
