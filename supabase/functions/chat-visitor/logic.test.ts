@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALERT_EMAILS_PER_HOUR,
   ALERT_GAP_MS,
   MAX_MESSAGE_LENGTH,
   RateLimiter,
   alertEmail,
+  alertEmailDecision,
   alertRecipients,
   allowedOrigins,
   email,
@@ -225,6 +227,34 @@ describe("staff alerts", () => {
     expect(shouldAlert(null, NOW)).toBe(true);
     expect(shouldAlert(new Date(NOW - ALERT_GAP_MS).toISOString(), NOW)).toBe(true);
     expect(shouldAlert(new Date(NOW - 60_000).toISOString(), NOW)).toBe(false);
+  });
+
+  it("caps alert emails per hour and flags the last one", () => {
+    expect(alertEmailDecision(0)).toEqual({ send: true, last: false });
+    expect(alertEmailDecision(ALERT_EMAILS_PER_HOUR - 2)).toEqual({ send: true, last: false });
+    expect(alertEmailDecision(ALERT_EMAILS_PER_HOUR - 1)).toEqual({ send: true, last: true });
+    expect(alertEmailDecision(ALERT_EMAILS_PER_HOUR)).toEqual({ send: false, last: false });
+    expect(alertEmailDecision(ALERT_EMAILS_PER_HOUR + 50)).toEqual({ send: false, last: false });
+  });
+
+  it("sends no email when the count is unknown", () => {
+    expect(alertEmailDecision(null)).toEqual({ send: false, last: false });
+  });
+
+  it("marks contact details as unverified and says when alerts pause", () => {
+    const base = {
+      isNew: true,
+      visitorName: "Sam",
+      visitorEmail: "sam@example.com",
+      pageUrl: null,
+      body: "hi",
+      inboxUrl: "x",
+    };
+    const normal = alertEmail(base);
+    expect(normal.html).toContain("not verified");
+    expect(normal.html).not.toContain("alerts are paused");
+    expect(alertEmail({ ...base, lastThisHour: true }).html).toContain("email alerts are paused");
+    expect(alertEmail({ ...base, visitorEmail: null }).html).not.toContain("not verified");
   });
 
   it("escapes visitor text in the email", () => {

@@ -38,7 +38,7 @@ That only works in the same browser: visitors aren't logged in, so a different d
 
 ## Alerts for staff
 
-- **Email:** every visitor message emails `CHAT_ALERT_EMAILS` with the message and a button that opens that chat in the Inbox (`/admin/inbox?c=<id>`). A message sent within 2 minutes of the previous one in the same chat doesn't send another email, so a visitor writing three lines in a row is one email.
+- **Email:** every visitor message emails `CHAT_ALERT_EMAILS` with the message and a button that opens that chat in the Inbox (`/admin/inbox?c=<id>`). A message sent within 2 minutes of the previous one in the same chat doesn't send another email, so a visitor writing three lines in a row is one email. At most 30 alert emails go out in any hour across all chats (`ALERT_EMAILS_PER_HOUR`), because they share the Resend account with booking emails; past that, alerts appear under the bell only, and the 30th email says so. The email has no reply-to and marks the visitor's contact details as unverified: reply in the Inbox.
 - **Desktop notifications:** switched on per browser from the top of the Inbox list ("Turn on desktop notifications", with a "Send a test" link afterwards). They appear for visitor messages while the hub is open in a tab, on any admin page, including when the tab is in the background. Clicking one opens that chat. They can't appear when no hub tab is open; that would need web push.
 - **In the hub:** a sound, the unread badge on Inbox in the sidebar, the admin bell, and a toast on other admin pages.
 

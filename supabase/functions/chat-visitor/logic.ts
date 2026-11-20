@@ -25,6 +25,21 @@ export const MESSAGES_PER_MINUTE = 15;
  */
 export const ALERT_GAP_MS = 2 * 60 * 1000;
 
+/**
+ * Most alert emails sent in any hour, across all chats. Alerts go through
+ * the same Resend account as booking confirmations, so a script keeping
+ * many chats busy must not be able to get that account throttled. Past the
+ * cap, alerts still go under the admin bell; only the email is skipped.
+ */
+export const ALERT_EMAILS_PER_HOUR = 30;
+
+/** What to do about the email for one alert, given how many were sent in the last hour. */
+export function alertEmailDecision(sentLastHour: number | null): { send: boolean; last: boolean } {
+  // Unknown count (the lookup failed): don't send, rather than risk a flood.
+  if (sentLastHour === null || sentLastHour >= ALERT_EMAILS_PER_HOUR) return { send: false, last: false };
+  return { send: true, last: sentLastHour === ALERT_EMAILS_PER_HOUR - 1 };
+}
+
 /** Who is emailed when CHAT_ALERT_EMAILS isn't set. */
 export const DEFAULT_ALERT_EMAILS = ["alex@fettle.ie"];
 
@@ -269,6 +284,8 @@ export function alertEmail(input: {
   pageUrl: string | null;
   body: string;
   inboxUrl: string;
+  /** This is the last email allowed this hour (ALERT_EMAILS_PER_HOUR). */
+  lastThisHour?: boolean;
 }): { subject: string; html: string } {
   const who = input.visitorName ?? input.visitorEmail ?? "A website visitor";
   const subject = input.isNew
@@ -283,6 +300,14 @@ export function alertEmail(input: {
     .filter((row): row is string => !!row)
     .map((row) => `<p style="margin:0 0 4px;font-size:14px">${escapeHtml(row)}</p>`)
     .join("");
+  // The visitor typed these; nobody has checked them. Staff should reply in
+  // the Inbox, so the email has no reply-to either.
+  const unverified = contact
+    ? `<p style="margin:0 0 4px;font-size:12px;color:#6b6a68">Typed by the visitor and not verified. Reply in the Inbox, not by email.</p>`
+    : "";
+  const capNote = input.lastThisHour
+    ? `<p style="margin:20px 0 0;font-size:12px;color:#6b6a68">This is the ${ALERT_EMAILS_PER_HOUR}th chat email in the past hour, so email alerts are paused for now. New messages still appear under the bell and in the Inbox.</p>`
+    : "";
   const page = input.pageUrl
     ? `<p style="margin:0 0 16px;color:#6b6a68;font-size:14px">Page: ${escapeHtml(input.pageUrl)}</p>`
     : "";
@@ -290,8 +315,10 @@ export function alertEmail(input: {
   <h2 style="margin:0 0 8px;font-size:20px">${escapeHtml(subject)}</h2>
   ${page}
   ${contact}
+  ${unverified}
   <div style="margin-top:12px;background:#fdf5eb;border-radius:12px;padding:16px;white-space:pre-wrap;font-size:15px;line-height:1.5">${escapeHtml(input.body)}</div>
   <p style="margin:24px 0 0"><a href="${escapeHtml(input.inboxUrl)}" style="background:#ff7300;color:#fff;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:bold;display:inline-block">Reply in the Inbox</a></p>
+  ${capNote}
 </div>`;
   return { subject, html };
 }
