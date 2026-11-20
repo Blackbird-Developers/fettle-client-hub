@@ -2,7 +2,7 @@
 
 Visitors on fettle.ie chat through a floating widget. Staff answer from **Admin → Inbox** (`/admin/inbox`) in the hub. Everything runs on the hub's Supabase project; there is no third-party chat service and no AI.
 
-Status (19 Nov 2026): built on branch `feature/live-chat`. **Not deployed.** The widget is only on the hidden test page https://fettle.ie/chat-test/ (noindex, in no menu).
+Status (20 Nov 2026): **live.** The backend is deployed, the Inbox is on my.fettle.ie, and since 20 Nov the widget is on every page of fettle.ie (WordPress Code Snippet #64) except the two booking pages. The hidden test page https://fettle.ie/chat-test/ still exists.
 
 ## How it fits together
 
@@ -23,7 +23,7 @@ Database triggers keep each conversation's summary current (last message, unread
 
 ## Working hours
 
-The widget has a working-hours table in Irish time (`HOURS` at the top of `chat-widget.html`; currently Monday to Friday, 9:00 to 18:00, which is a placeholder until Fettle confirms the real hours).
+The widget has a working-hours table in Irish time (`HOURS` at the top of `chat-widget.html`; Monday to Friday, 9:00 to 17:00, as confirmed by Fettle on 20 Nov 2026).
 
 - **In hours:** the visitor chats straight away and is asked for an email after their first message.
 - **Out of hours:** the widget shows a form instead: first name, last name, phone number, optional email and a message. The conversation is saved with `started_offline = true` and a system note, "we will respond to you as soon as we can". The Inbox marks it "Out of hours" and shows the phone number.
@@ -34,7 +34,7 @@ The hours live in the widget, not the database, so changing them means redeployi
 
 A visitor's conversation stays in their browser. When they come back, days or weeks later, they see the whole history, and sending a message reopens the conversation in the Inbox with everything above it.
 
-That only works in the same browser: visitors aren't logged in, so a different device starts a new conversation. To connect them, the Inbox's visitor panel lists **Earlier conversations** from the same email or phone number.
+That only works in the same browser: visitors aren't logged in, so a different device starts a new conversation. To connect them, the Inbox's visitor panel lists other conversations where the same email or phone number was typed. The list is labelled "Same email/phone typed — not verified", because anyone can type someone else's details: staff must not treat it as proof of who they are talking to.
 
 ## Alerts for staff
 
@@ -46,13 +46,14 @@ That only works in the same browser: visitors aren't logged in, so a different d
 
 - Only `https://fettle.ie` and `https://www.fettle.ie` may call `chat-visitor` (plus `CHAT_EXTRA_ORIGINS`).
 - A conversation can only be read or written with the secret created for it. The database stores a SHA-256 of the secret in `chat_conversation_secrets`, which only the service role can read.
+- The visitor's IP is never stored. An HMAC of it (keyed with `CHAT_IP_HASH_SECRET`, or the service-role key when that isn't set) is kept for the new-chat limit and blanked after a day.
 - Limits: 2,000 characters a message, 120 requests a minute per IP, 5 new chats an hour per IP, 15 messages a minute per chat.
 - Function logs hold error codes and counts only, never names or message text.
 - `anon` has no access to any chat table.
 
 ## Deploying
 
-Live's migration history is empty, so do **not** use `supabase db push` (see `backend-todo.md`).
+Live's migration history has been tracked since 5 Nov 2026, so `supabase db push` works. Add schema changes as **new** migration files; don't edit one that has been applied.
 
 1. **Database:** paste `supabase/migrations/20261119120000_live_chat.sql` into the Supabase SQL editor and run it. It is safe to re-run.
 2. **Realtime:** in Supabase → Database → Publications, check `supabase_realtime` now lists `chat_messages` and `chat_conversations` (the migration adds them).
