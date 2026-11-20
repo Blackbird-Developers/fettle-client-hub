@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowLeft,
+  BellOff,
   BellRing,
   CheckCircle2,
   Globe,
@@ -32,6 +33,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAdminList } from "@/hooks/useAdmin";
 import {
   desktopAlertsState,
+  testDesktopAlert,
   useChatConversations,
   useChatMessages,
   useConversationChannel,
@@ -162,17 +164,6 @@ export function Inbox() {
                 className="pl-9"
               />
             </div>
-            {alerts === "default" && (
-              <Button
-                variant="outline"
-                size="icon"
-                title="Turn on desktop alerts for new messages"
-                aria-label="Turn on desktop alerts for new messages"
-                onClick={() => void Notification.requestPermission().then(setAlerts)}
-              >
-                <BellRing className="h-4 w-4" />
-              </Button>
-            )}
           </div>
           <div className="flex items-center justify-between gap-2">
             <ToggleGroup
@@ -209,6 +200,8 @@ export function Inbox() {
             </Select>
           </div>
         </div>
+
+        <DesktopAlerts state={alerts} onChange={setAlerts} />
 
         <div className="flex-1 overflow-y-auto">
           {visible.length === 0 ? (
@@ -271,6 +264,66 @@ export function Inbox() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Desktop notifications for new chat messages: a switch-on button, then a
+ * confirmation with a test. They show while the hub is open in a browser
+ * tab on this computer, even when that tab is in the background.
+ */
+function DesktopAlerts({
+  state,
+  onChange,
+}: {
+  state: ReturnType<typeof desktopAlertsState>;
+  onChange: (state: ReturnType<typeof desktopAlertsState>) => void;
+}) {
+  if (state === "unsupported") return null;
+  if (state === "default") {
+    return (
+      <div className="border-b border-border/60 bg-primary/5 p-3">
+        <p className="text-sm font-medium">Get notified of new chats</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Desktop notifications appear on this computer while the hub is open in a tab.
+        </p>
+        <Button
+          size="sm"
+          className="mt-2"
+          onClick={() =>
+            void Notification.requestPermission().then((next) => {
+              onChange(next);
+              if (next === "granted") testDesktopAlert();
+            })
+          }
+        >
+          <BellRing className="mr-1.5 h-3.5 w-3.5" />
+          Turn on desktop notifications
+        </Button>
+      </div>
+    );
+  }
+  if (state === "denied") {
+    return (
+      <div className="flex items-start gap-2 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">
+        <BellOff className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          Desktop notifications are blocked for this site. To turn them on, click the icon beside the
+          address bar and allow notifications, then reload.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-1.5 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1.5">
+        <BellRing className="h-3.5 w-3.5 text-success" />
+        Desktop notifications are on
+      </span>
+      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={testDesktopAlert}>
+        Send a test
+      </Button>
     </div>
   );
 }

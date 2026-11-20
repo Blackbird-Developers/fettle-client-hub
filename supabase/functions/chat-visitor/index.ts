@@ -19,9 +19,11 @@
 // "offline" is set by the widget's out-of-hours form: the chat is marked
 // and gets a system note saying staff will reply as soon as they can.
 //
-// Staff are told about a new chat, or a visitor message after a long
-// silence, under the admin bell and by email to CHAT_ALERT_EMAILS
-// (comma-separated; no email is sent while it is unset).
+// Staff are told about every visitor message (bar quick follow-ups, see
+// ALERT_GAP_MS) under the admin bell and by email, with a link that opens
+// that chat in the Inbox. The email goes to CHAT_ALERT_EMAILS
+// (comma-separated), or to DEFAULT_ALERT_EMAILS when that isn't set;
+// CHAT_ALERT_EMAILS=off sends none.
 //
 // DEPLOY: `supabase functions deploy chat-visitor` (needs the
 // [functions.chat-visitor] verify_jwt = false entry in config.toml).
@@ -37,6 +39,7 @@ import {
   RateLimiter,
   STARTS_PER_HOUR,
   alertEmail,
+  alertRecipients,
   allowedOrigins,
   parseRequest,
   randomHex,
@@ -140,10 +143,7 @@ async function alertStaff(
   }
 
   const apiKey = Deno.env.get("RESEND_API_KEY");
-  const to = (Deno.env.get("CHAT_ALERT_EMAILS") ?? "")
-    .split(",")
-    .map((address) => address.trim())
-    .filter(Boolean);
+  const to = alertRecipients(Deno.env.get("CHAT_ALERT_EMAILS"));
   if (!apiKey || to.length === 0) return;
   try {
     const resp = await fetch("https://api.resend.com/emails", {

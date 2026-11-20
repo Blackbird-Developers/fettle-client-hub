@@ -36,6 +36,12 @@ A visitor's conversation stays in their browser. When they come back, days or we
 
 That only works in the same browser: visitors aren't logged in, so a different device starts a new conversation. To connect them, the Inbox's visitor panel lists **Earlier conversations** from the same email or phone number.
 
+## Alerts for staff
+
+- **Email:** every visitor message emails `CHAT_ALERT_EMAILS` with the message and a button that opens that chat in the Inbox (`/admin/inbox?c=<id>`). A message sent within 2 minutes of the previous one in the same chat doesn't send another email, so a visitor writing three lines in a row is one email.
+- **Desktop notifications:** switched on per browser from the top of the Inbox list ("Turn on desktop notifications", with a "Send a test" link afterwards). They appear for visitor messages while the hub is open in a tab, on any admin page, including when the tab is in the background. Clicking one opens that chat. They can't appear when no hub tab is open; that would need web push.
+- **In the hub:** a sound, the unread badge on Inbox in the sidebar, the admin bell, and a toast on other admin pages.
+
 ## Protections
 
 - Only `https://fettle.ie` and `https://www.fettle.ie` may call `chat-visitor` (plus `CHAT_EXTRA_ORIGINS`).
@@ -52,7 +58,7 @@ Live's migration history is empty, so do **not** use `supabase db push` (see `ba
 2. **Realtime:** in Supabase → Database → Publications, check `supabase_realtime` now lists `chat_messages` and `chat_conversations` (the migration adds them).
 3. **Function:** `supabase functions deploy chat-visitor --project-ref gxeoillrmjezpehmcvrh`
 4. **Secrets (optional):**
-   - `CHAT_ALERT_EMAILS`: comma-separated addresses emailed about a new chat, or a visitor message after 30 quiet minutes. No email is sent while it is unset. Every alert also goes under the admin bell.
+   - `CHAT_ALERT_EMAILS`: comma-separated addresses emailed about visitor messages. When it is unset the email goes to alex@fettle.ie; set it to `off` to send none. Every alert also goes under the admin bell.
    - `CHAT_EXTRA_ORIGINS`: extra allowed origins, e.g. a staging site.
 5. **Frontend:** merge the branch; Vercel deploys it. Until step 1 is done the Inbox shows "Not set up yet".
 
