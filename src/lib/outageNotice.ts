@@ -3,7 +3,7 @@
 // Change OUTAGE_ID for a new outage and everyone sees the popup again.
 
 export const OUTAGE_NOTICE = {
-  ENABLED: true,
+  ENABLED: false,
   OUTAGE_ID: "2026-11-13",
   DELAY_MS: 1200,
   /** Phone lines, Europe/Dublin time, every day (same as the website ribbon). */
