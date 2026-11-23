@@ -85,6 +85,8 @@ import {
     ASSESSMENTS,
     getAssessmentPriceOverride,
     getAssessmentDurationOverride,
+    assessmentTherapistCalendarIds,
+    isTherapistCalendar,
     type Assessment,
 } from '@/lib/assessments';
 import {
@@ -270,6 +272,12 @@ export function BookingModal({
     const poolsAcrossTypes =
         autoAssign &&
         (sessionCategory === 'couples' || sessionCategory === 'youth');
+    // Assessments are always booked with a named therapist: availability is
+    // pooled across the type's therapist calendars one calendar at a time
+    // (never Acuity's type-wide pool, which also includes the Preliminary
+    // Availability Calendar), and the slot's therapist is set before booking.
+    const poolsAssessmentTherapists = sessionCategory === 'assessment';
+    const usesOwnerPool = poolsAcrossTypes || poolsAssessmentTherapists;
     // Slot whose therapist is being looked up after the client picked it.
     const [assigningTime, setAssigningTime] = useState<string | null>(null);
 
@@ -341,13 +349,13 @@ export function BookingModal({
         : null;
     const { dates: typeDates, loading: typeDatesLoading } =
         useAcuityAvailability(
-            poolsAcrossTypes ? null : selectedType,
+            usesOwnerPool ? null : selectedType,
             viewingMonthKey,
             autoAssign ? null : selectedCalendar
         );
 
     const { times: typeTimes, loading: typeTimesLoading } = useAcuityTimes(
-        poolsAcrossTypes ? null : selectedType,
+        usesOwnerPool ? null : selectedType,
         selectedDateKey,
         autoAssign ? null : selectedCalendar
     );
@@ -433,41 +441,53 @@ export function BookingModal({
     ]);
 
     // Youth/couples with auto-assign: every therapist's type in the category.
-    const poolOwners = useMemo<PoolOwner[]>(
-        () =>
-            poolsAcrossTypes
-                ? filteredAppointmentTypes
-                      .filter((type) => type.calendarIDs?.length)
-                      .map((type) => ({
-                          typeId: type.id,
-                          calendarId: type.calendarIDs[0],
-                      }))
-                : [],
-        [poolsAcrossTypes, filteredAppointmentTypes]
-    );
+    // Assessments: the selected type on each of its therapist calendars.
+    const poolOwners = useMemo<PoolOwner[]>(() => {
+        if (poolsAssessmentTherapists) {
+            const type = types.find((t) => t.id === selectedType);
+            if (!type) return [];
+            return assessmentTherapistCalendarIds(type.calendarIDs).map(
+                (calendarId) => ({ typeId: type.id, calendarId })
+            );
+        }
+        return poolsAcrossTypes
+            ? filteredAppointmentTypes
+                  .filter((type) => type.calendarIDs?.length)
+                  .map((type) => ({
+                      typeId: type.id,
+                      calendarId: type.calendarIDs[0],
+                  }))
+            : [];
+    }, [
+        poolsAssessmentTherapists,
+        poolsAcrossTypes,
+        filteredAppointmentTypes,
+        types,
+        selectedType,
+    ]);
     const pooledDates = usePooledDates(
         poolOwners,
         viewingMonthKey,
-        open && poolsAcrossTypes
+        open && usesOwnerPool
     );
     const pooledTimes = usePooledTimes(
         selectedDateKey ? pooledDates.ownersByDate[selectedDateKey] ?? [] : [],
         selectedDateKey,
-        open && poolsAcrossTypes
+        open && usesOwnerPool
     );
 
     const availableDates = useMemo(
         () =>
-            poolsAcrossTypes
+            usesOwnerPool
                 ? Object.keys(pooledDates.ownersByDate).map((date) => ({ date }))
                 : typeDates,
-        [poolsAcrossTypes, pooledDates.ownersByDate, typeDates]
+        [usesOwnerPool, pooledDates.ownersByDate, typeDates]
     );
-    const datesLoading = poolsAcrossTypes
+    const datesLoading = usesOwnerPool
         ? pooledDates.loading
         : typeDatesLoading;
-    const availableTimes = poolsAcrossTypes ? pooledTimes.times : typeTimes;
-    const timesLoading = poolsAcrossTypes
+    const availableTimes = usesOwnerPool ? pooledTimes.times : typeTimes;
+    const timesLoading = usesOwnerPool
         ? pooledTimes.loading
         : typeTimesLoading;
 
@@ -910,6 +930,24 @@ export function BookingModal({
             return;
         }
 
+        // Assessments must be booked on a therapist's calendar, never left
+        // for Acuity to assign (it could pick the Preliminary Availability
+        // Calendar). create-payment-intent enforces this too.
+        if (
+            sessionCategory === 'assessment' &&
+            !isTherapistCalendar(selectedCalendar)
+        ) {
+            toast({
+                title: 'Please choose a time again',
+                description:
+                    "We couldn't match that time to one of our assessment therapists.",
+                variant: 'destructive',
+            });
+            setSelectedTime(null);
+            setStep('date');
+            return;
+        }
+
         // Verify we have all required data (same as filter.html)
         if (!formData.firstName || !formData.lastName || !formData.email) {
             toast({
@@ -1193,9 +1231,9 @@ export function BookingModal({
         setSelectedType(typeId);
         setBookedFromRebookShortcut(false);
 
-        // Assessments and psychiatry don't require choosing a clinician:
-        // availability is pooled across the type's calendars and Acuity
-        // assigns one at booking time (calendarID stays unset).
+        // Assessments and psychiatry don't ask the client to choose a
+        // clinician. For assessments the therapist is set when a time is
+        // picked (see handlePickAutoAssignedSlot).
         if (isClinicalCategory) {
             setSelectedCalendar(null);
             setStep('date');
@@ -1320,7 +1358,7 @@ export function BookingModal({
         setAssigningTime(time);
         try {
             let assigned: PoolOwner | null = null;
-            if (poolsAcrossTypes) {
+            if (usesOwnerPool) {
                 assigned = pickPoolOwner(owners ?? pooledTimes.ownersByTime[time]);
             } else if (selectedTypeData) {
                 const calendarId = await findFreeCalendar(
@@ -1341,7 +1379,7 @@ export function BookingModal({
                     description: 'It was just booked. Please choose another time.',
                     variant: 'destructive',
                 });
-                if (poolsAcrossTypes) pooledTimes.refetch();
+                if (usesOwnerPool) pooledTimes.refetch();
                 return;
             }
 
@@ -1359,6 +1397,18 @@ export function BookingModal({
 
     const handlePickEarliestSlot = () => {
         if (!earliestSlot) return;
+        if (poolsAssessmentTherapists) {
+            // The earliest assessment slot is found per therapist calendar,
+            // so it already names the therapist (never the prelim calendar).
+            if (!isTherapistCalendar(earliestSlot.calendarId)) return;
+            handlePickAutoAssignedSlot(earliestSlot.time, earliestSlot.isoDate, [
+                {
+                    typeId: earliestSlot.appointmentTypeId,
+                    calendarId: earliestSlot.calendarId!,
+                },
+            ]);
+            return;
+        }
         if (autoAssign) {
             handlePickAutoAssignedSlot(
                 earliestSlot.time,
@@ -1393,7 +1443,15 @@ export function BookingModal({
 
         let calendarId: number | null = slot.calendarId ?? null;
         let time = slot.time;
-        if (isClinicalCategory) {
+        if (sessionCategory === 'assessment') {
+            // Assessment hints are found per therapist calendar, so the slot
+            // names its therapist. Without one, let the client pick a time.
+            if (!isTherapistCalendar(calendarId)) {
+                setSelectedCalendar(null);
+                setStep('date');
+                return;
+            }
+        } else if (isClinicalCategory) {
             // Pooled booking — Acuity assigns the clinician.
             calendarId = null;
         } else if (
@@ -2323,7 +2381,10 @@ export function BookingModal({
                                                 }
                                                 disabled={!!assigningTime}
                                                 onClick={() => {
-                                                    if (autoAssign) {
+                                                    if (
+                                                        autoAssign ||
+                                                        poolsAssessmentTherapists
+                                                    ) {
                                                         if (selectedDateKey) {
                                                             handlePickAutoAssignedSlot(
                                                                 slot.time,

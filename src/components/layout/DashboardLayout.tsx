@@ -1,6 +1,5 @@
 import { ReactNode } from "react";
 import { Sidebar, MobileHeader } from "./Sidebar";
-import { AnnouncementBar } from "./AnnouncementBar";
 import { OutageNoticeModal } from "./OutageNoticeModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsAdmin } from "@/hooks/useAdmin";
@@ -15,10 +14,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
   return (
     <>
-      {/* Announcement bar sits outside the flex layout so it never
-          creates a nested scroll container on iOS. It promotes customer
-          services, so admins don't see it. */}
-      {!(user && isAdmin) && <AnnouncementBar />}
+      {/* The psychiatry announcement bar (AnnouncementBar.tsx) is switched
+          off: psychiatry is no longer bookable through the hub. */}
 
       {/* Email outage popup: signed-in clients only (not login, not admins).
           Waits for the admin check so admins never see it flash up. */}
