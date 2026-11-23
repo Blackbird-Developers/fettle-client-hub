@@ -139,3 +139,29 @@ export function getAssessmentDurationOverride(
     return ASSESSMENTS.find((a) => a.screeningTypeId === appointmentTypeId)
         ?.durationOverride;
 }
+
+/**
+ * Acuity calendars that are NOT a real clinician: the "Preliminary
+ * Availability Calendar" (13216804) is attached to some assessment types
+ * (e.g. Depression) as a placeholder, so pooled booking could hand a client
+ * to it instead of a therapist. Assessment availability and bookings only
+ * ever use the type's therapist calendars — Dr. Judith Malone, Dr. Zai
+ * Edworthy, Fabiola Honorio Neto, Jennifer Cuppage as of Nov 2026 — matching
+ * the therapists fettle.ie's assessment pages book with.
+ */
+export const NON_THERAPIST_CALENDAR_IDS: readonly number[] = [13216804];
+
+export function isTherapistCalendar(calendarId: number | null | undefined): boolean {
+    return (
+        typeof calendarId === 'number' &&
+        calendarId > 0 &&
+        !NON_THERAPIST_CALENDAR_IDS.includes(calendarId)
+    );
+}
+
+/** The therapist calendars an assessment type can be booked on. */
+export function assessmentTherapistCalendarIds(
+    calendarIds: number[] | undefined
+): number[] {
+    return (calendarIds ?? []).filter(isTherapistCalendar);
+}

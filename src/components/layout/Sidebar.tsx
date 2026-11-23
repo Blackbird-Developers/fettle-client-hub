@@ -10,7 +10,6 @@ import {
   Menu,
   HelpCircle,
   Gift,
-  Stethoscope,
   ChevronDown,
   MessageSquare,
   type LucideIcon,
@@ -43,7 +42,6 @@ interface NavItem {
 const authenticatedNavigation: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: Home },
   { name: "My Sessions", href: "/sessions", icon: Calendar },
-  { name: "Psychiatry", href: "/psychiatry", icon: Stethoscope },
   { name: "Invoices", href: "/invoices", icon: FileText },
   { name: "Profile", href: "/profile", icon: User },
   { name: "Refer & Earn", href: "/referrals", icon: Gift },

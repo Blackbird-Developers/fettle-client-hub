@@ -22,7 +22,6 @@ import TermsConditions from "./pages/TermsConditions";
 import Admin from "./pages/Admin";
 import Packages from "./pages/Packages";
 import Referrals from "./pages/Referrals";
-import Psychiatry from "./pages/Psychiatry";
 import GetStarted from "./pages/GetStarted";
 import HelpCenter from "./pages/HelpCenter";
 import HelpArticle from "./pages/HelpArticle";
@@ -49,7 +48,8 @@ const App = () => (
             <Route path="/invoices" element={<ProtectedRoute><CustomerOnly><Invoices /></CustomerOnly></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><CustomerOnly><Profile /></CustomerOnly></ProtectedRoute>} />
             <Route path="/referrals" element={<ProtectedRoute><CustomerOnly><Referrals /></CustomerOnly></ProtectedRoute>} />
-            <Route path="/psychiatry" element={<ProtectedRoute><CustomerOnly><Psychiatry /></CustomerOnly></ProtectedRoute>} />
+            {/* Psychiatry is no longer bookable in the hub; old links land on the dashboard. */}
+            <Route path="/psychiatry" element={<Navigate to="/dashboard" replace />} />
             <Route path="/feedback" element={<ProtectedRoute><CustomerOnly><Feedback /></CustomerOnly></ProtectedRoute>} />
             <Route path="/book" element={<ProtectedRoute><CustomerOnly><Book /></CustomerOnly></ProtectedRoute>} />
             <Route path="/get-started" element={<ProtectedRoute><CustomerOnly><GetStarted /></CustomerOnly></ProtectedRoute>} />

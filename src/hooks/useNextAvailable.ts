@@ -6,7 +6,10 @@ import {
     type AcuityAppointmentType,
     type AcuityAvailableTime,
 } from '@/hooks/useAcuity';
-import { ASSESSMENT_SCREENING_TYPE_IDS } from '@/lib/assessments';
+import {
+    ASSESSMENT_SCREENING_TYPE_IDS,
+    assessmentTherapistCalendarIds,
+} from '@/lib/assessments';
 import { PSYCHIATRY_BOOKABLE_TYPE_IDS } from '@/lib/psychiatry';
 
 /**
@@ -230,6 +233,40 @@ async function findEarliestSlot(
 }
 
 /**
+ * Earliest assessment slot on a therapist's calendar. Assessment types are
+ * searched one therapist calendar at a time (never pooled across the type),
+ * because Acuity's pooled availability also includes the Preliminary
+ * Availability Calendar, which isn't a clinician.
+ */
+async function findEarliestTherapistSlot(
+    types: AcuityAppointmentType[]
+): Promise<NextAvailableSlot | null> {
+    const searches = types.flatMap((type) =>
+        assessmentTherapistCalendarIds(type.calendarIDs).map((calendarId) =>
+            findEarliestSlot([type], calendarId).then((slot) =>
+                slot
+                    ? {
+                          ...slot,
+                          calendarId,
+                          candidateCalendarIds: assessmentTherapistCalendarIds(
+                              type.calendarIDs
+                          ),
+                      }
+                    : null
+            )
+        )
+    );
+    const slots: NextAvailableSlot[] = [];
+    for (const slot of await Promise.all(searches)) {
+        if (slot) slots.push(slot);
+    }
+    slots.sort(
+        (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
+    );
+    return slots[0] ?? null;
+}
+
+/**
  * Resolve which therapist (calendar) actually owns a pooled slot. Pooled
  * availability gives us the earliest time for an appointment type but not the
  * calendar, so we probe the type's calendars for that day and return the one
@@ -304,7 +341,10 @@ export function useNextAvailable(
 
     const query = useQuery({
         queryKey: ['next-available', category, calendarId ?? null, typeIds],
-        queryFn: () => findEarliestSlot(matchedTypes, calendarId),
+        queryFn: () =>
+            category === 'assessment' && !calendarId
+                ? findEarliestTherapistSlot(matchedTypes)
+                : findEarliestSlot(matchedTypes, calendarId),
         enabled: enabled && !typesLoading && matchedTypes.length > 0,
         staleTime: 5 * 60 * 1000, // 5 min — availability changes slowly
         gcTime: 10 * 60 * 1000,

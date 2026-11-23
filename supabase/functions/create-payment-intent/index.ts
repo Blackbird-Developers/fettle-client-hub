@@ -5,7 +5,7 @@ import { getCaller, unauthorized } from "../_shared/auth.ts";
 import { requireSupportedAppVersion } from "../_shared/appVersion.ts";
 import { paymentSheetFields } from "../_shared/paymentSheet.ts";
 import { lookUpSessionPrice } from "../_shared/sessionPrice.ts";
-import { isClinicalTypeName } from "../_shared/clinical.ts";
+import { isClinicalTypeName, onlineBookingRefusal } from "../_shared/clinical.ts";
 
 // AUTH: user JWT. The caller's user id goes into the PaymentIntent metadata
 // (userId), and confirm-payment-and-book only books it for that same user (or
@@ -103,6 +103,11 @@ serve(async (req) => {
     const session = await lookUpSessionPrice(String(appointmentTypeID));
     if (!session) {
       throw new Error("This session type isn't available to book. Please contact hello@fettle.ie for support.");
+    }
+    const bookingRefusal = onlineBookingRefusal(session.name, calendarID);
+    if (bookingRefusal) {
+      logStep("Booking refused", { appointmentTypeID, calendarID, reason: bookingRefusal });
+      throw new Error(bookingRefusal);
     }
     const priceValue = session.price;
     logStep("Price from Acuity", {
