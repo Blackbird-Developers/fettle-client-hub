@@ -11,6 +11,9 @@
 //   GET ?action=funnel&from&to[&flow][&device][&path][&service][&therapist]
 //       → the Booking funnel tab (anonymous counts from booking_funnel_events,
 //         see ./funnel.ts and docs/BOOKING_FUNNEL_TRACKING.md)
+//   GET ?action=marketing&from&to[&group][&compare]
+//       → the Marketing tab (ad spend and results from marketing_daily, filled
+//         by marketing-sync, against new customers; see ./marketing.ts)
 //
 // PRIVACY: the customers response holds client names, emails and phones for
 // admins; logs stay counts-only. All definitions live in ./logic.ts (tested).
@@ -39,6 +42,7 @@ import {
   segmentMembers,
 } from "./logic.ts";
 import { funnelReport, parseFunnelParams, parseFunnelRows, queryBounds } from "./funnel.ts";
+import { marketingReport, parseMarketingParams, parseMarketingRows, parseSyncState, spanningRange } from "./marketing.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -179,6 +183,53 @@ serve(async (req) => {
         params: funnelParams,
         funnel: report,
       });
+    }
+
+    // Marketing tab: ad figures (marketing_daily, filled by marketing-sync)
+    // against new customers from the Acuity copy (booking date basis, no
+    // filters, the same count as the Customers board).
+    if (search.get("action") === "marketing") {
+      const marketingParams = parseMarketingParams(search);
+      if (typeof marketingParams === "string") return json({ error: marketingParams }, 400);
+      const startedAt = Date.now();
+      const db = createClient(supabaseUrl, supabaseServiceKey);
+      const compare = comparisonRange(marketingParams.range, marketingParams.compareTo);
+      const span = spanningRange(marketingParams.range, compare);
+
+      const [
+        { data: acuityState, error: acuityStateError },
+        { data: rawSessions, error: sessionsError },
+        { data: rawDays, error: daysError },
+        { data: rawStatus, error: statusError },
+      ] = await Promise.all([
+        db.from("acuity_sync_state").select("last_refreshed_at").eq("id", true).maybeSingle(),
+        db.rpc("admin_analytics_sessions"),
+        db.rpc("admin_marketing_daily", { p_from: span.from, p_to: span.to }),
+        db
+          .from("marketing_sync_state")
+          .select("channel, last_attempt_at, last_success_at, last_error, history_from"),
+      ]);
+      if (acuityStateError) throw new Error(`Failed to read sync state: ${acuityStateError.code}`);
+      if (!acuityState?.last_refreshed_at) return json({ error: NOT_BUILT_MESSAGE });
+      if (sessionsError) throw new Error(`Failed to read sessions: ${sessionsError.code}`);
+      if (daysError) throw new Error(`Failed to read marketing figures: ${daysError.code}`);
+      if (statusError) throw new Error(`Failed to read marketing sync state: ${statusError.code}`);
+
+      const histories = buildHistories(parseSessionRows(rawSessions));
+      const series = customerSeries(histories, marketingParams.range, marketingParams.groupBy, "booking");
+      const days = parseMarketingRows(rawDays);
+      const report = marketingReport({
+        params: marketingParams,
+        compareRange: compare,
+        days,
+        statuses: parseSyncState(rawStatus),
+        newCustomers: customerTotals(histories, marketingParams.range, "booking").new,
+        compareNewCustomers: customerTotals(histories, compare, "booking").new,
+        newCustomersByPeriod: new Map(series.map((point) => [point.period.key, point.new])),
+      });
+
+      console.log("admin-analytics marketing", { days: days.length, durationMs: Date.now() - startedAt });
+      return json({ generatedAt: new Date().toISOString(), ...report });
     }
 
     const params = parseAnalyticsParams(search);

@@ -1,0 +1,30 @@
+# Copies daily ad spend and results from Meta, Google Ads and TikTok into
+# marketing_daily for the admin Overview's Marketing tab, by calling the
+# marketing-sync edge function once per channel. Channels whose secrets
+# aren't set in Supabase are skipped. Only counts, dates and short error
+# messages reach these logs — never tokens.
+name: Marketing sync
+
+on:
+  schedule:
+    - cron: "40 */4 * * *" # every 4 hours, at :40 (clear of the :15 admin snapshots)
+  workflow_dispatch: {}
+
+concurrency:
+  group: marketing-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Sync ad platforms
+        env:
+          FUNCTION_URL: https://gxeoillrmjezpehmcvrh.supabase.co/functions/v1/marketing-sync
+          CRON_SECRET: ${{ secrets.REMINDER_CRON_SECRET }}
+        run: node .github/scripts/sync-marketing.mjs

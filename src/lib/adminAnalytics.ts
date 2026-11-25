@@ -168,6 +168,7 @@ export const BOARDS = [
   { id: "progression", label: "Progression" },
   { id: "customers", label: "Customers" },
   { id: "funnel", label: "Booking funnel" },
+  { id: "marketing", label: "Marketing" },
 ] as const;
 
 export type Board = (typeof BOARDS)[number]["id"];

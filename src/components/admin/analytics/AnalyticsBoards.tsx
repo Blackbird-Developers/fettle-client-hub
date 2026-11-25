@@ -39,6 +39,7 @@ import {
 } from "../../../../supabase/functions/admin-analytics/logic.ts";
 import { CustomersBoard } from "./CustomersBoard";
 import { FunnelBoard } from "./FunnelBoard";
+import { MarketingBoard } from "./MarketingBoard";
 import { ProgressionBoard } from "./ProgressionBoard";
 
 const SETTINGS_KEYS = [
@@ -124,14 +125,20 @@ function BoardsSkeleton() {
   );
 }
 
-/** The Overview's analytics: shared controls, then the Progression, Customers and Booking funnel boards. */
+/** The Overview's analytics: shared controls, then the Progression, Customers, Booking funnel and Marketing boards. */
 export function AnalyticsBoards() {
   const [searchParams, setSearchParams] = useSearchParams();
   const today = todayInDublin();
   const settings = useMemo(() => readBoardSettings(searchParams, today), [searchParams, today]);
   // The funnel tab has its own data and filters; only the date range is shared.
   const isFunnel = settings.board === "funnel";
-  const { data, error, isPending, isFetching, refetch } = useAdminAnalytics(analyticsQuery(settings), !isFunnel);
+  // The marketing tab has its own data too, and shares the range, grouping
+  // and comparison, but not the session filters.
+  const isMarketing = settings.board === "marketing";
+  const { data, error, isPending, isFetching, refetch } = useAdminAnalytics(
+    analyticsQuery(settings),
+    !isFunnel && !isMarketing
+  );
   const calendars = [...(data?.data.calendars ?? [])];
   // A calendar from a shared link that the list no longer has still shows.
   if (settings.filters.calendarId !== null && !calendars.some((c) => c.id === settings.filters.calendarId)) {
@@ -204,55 +211,59 @@ export function AnalyticsBoards() {
                   </ToggleGroupItem>
                 </ToggleGroup>
               </div>
-              <div className="space-y-1">
-                <Label htmlFor="analytics-type" className="text-xs">
-                  Session type
-                </Label>
-                <Select
-                  value={settings.filters.category ?? ALL}
-                  onValueChange={(value) =>
-                    update({
-                      filters: { ...settings.filters, category: value === ALL ? null : (value as SessionCategory) },
-                    })
-                  }
-                >
-                  <SelectTrigger id="analytics-type" className="h-9 w-36">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>All types</SelectItem>
-                    {SESSION_CATEGORIES.map((category) => (
-                      <SelectItem key={category} value={category}>
-                        {CATEGORY_LABELS[category]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="analytics-calendar" className="text-xs">
-                  Calendar
-                </Label>
-                <Select
-                  value={settings.filters.calendarId === null ? ALL : String(settings.filters.calendarId)}
-                  onValueChange={(value) =>
-                    update({ filters: { ...settings.filters, calendarId: value === ALL ? null : Number(value) } })
-                  }
-                  disabled={!data && settings.filters.calendarId === null}
-                >
-                  <SelectTrigger id="analytics-calendar" className="h-9 w-48">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>All calendars</SelectItem>
-                    {calendars.map((calendar) => (
-                      <SelectItem key={calendar.id} value={String(calendar.id)}>
-                        {calendar.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {!isMarketing && (
+                <>
+                  <div className="space-y-1">
+                    <Label htmlFor="analytics-type" className="text-xs">
+                      Session type
+                    </Label>
+                    <Select
+                      value={settings.filters.category ?? ALL}
+                      onValueChange={(value) =>
+                        update({
+                          filters: { ...settings.filters, category: value === ALL ? null : (value as SessionCategory) },
+                        })
+                      }
+                    >
+                      <SelectTrigger id="analytics-type" className="h-9 w-36">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL}>All types</SelectItem>
+                        {SESSION_CATEGORIES.map((category) => (
+                          <SelectItem key={category} value={category}>
+                            {CATEGORY_LABELS[category]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="analytics-calendar" className="text-xs">
+                      Calendar
+                    </Label>
+                    <Select
+                      value={settings.filters.calendarId === null ? ALL : String(settings.filters.calendarId)}
+                      onValueChange={(value) =>
+                        update({ filters: { ...settings.filters, calendarId: value === ALL ? null : Number(value) } })
+                      }
+                      disabled={!data && settings.filters.calendarId === null}
+                    >
+                      <SelectTrigger id="analytics-calendar" className="h-9 w-48">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL}>All calendars</SelectItem>
+                        {calendars.map((calendar) => (
+                          <SelectItem key={calendar.id} value={String(calendar.id)}>
+                            {calendar.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
               <div className="space-y-1">
                 <Label htmlFor="analytics-compare" className="text-xs">
                   Compare to
@@ -291,6 +302,10 @@ export function AnalyticsBoards() {
         {isFunnel ? (
           <TabsContent value="funnel" className="mt-0">
             <FunnelBoard range={settings.range} />
+          </TabsContent>
+        ) : isMarketing ? (
+          <TabsContent value="marketing" className="mt-0">
+            <MarketingBoard range={settings.range} groupBy={settings.groupBy} compareTo={settings.compareTo} />
           </TabsContent>
         ) : isPending ? (
           <BoardsSkeleton />

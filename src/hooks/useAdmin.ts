@@ -8,6 +8,7 @@ import { type AdminDataSource, timeLoad } from "@/lib/adminLoadProgress";
 import { normalizeProgression } from "@/lib/customerInsights";
 import type { AnalyticsCustomersResponse, AnalyticsResponse } from "@/lib/adminAnalytics";
 import type { FunnelResponse } from "@/lib/adminFunnel";
+import type { MarketingResponse } from "@/lib/adminMarketing";
 import {
   type CustomerFollowup,
   type FollowupPatch,
@@ -630,6 +631,20 @@ export function useAdminFunnel(query: string, enabled = true) {
   const { data: isAdmin } = useIsAdmin();
   return useQuery<FunnelResponse, ApiError>({
     queryKey: ["admin-analytics-funnel", query],
+    queryFn: () => fetchAdminFunction("admin-analytics", query),
+    enabled: isAdmin === true && enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+    retry: ACUITY_QUERY_OPTIONS.retry,
+  });
+}
+
+// The Marketing tab (admin-analytics?action=marketing).
+export function useAdminMarketing(query: string, enabled = true) {
+  const { data: isAdmin } = useIsAdmin();
+  return useQuery<MarketingResponse, ApiError>({
+    queryKey: ["admin-analytics-marketing", query],
     queryFn: () => fetchAdminFunction("admin-analytics", query),
     enabled: isAdmin === true && enabled,
     placeholderData: keepPreviousData,
