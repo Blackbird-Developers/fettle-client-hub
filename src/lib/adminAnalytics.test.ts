@@ -23,7 +23,7 @@ describe("presetRange", () => {
   it("covers the expected dates up to today", () => {
     expect(presetRange("last7", TODAY)).toEqual({ from: "2026-10-22", to: TODAY });
     expect(presetRange("lastMonth", TODAY)).toEqual({ from: "2026-09-01", to: "2026-09-30" });
-    expect(presetRange("thisQuarter", TODAY)).toEqual({ from: "2026-10-01", to: TODAY });
+    expect(presetRange("quarterToDate", TODAY)).toEqual({ from: "2026-10-01", to: TODAY });
     expect(presetRange("custom", TODAY)).toBeNull();
   });
 
@@ -36,6 +36,7 @@ describe("presetRange", () => {
     expect(presetRange("thisYear", TODAY)).toEqual({ from: "2026-07-29", to: TODAY });
     expect(presetRange("last12Months", TODAY)).toEqual({ from: "2026-07-29", to: TODAY });
     expect(presetRange("thisYear", "2027-03-01")).toEqual({ from: "2027-01-01", to: "2027-03-01" });
+    expect(presetRange("lastYear", TODAY)).toBeNull();
   });
 });
 
@@ -48,7 +49,7 @@ describe("board settings in the URL", () => {
       range: { from: "2026-07-29", to: TODAY },
       groupBy: "week",
       groupByChosen: false,
-      compareTo: "previous",
+      compare: { preset: "previous", range: { from: "2026-04-28", to: "2026-07-28" } },
       windowDays: 30,
       basis: "session",
     });
@@ -66,7 +67,7 @@ describe("board settings in the URL", () => {
       range: { from: "2026-08-01", to: "2026-09-30" },
       groupBy: "week",
       groupByChosen: true,
-      compareTo: "year",
+      compare: { preset: "previousYear", range: { from: "2025-08-01", to: "2025-09-30" } },
       windowDays: 60,
       basis: "booking",
       filters: { category: "couples", calendarId: 42 },
@@ -75,6 +76,34 @@ describe("board settings in the URL", () => {
     expect(analyticsQuery(settings)).toBe(
       "from=2026-08-01&to=2026-09-30&group=week&compare=year&window=60&basis=booking&type=couples&calendar=42"
     );
+  });
+
+  it("keeps every comparison in the link, and sends picker-only ones as custom dates", () => {
+    const weekday = readBoardSettings(new URLSearchParams("range=last30&compare=previousWeekday"), TODAY);
+    expect(weekday.compare).toEqual({ preset: "previousWeekday", range: { from: "2026-09-01", to: "2026-09-30" } });
+    expect(boardSettingsToSearch(weekday).toString()).toBe("range=last30&compare=previousWeekday");
+    expect(analyticsQuery(weekday)).toContain("compare=custom&cfrom=2026-09-01&cto=2026-09-30");
+
+    const custom = new URLSearchParams("range=last7&compare=custom&cfrom=2026-01-05&cto=2026-01-11");
+    const customSettings = readBoardSettings(custom, TODAY);
+    expect(customSettings.compare).toEqual({ preset: "custom", range: { from: "2026-01-05", to: "2026-01-11" } });
+    expect(boardSettingsToSearch(customSettings).toString()).toBe(custom.toString());
+
+    const off = readBoardSettings(new URLSearchParams("compare=off"), TODAY);
+    expect(off.compare).toBeNull();
+    expect(boardSettingsToSearch(off).toString()).toBe("compare=off");
+    expect(analyticsQuery(off)).toContain("compare=previous");
+
+    // A custom comparison with bad dates falls back to the previous period.
+    expect(readBoardSettings(new URLSearchParams("compare=custom&cfrom=nope"), TODAY).compare?.preset).toBe("previous");
+  });
+
+  it("opens links made before the shared picker", () => {
+    expect(readBoardSettings(new URLSearchParams("range=thisQuarter"), TODAY)).toMatchObject({
+      preset: "quarterToDate",
+      range: { from: "2026-10-01", to: TODAY },
+    });
+    expect(readBoardSettings(new URLSearchParams("range=last12Months"), TODAY).range).toEqual({ from: "2026-07-29", to: TODAY });
   });
 
   it("keeps the lapsed-client view in the link and the queries", () => {

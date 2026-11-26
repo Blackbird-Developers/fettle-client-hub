@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { format, parseISO } from "date-fns";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,7 +19,9 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useToast } from "@/hooks/use-toast";
 
 import { AlertCircle, MessageSquare, RefreshCw, Star } from "lucide-react";
-import { DateRangeFilter } from "./DateRangeFilter";
+import { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
+import { comparisonLabel, formatCountChange } from "@/lib/adminAnalytics";
+import type { DatePresetId } from "@/lib/datePresets";
 import { useHubFeedback, useUpdateFeedbackStatus } from "@/hooks/useAdmin";
 import { isMissingTableError } from "@/lib/customerFollowups";
 import { formatDateTime } from "@/lib/customerInsights";
@@ -37,6 +40,28 @@ import {
 } from "@/lib/hubFeedback";
 import { StatTile } from "./CustomerInsightsShared";
 
+/** The date picker's presets on this page. */
+const FEEDBACK_PRESETS: readonly DatePresetId[] = [
+  "today",
+  "yesterday",
+  "thisWeek",
+  "lastWeek",
+  "last7",
+  "last30",
+  "thisMonth",
+  "lastMonth",
+  "last90",
+  "thisYear",
+  "allTime",
+];
+
+/** "+0.4", "−0.2" or "±0.0" between two average ratings; null if either is missing. */
+function ratingChange(current: number | null, previous: number | null): string | null {
+  if (current === null || previous === null) return null;
+  const diff = Math.round((current - previous) * 10) / 10;
+  return `${diff > 0 ? "+" : diff < 0 ? "−" : "±"}${Math.abs(diff).toFixed(1)}`;
+}
+
 const STATUS_STYLES: Record<FeedbackStatus, string> = {
   new: "bg-blue-50 text-blue-700 border-blue-200",
   read: "bg-muted text-muted-foreground border-border",
@@ -53,8 +78,47 @@ export function Feedback() {
   const setFilter = <K extends keyof FeedbackFilters>(key: K, value: FeedbackFilters[K]) =>
     setFilters((current) => ({ ...current, [key]: value }));
 
-  const rows = useMemo(() => filterFeedback(data ?? [], filters), [data, filters]);
+  // The period picked; null = all time.
+  const [dates, setDates] = useState<DateRangeValue | null>(null);
+  const today = format(new Date(), "yyyy-MM-dd");
+  // The first day anyone sent feedback: "All time" and the calendar start there.
+  const firstDay = useMemo(
+    () =>
+      (data ?? []).reduce((first, row) => {
+        const day = format(parseISO(row.created_at), "yyyy-MM-dd");
+        return day < first ? day : first;
+      }, today),
+    [data, today]
+  );
+  const pickerValue: DateRangeValue = dates ?? {
+    preset: "allTime",
+    range: { from: firstDay, to: today },
+    compare: null,
+  };
+
+  const rows = useMemo(
+    () => filterFeedback(data ?? [], { ...filters, from: dates?.range.from ?? "", to: dates?.range.to ?? "" }),
+    [data, filters, dates]
+  );
   const summary = useMemo(() => summariseFeedback(data ?? []), [data]);
+  // The tiles: feedback in the period, and in the period it's compared with.
+  const periodSummary = useMemo(
+    () =>
+      dates
+        ? summariseFeedback(
+            filterFeedback(data ?? [], { ...DEFAULT_FEEDBACK_FILTERS, from: dates.range.from, to: dates.range.to })
+          )
+        : summary,
+    [data, dates, summary]
+  );
+  const compareSummary = useMemo(() => {
+    const compare = dates?.compare;
+    if (!compare) return null;
+    return summariseFeedback(
+      filterFeedback(data ?? [], { ...DEFAULT_FEEDBACK_FILTERS, from: compare.range.from, to: compare.range.to })
+    );
+  }, [data, dates]);
+  const compareLabel = comparisonLabel(dates?.compare ?? null);
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const row of data ?? []) counts[row.status] = (counts[row.status] ?? 0) + 1;
@@ -85,8 +149,8 @@ export function Feedback() {
     );
   }
 
-  const filtered =
-    filters.category !== "all" || filters.from !== "" || filters.to !== "";
+  const filtered = filters.category !== "all" || dates !== null;
+  const ratingDiff = compareSummary ? ratingChange(periodSummary.averageRating, compareSummary.averageRating) : null;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -98,12 +162,22 @@ export function Feedback() {
       </div>
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-3">
-        <StatTile label="Unread" value={String(summary.new)} hint="Status still New" />
-        <StatTile label="All feedback" value={String(summary.total)} />
+        <StatTile label="Unread" value={String(summary.new)} hint="Status still New, any date" />
+        <StatTile
+          label={dates ? "Feedback in this period" : "All feedback"}
+          value={String(periodSummary.total)}
+          hint={
+            compareSummary
+              ? `${formatCountChange(periodSummary.total, compareSummary.total)} vs ${compareLabel}`
+              : undefined
+          }
+        />
         <StatTile
           label="Average rating"
-          value={summary.averageRating === null ? "–" : `${summary.averageRating} / 5`}
-          hint={`From ${summary.rated} rated`}
+          value={periodSummary.averageRating === null ? "–" : `${periodSummary.averageRating} / 5`}
+          hint={[`From ${periodSummary.rated} rated`, ratingDiff && `${ratingDiff} vs ${compareLabel}`]
+            .filter(Boolean)
+            .join(" · ")}
         />
       </div>
 
@@ -157,18 +231,25 @@ export function Feedback() {
               <Label htmlFor="feedback-dates" className="text-xs text-muted-foreground">
                 Date
               </Label>
-              <DateRangeFilter
+              <DateRangePicker
                 id="feedback-dates"
-                from={filters.from}
-                to={filters.to}
-                onChange={(from, to) => setFilters((current) => ({ ...current, from, to }))}
+                value={pickerValue}
+                // "All time" clears the dates (and any comparison).
+                onChange={(value) => setDates(value.preset === "allTime" ? null : value)}
+                today={today}
+                min={firstDay}
+                presets={FEEDBACK_PRESETS}
+                clampPresets
               />
             </div>
             {filtered && (
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setFilters((current) => ({ ...DEFAULT_FEEDBACK_FILTERS, status: current.status }))}
+                onClick={() => {
+                  setFilters((current) => ({ ...DEFAULT_FEEDBACK_FILTERS, status: current.status }));
+                  setDates(null);
+                }}
               >
                 Clear filters
               </Button>

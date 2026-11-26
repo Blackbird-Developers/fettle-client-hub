@@ -77,7 +77,9 @@ describe("marketingTotals", () => {
     expect(totals.spend).toBe(500);
     expect(totals.conversions).toBe(10);
     expect(totals.newCustomers).toBe(10);
-    expect(totals.costPerNewCustomer).toBe(50);
+    // Spend inc. 23% VAT, €615, over 10 new customers; cost per conversion stays before VAT.
+    expect(totals.spendIncVat).toBe(615);
+    expect(totals.costPerNewCustomer).toBe(61.5);
     expect(totals.costPerConversion).toBe(50);
     expect(totals.channels.map((c) => c.channel)).toEqual([...CHANNELS]);
     expect(totals.channels.find((c) => c.channel === "meta")!.costPerConversion).toBe(50);
@@ -147,7 +149,7 @@ describe("marketingTotals", () => {
       2
     );
     expect(totals.spend).toBe(100);
-    expect(totals.costPerNewCustomer).toBe(50);
+    expect(totals.costPerNewCustomer).toBe(61.5);
     expect(totals.channels.find((c) => c.channel === "tiktok")!.spend).toBe(0);
     expect(totals.otherCurrencies).toEqual([{ channel: "tiktok", currency: "USD", spend: 42.5 }]);
   });
@@ -177,7 +179,8 @@ describe("marketingSeries", () => {
     expect(points[0].spendByChannel).toEqual({ google: 50, meta: 100, tiktok: 0 });
     expect(points[0].conversionsByChannel).toEqual({ google: 1, meta: 2, tiktok: 0 });
     expect(points[0].spend).toBe(150);
-    expect(points[0].costPerNewCustomer).toBe(30);
+    expect(points[0].spendIncVat).toBe(184.5);
+    expect(points[0].costPerNewCustomer).toBe(36.9);
     expect(points[1].spend).toBe(30);
     expect(points[1].costPerNewCustomer).toBeNull();
     // A week with no figures and no new-customer entry.
@@ -193,7 +196,7 @@ describe("marketingSeries", () => {
     );
     expect(points.map((p) => [p.period.key, p.spend, p.costPerNewCustomer])).toEqual([
       ["2026-10-01", 10, null],
-      ["2026-11-01", 20, 5],
+      ["2026-11-01", 20, 6.15],
     ]);
   });
 });
@@ -247,10 +250,10 @@ describe("marketingReport", () => {
       newCustomersByPeriod: new Map([["2026-11-01", 3]]),
     });
     expect(report.params).toEqual({ range, groupBy: "month", compareTo: "previous", compareRange });
-    expect(report.totals).toMatchObject({ spend: 90, newCustomers: 3, costPerNewCustomer: 30 });
-    expect(report.compare).toMatchObject({ spend: 40, newCustomers: 4, costPerNewCustomer: 10 });
+    expect(report.totals).toMatchObject({ spend: 90, spendIncVat: 110.7, newCustomers: 3, costPerNewCustomer: 36.9 });
+    expect(report.compare).toMatchObject({ spend: 40, newCustomers: 4, costPerNewCustomer: 12.3 });
     expect(report.series).toHaveLength(1);
-    expect(report.series[0]).toMatchObject({ spend: 90, costPerNewCustomer: 30 });
+    expect(report.series[0]).toMatchObject({ spend: 90, costPerNewCustomer: 36.9 });
     expect(report.missingStart).toEqual([]);
     expect(report.compareMissingStart).toEqual(["meta"]);
     expect(report.channels.find((c) => c.channel === "meta")!.connected).toBe(true);
@@ -270,12 +273,17 @@ describe("parseMarketingParams", () => {
       range,
       groupBy: "week",
       compareTo: "previous",
+      compareRange: { from: "2026-10-02", to: "2026-10-31" },
     });
     expect(parseMarketingParams(new URLSearchParams("from=2026-01-01&to=2026-11-30&compare=year"))).toEqual({
       range: { from: "2026-01-01", to: "2026-11-30" },
       groupBy: "month",
       compareTo: "year",
+      compareRange: { from: "2025-01-01", to: "2025-11-30" },
     });
+    expect(
+      parseMarketingParams(new URLSearchParams("from=2026-11-01&to=2026-11-30&compare=custom&cfrom=2026-10-04&cto=2026-11-02"))
+    ).toMatchObject({ compareTo: "custom", compareRange: { from: "2026-10-04", to: "2026-11-02" } });
   });
 
   it("rejects bad input", () => {

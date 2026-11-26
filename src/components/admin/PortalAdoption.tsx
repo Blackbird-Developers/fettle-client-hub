@@ -30,6 +30,10 @@ import {
   type SortDirection,
   StatTile,
 } from "./CustomerInsightsShared";
+import { LIST_PRESETS, dayInRange, localDay, presetValue } from "@/lib/datePresets";
+import { liveWindowStart } from "@/lib/adminWorklists";
+import { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
+import { PeriodFigures } from "./PeriodFigures";
 import { PortalEmailsPanel } from "./PortalEmailsPanel";
 import { TablePagination } from "./TablePagination";
 
@@ -55,12 +59,16 @@ export function PortalAdoption() {
   });
   const [page, setPage] = useState(1);
   const tableRef = useRef<HTMLDivElement>(null);
+  // Customers whose last session is in this period; null = the whole live window.
+  const [dates, setDates] = useState<DateRangeValue | null>(null);
 
   const rows = useMemo(() => {
-    const filtered = (data?.adoption.rows ?? []).filter((row) => matchesSearch(row, search));
+    const filtered = (data?.adoption.rows ?? [])
+      .filter((row) => !dates || dayInRange(localDay(row.lastSessionAt), dates.range))
+      .filter((row) => matchesSearch(row, search));
     const compare = COMPARATORS[sort.key];
     return filtered.sort((a, b) => (sort.direction === "asc" ? compare(a, b) : compare(b, a)));
-  }, [data, search, sort]);
+  }, [data, search, sort, dates]);
 
   const shown = paginate(rows, page, PAGE_SIZE);
 
@@ -90,10 +98,32 @@ export function PortalAdoption() {
   const { totals } = data.adoption;
   const matchable = totals.withAccount + totals.withoutAccount;
   const adoptionRate = matchable > 0 ? Math.round((totals.withAccount / matchable) * 100) : 0;
+  const today = localDay(new Date().toISOString());
+  const windowStart = liveWindowStart(today, data.activeWindowDays);
+  const picked = dates ?? presetValue("last30", today, windowStart);
 
   return (
     <div className="space-y-6 animate-fade-in">
       <InsightsHeader data={data} isFetching={isFetching} onRefresh={() => refetch()} />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <DateRangePicker
+          id="adoption-dates"
+          value={picked}
+          onChange={(value) => {
+            setDates(value);
+            setPage(1);
+          }}
+          today={today}
+          min={windowStart}
+          compareMin="2010-01-01"
+          presets={LIST_PRESETS}
+        />
+        <p className="text-xs text-muted-foreground">
+          The dates narrow the list (last {data.activeWindowDays} days, live from Acuity) by each customer's last
+          session. The figures at the top are always the last {data.activeWindowDays} days.
+        </p>
+      </div>
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <StatTile
@@ -108,6 +138,24 @@ export function PortalAdoption() {
         <StatTile label="Without a portal account" value={String(totals.withoutAccount)} />
         <StatTile label="Can't match (no email)" value={String(totals.noEmail)} />
       </div>
+
+      <PeriodFigures
+        list="adoption"
+        range={picked.range}
+        compare={picked.compare}
+        figures={(t, before) => [
+          { label: "Active customers", current: t.activeCustomers, previous: before?.activeCustomers ?? null, kind: "count", detail: "Completed a session" },
+          {
+            label: "Portal adoption",
+            current: t.adoptionRate,
+            previous: before?.adoptionRate ?? null,
+            kind: "rate",
+            detail: `${t.withAccount} of ${t.withAccount + t.withoutAccount} with an email`,
+          },
+          { label: "Without a portal account", current: t.withoutAccount, previous: before?.withoutAccount ?? null, kind: "count" },
+          { label: "Can't match (no email)", current: t.noEmail, previous: before?.noEmail ?? null, kind: "count" },
+        ]}
+      />
 
       <DataIssuesPanel data={data} />
 

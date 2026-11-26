@@ -49,6 +49,9 @@ export function notificationDetailLines(n: Pick<AdminNotification, 'kind' | 'det
 export const BELL_LIMIT = 10;
 export const NOTIFICATIONS_PAGE_SIZE = 25;
 
+/** The first day of admin notifications (the feature went live), where "All time" starts. */
+export const NOTIFICATIONS_START = "2026-10-30";
+
 /**
  * Search text made safe for a PostgREST `or(...ilike...)` filter: commas,
  * brackets and wildcards would break or widen the filter, so they're dropped.

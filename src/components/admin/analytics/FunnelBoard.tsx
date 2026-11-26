@@ -12,7 +12,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAdminFunnel } from "@/hooks/useAdmin";
-import { formatFullDay, formatRange } from "@/lib/adminAnalytics";
+import {
+  type BoardComparison,
+  comparisonLabel,
+  formatCountChange,
+  formatFullDay,
+  formatPoints,
+  formatRange,
+} from "@/lib/adminAnalytics";
 import {
   type FunnelResponse,
   DEVICE_LABELS,
@@ -35,7 +42,7 @@ import {
   FUNNEL_PATHS,
 } from "../../../../supabase/functions/admin-analytics/funnel.ts";
 import { type DateRange, dublinDate } from "../../../../supabase/functions/admin-analytics/logic.ts";
-import { SERIES_COLORS } from "./chartStyle";
+import { SERIES_COLORS, toneOf } from "./chartStyle";
 import { MetricTile, StaticLegend, TooltipBox } from "./parts";
 
 const ALL = "all";
@@ -179,18 +186,38 @@ function FunnelSkeleton() {
   );
 }
 
+/** The headline figures: clicks, visits that opened a form, bookings, and booked ÷ opened in %. */
+function headline(f: FunnelResponse["funnel"]) {
+  const opened = f.stages[0]?.sessions ?? 0;
+  const booked = f.stages[f.stages.length - 1]?.sessions ?? 0;
+  return { clicks: f.bookNowClicks, opened, booked, conversion: opened > 0 ? (booked / opened) * 100 : null };
+}
+
 function FunnelContent({
   data,
+  previous,
+  compareLabel,
   onFilter,
 }: {
   data: FunnelResponse;
+  /** The comparison period's funnel, once loaded (same filters). */
+  previous: FunnelResponse | undefined;
+  /** What it's compared with; null when compare is off. */
+  compareLabel: string | null;
   onFilter: (patch: Partial<FunnelFilters>) => void;
 }) {
   const f = data.funnel;
   const [showTable, setShowTable] = useState(false);
-  const opened = f.stages[0]?.sessions ?? 0;
-  const booked = f.stages[f.stages.length - 1]?.sessions ?? 0;
-  const conversion = opened > 0 ? (booked / opened) * 100 : null;
+  const { opened, booked, conversion } = headline(f);
+  const before = previous && compareLabel ? headline(previous.funnel) : null;
+  const countTile = (current: number, key: "clicks" | "opened" | "booked") =>
+    before
+      ? { change: `${formatCountChange(current, before[key])} vs ${compareLabel}`, tone: toneOf(current - before[key]) }
+      : {};
+  const conversionChange =
+    before && conversion !== null && before.conversion !== null
+      ? Math.round((conversion - before.conversion) * 10) / 10
+      : null;
   const max = Math.max(opened, 1);
   const rows = useMemo(() => f.series.map((p) => ({ ...p, label: pointLabel(p.key, f.groupBy) })), [f.series, f.groupBy]);
 
@@ -210,15 +237,28 @@ function FunnelContent({
         <MetricTile
           label="Book Now clicks"
           value={String(f.bookNowClicks)}
+          {...countTile(f.bookNowClicks, "clicks")}
           detail="On a therapist's card on /our-therapists"
         />
-        <MetricTile label="Opened a booking form" value={String(opened)} detail="Visits, website and hub" />
+        <MetricTile
+          label="Opened a booking form"
+          value={String(opened)}
+          {...countTile(opened, "opened")}
+          detail="Visits, website and hub"
+        />
         <MetricTile
           label="Booked"
           value={String(booked)}
+          {...countTile(booked, "booked")}
           detail={`${f.outcomes.sessionsBooked} sessions · ${f.outcomes.bundlesBought} bundles`}
         />
-        <MetricTile label="Conversion" value={formatPct(conversion)} detail="Booked ÷ opened" />
+        <MetricTile
+          label="Conversion"
+          value={formatPct(conversion)}
+          change={conversionChange === null ? null : `${formatPoints(conversionChange)} vs ${compareLabel}`}
+          tone={conversionChange === null ? undefined : toneOf(conversionChange)}
+          detail="Booked ÷ opened"
+        />
       </div>
 
       {f.biggestDrop && (
@@ -415,11 +455,15 @@ function FunnelContent({
 }
 
 /** The Overview's Booking funnel tab: website + hub booking forms, step by step. */
-export function FunnelBoard({ range: requestedRange }: { range: DateRange }) {
+export function FunnelBoard({ range: requestedRange, compare }: { range: DateRange; compare: BoardComparison }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => readFunnelFilters(searchParams), [searchParams]);
   const { range, clipped } = funnelRange(requestedRange);
   const { data, error, isPending, isFetching, refetch } = useAdminFunnel(funnelQuery(range, filters));
+  // The comparison is a second request for the other period, same filters.
+  const compareRange = compare ? funnelRange(compare.range).range : null;
+  const previous = useAdminFunnel(funnelQuery(compareRange ?? range, filters), compareRange !== null);
+  const compareLabel = comparisonLabel(compare);
   const setFilters = (patch: Partial<FunnelFilters>) =>
     setSearchParams(withFunnelFilters(searchParams, { ...filters, ...patch }), { replace: true });
   const anyFilter = Object.values(filters).some(Boolean);
@@ -498,6 +542,15 @@ export function FunnelBoard({ range: requestedRange }: { range: DateRange }) {
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-live="polite">
           {clipped && <span>The funnel shows at most a year: {formatRange(range)}.</span>}
           {data?.trackingStart && <span>Tracking since {formatFullDay(dublinDate(Date.parse(data.trackingStart)))}</span>}
+          {compareRange && (
+            <span>
+              {previous.error
+                ? "Couldn't load the comparison"
+                : previous.data
+                  ? `Compared with ${formatRange(compareRange)}`
+                  : "Loading the comparison…"}
+            </span>
+          )}
           {isFetching && !isPending && (
             <span className="flex items-center gap-1">
               <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
@@ -531,7 +584,12 @@ export function FunnelBoard({ range: requestedRange }: { range: DateRange }) {
                 </AlertDescription>
               </Alert>
             )}
-            <FunnelContent data={data} onFilter={setFilters} />
+            <FunnelContent
+              data={data}
+              previous={previous.data}
+              compareLabel={compareLabel}
+              onFilter={setFilters}
+            />
           </>
         ) : null}
       </CardContent>

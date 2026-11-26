@@ -4,8 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useAdminNotificationsPage, useMarkNotificationsRead } from "@/hooks/useAdminNotifications";
-import { NOTIFICATIONS_PAGE_SIZE } from "@/lib/adminNotifications";
+import {
+  useAdminNotificationCount,
+  useAdminNotificationsPage,
+  useMarkNotificationsRead,
+} from "@/hooks/useAdminNotifications";
+import { NOTIFICATIONS_PAGE_SIZE, NOTIFICATIONS_START } from "@/lib/adminNotifications";
+import { comparisonLabel, countChangeHint } from "@/lib/adminAnalytics";
+import { LIST_PRESETS, formatDayRange, localDay, presetValue } from "@/lib/datePresets";
+import { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
 import { isMissingTableError } from "@/lib/customerFollowups";
 import { NotificationItem } from "./NotificationItem";
 import { TablePagination } from "./TablePagination";
@@ -19,6 +26,9 @@ export function NotificationsPage() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  // null = all time.
+  const [dates, setDates] = useState<DateRangeValue | null>(null);
+  const today = localDay(new Date().toISOString());
 
   // Wait for a pause in typing before searching.
   useEffect(() => {
@@ -29,7 +39,14 @@ export function NotificationsPage() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  const { data, isLoading, isFetching, error } = useAdminNotificationsPage({ page, unreadOnly, search });
+  const range = dates?.range ?? null;
+  const { data, isLoading, isFetching, error } = useAdminNotificationsPage({ page, unreadOnly, search, range });
+  const compare = dates?.compare ?? null;
+  const previous = useAdminNotificationCount(
+    { unreadOnly, search, range: compare?.range ?? null },
+    compare !== null
+  );
+  const compareLabel = comparisonLabel(compare);
   const markRead = useMarkNotificationsRead();
   const rows = data?.rows ?? [];
   const total = data?.total ?? 0;
@@ -66,7 +83,27 @@ export function NotificationsPage() {
               className="pl-8 h-9 w-64 max-w-full"
             />
           </div>
+          <DateRangePicker
+            id="notifications-dates"
+            value={dates ?? presetValue("allTime", today, NOTIFICATIONS_START)}
+            // "All time" clears the dates (and any comparison).
+            onChange={(value) => {
+              setDates(value.preset === "allTime" ? null : value);
+              setPage(1);
+            }}
+            today={today}
+            min={NOTIFICATIONS_START}
+            presets={LIST_PRESETS}
+            clampPresets
+          />
           {isFetching && !isLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          {range && data && (
+            <p className="w-full text-xs text-muted-foreground" aria-live="polite">
+              {total} notification{total === 1 ? "" : "s"} {formatDayRange(range)}
+              {countChangeHint(total, previous.data, compareLabel) &&
+                ` · ${countChangeHint(total, previous.data, compareLabel)}`}
+            </p>
+          )}
         </div>
         {anyUnread && (
           <Button variant="outline" size="sm" onClick={() => markRead.mutate({ allUnread: true })}>
@@ -87,7 +124,7 @@ export function NotificationsPage() {
           </p>
         ) : rows.length === 0 ? (
           <p className="px-6 py-8 text-sm text-muted-foreground">
-            {search || unreadOnly ? "No notifications match." : "No notifications yet."}
+            {search || unreadOnly || range ? "No notifications match." : "No notifications yet."}
           </p>
         ) : (
           <>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityCustomer, activityRange, describeActivity } from "./adminActivity";
+import { activityBounds, activityCustomer, describeActivity } from "./adminActivity";
 
 const row = (action: string, details: Record<string, unknown> = {}) => ({ action, details });
 
@@ -72,20 +72,12 @@ describe("activityCustomer", () => {
   });
 });
 
-describe("activityRange", () => {
-  const now = new Date(2026, 10, 11, 15, 30); // 11 Nov 2026, local time
-
-  it("covers whole local days for the presets", () => {
-    const today = activityRange("today", "", "", now);
-    expect(new Date(today.from)).toEqual(new Date(2026, 10, 11));
-    expect(new Date(today.to)).toEqual(new Date(2026, 10, 12));
-    expect(new Date(activityRange("7d", "", "", now).from)).toEqual(new Date(2026, 10, 5));
-    expect(new Date(activityRange("30d", "", "", now).from)).toEqual(new Date(2026, 9, 13));
-  });
-
-  it("uses a custom range over the preset, including its last day", () => {
-    const range = activityRange("today", "2026-11-01", "2026-11-03", now);
+describe("activityBounds", () => {
+  it("covers whole local days, including the last one", () => {
+    const range = activityBounds({ from: "2026-11-01", to: "2026-11-03" });
     expect(new Date(range.from)).toEqual(new Date(2026, 10, 1));
     expect(new Date(range.to)).toEqual(new Date(2026, 10, 4));
+    const today = activityBounds({ from: "2026-11-11", to: "2026-11-11" });
+    expect(new Date(today.to)).toEqual(new Date(2026, 10, 12));
   });
 });

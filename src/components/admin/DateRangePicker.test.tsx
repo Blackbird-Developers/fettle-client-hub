@@ -41,6 +41,26 @@ describe("DateRangePicker", () => {
     });
   });
 
+  it("hides presets that start before the minimum, or starts them on it with clampPresets", async () => {
+    const { user } = setup(LAST_30, { min: "2026-07-29" });
+    await user.click(screen.getByRole("button", { name: /last 30 days/i }));
+    expect(screen.queryByRole("button", { name: "This year (Jan – today)" })).toBeNull();
+  });
+
+  it("clampPresets starts a preset on the first day with figures", async () => {
+    const { onChange, user } = setup(LAST_30, { min: "2026-07-29", clampPresets: true });
+    await user.click(screen.getByRole("button", { name: /last 30 days/i }));
+    // Last calendar year is wholly before the minimum, so it still isn't offered.
+    expect(screen.queryByRole("button", { name: "Last calendar year" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "This year (Jan – today)" }));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    expect(onChange).toHaveBeenCalledWith({
+      preset: "thisYear",
+      range: { from: "2026-07-29", to: TODAY },
+      compare: null,
+    });
+  });
+
   it("Cancel throws the changes away", async () => {
     const { onChange, user } = setup();
     await user.click(screen.getByRole("button", { name: /last 30 days/i }));

@@ -29,7 +29,7 @@ export const LEAD_LOOKBACK_DAYS = 90;
 // trailing spaces ("Quoted ", "Booked in "), and the No Show / Quoted ids
 // haven't been confirmed by Fettle yet. "Booked in" is also matched by its id.
 // Once the ids are known, add them here; nothing else needs to change.
-const NO_SHOW_LABEL = /^no[\s-]?shows?$/i;
+export const NO_SHOW_LABEL = /^no[\s-]?shows?$/i;
 const QUOTED_LABEL = /^quoted$/i;
 const BOOKED_IN_LABEL = /^booked in$/i;
 export const BOOKED_IN_LABEL_ID = 23047490;

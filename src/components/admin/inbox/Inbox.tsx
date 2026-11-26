@@ -47,8 +47,11 @@ import {
   type ChatConversation,
   type ChatFilters,
   type ChatMessage,
+  CHAT_START,
   DEFAULT_CHAT_FILTERS,
   countByStatus,
+  periodChatCounts,
+  startedIn,
   describeDevice,
   filterConversations,
   groupByDay,
@@ -62,6 +65,9 @@ import {
   visitorLabel,
 } from "@/lib/chat";
 import { cn } from "@/lib/utils";
+import { comparisonLabel, countChangeHint } from "@/lib/adminAnalytics";
+import { LIST_PRESETS, formatDayRange, localDay, presetValue } from "@/lib/datePresets";
+import { DateRangePicker, type DateRangeValue } from "../DateRangePicker";
 
 interface AdminOption {
   userId: string;
@@ -84,12 +90,18 @@ export function Inbox() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get("c") ?? undefined;
   const [alerts, setAlerts] = useState(desktopAlertsState);
+  // Conversations started in this period; null = any date.
+  const [dates, setDates] = useState<DateRangeValue | null>(null);
+  const today = localDay(new Date().toISOString());
 
   const conversations = useMemo(() => data ?? [], [data]);
-  const visible = useMemo(
-    () => filterConversations(conversations, filters, user?.id),
-    [conversations, filters, user?.id]
-  );
+  const visible = useMemo(() => {
+    const matching = filterConversations(conversations, filters, user?.id);
+    return dates ? startedIn(matching, dates.range) : matching;
+  }, [conversations, filters, user?.id, dates]);
+  const period = dates ? periodChatCounts(conversations, dates.range) : null;
+  const before = dates?.compare ? periodChatCounts(conversations, dates.compare.range) : null;
+  const compareLabel = comparisonLabel(dates?.compare ?? null);
   const counts = useMemo(() => countByStatus(conversations), [conversations]);
   const selected = conversations.find((c) => c.id === selectedId);
 
@@ -199,6 +211,27 @@ export function Inbox() {
               </SelectContent>
             </Select>
           </div>
+          <DateRangePicker
+            id="inbox-dates"
+            value={dates ?? presetValue("allTime", today, CHAT_START)}
+            // "All time" clears the dates (and any comparison).
+            onChange={(value) => setDates(value.preset === "allTime" ? null : value)}
+            today={today}
+            min={CHAT_START}
+            presets={LIST_PRESETS}
+            clampPresets
+            className="w-full"
+          />
+          {dates && period && (
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              Started {formatDayRange(dates.range)}: {period.started}
+              {countChangeHint(period.started, before?.started, compareLabel) &&
+                ` (${countChangeHint(period.started, before?.started, compareLabel)})`}
+              {" · "}closed: {period.closed}
+              {countChangeHint(period.closed, before?.closed, compareLabel) &&
+                ` (${countChangeHint(period.closed, before?.closed, compareLabel)})`}
+            </p>
+          )}
         </div>
 
         <DesktopAlerts state={alerts} onChange={setAlerts} />

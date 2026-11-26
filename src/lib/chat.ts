@@ -1,5 +1,10 @@
 // Live chat (docs/LIVE_CHAT.md): types and pure helpers for the admin Inbox.
 
+import { type DayRange, dayInRange, localDay } from "./datePresets";
+
+/** The first day of live chat (it went live), where "All time" starts. */
+export const CHAT_START = "2026-11-19";
+
 export type ChatStatus = "open" | "closed";
 export type ChatSender = "visitor" | "admin" | "system";
 
@@ -87,6 +92,19 @@ export function filterConversations(
         .some((value) => value?.toLowerCase().includes(needle));
     })
     .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at));
+}
+
+/** Conversations started on the period's days. */
+export function startedIn(conversations: ChatConversation[], range: DayRange): ChatConversation[] {
+  return conversations.filter((c) => dayInRange(localDay(c.created_at), range));
+}
+
+/** Started and closed in a period, for the Inbox's period line and comparison. */
+export function periodChatCounts(conversations: ChatConversation[], range: DayRange): { started: number; closed: number } {
+  return {
+    started: startedIn(conversations, range).length,
+    closed: conversations.filter((c) => c.status === "closed" && dayInRange(c.closed_at && localDay(c.closed_at), range)).length,
+  };
 }
 
 export function countByStatus(conversations: ChatConversation[]): Record<ChatStatus | "all", number> {

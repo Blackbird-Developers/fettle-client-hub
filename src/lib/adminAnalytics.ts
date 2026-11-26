@@ -28,10 +28,16 @@ import {
   defaultGroupBy,
   dublinDate,
   isDate,
-  monthStart,
   periodEnd,
 } from "../../supabase/functions/admin-analytics/logic.ts";
-import { addDays } from "../../supabase/functions/admin-customer-insights/logic.ts";
+import {
+  COMPARE_PRESETS,
+  type ComparePresetId,
+  type DatePresetId,
+  clampToMin,
+  compareRange as comparePresetRange,
+  presetRange as presetDays,
+} from "./datePresets";
 
 // ---------------------------------------------------------------------------
 // Responses
@@ -85,42 +91,37 @@ export interface AnalyticsCustomersResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Date presets
+// Date presets (the shared admin date picker's, from TRACKING_START)
 // ---------------------------------------------------------------------------
 
-export const RANGE_PRESETS = [
-  { id: "last7", label: "Last 7 days" },
-  { id: "last30", label: "Last 30 days" },
-  { id: "last3Months", label: "Last 3 months" },
-  { id: "thisMonth", label: "This month" },
-  { id: "lastMonth", label: "Last month" },
-  { id: "thisQuarter", label: "This quarter" },
-  { id: "thisYear", label: "This year" },
-  { id: "last12Months", label: "Last 12 months" },
-  { id: "custom", label: "Custom range" },
-] as const;
+/** The presets the Overview's picker offers, in the picker's order. */
+export const OVERVIEW_PRESETS: readonly DatePresetId[] = [
+  "today",
+  "yesterday",
+  "thisWeek",
+  "lastWeek",
+  "last7",
+  "last14",
+  "last28",
+  "last30",
+  "thisMonth",
+  "lastMonth",
+  "last90",
+  "last3Months",
+  "quarterToDate",
+  "thisYear",
+  "last12Months",
+  "lastYear",
+];
 
-export type RangePreset = (typeof RANGE_PRESETS)[number]["id"];
+export const DEFAULT_PRESET: DatePresetId = "last3Months";
 
-export const DEFAULT_PRESET: RangePreset = "last3Months";
+/** Preset ids from links made before the shared picker. */
+const LEGACY_PRESETS: Record<string, DatePresetId> = { thisQuarter: "quarterToDate" };
 
 /** Dublin date for "today". */
 export function todayInDublin(now = Date.now()): string {
   return dublinDate(now);
-}
-
-function quarterStart(date: string): string {
-  const month = Number(date.slice(5, 7));
-  const first = Math.floor((month - 1) / 3) * 3 + 1;
-  return `${date.slice(0, 4)}-${String(first).padStart(2, "0")}-01`;
-}
-
-/** The same day `months` earlier; the 31st becomes the month's last day. */
-function monthsBefore(date: string, months: number): string {
-  const [year, month, day] = date.split("-").map(Number);
-  const target = new Date(Date.UTC(year, month - 1 - months, 1));
-  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  return `${target.toISOString().slice(0, 8)}${String(Math.min(day, lastDay)).padStart(2, "0")}`;
 }
 
 /** Moves a range's start up to TRACKING_START, the earliest the boards show. */
@@ -129,34 +130,51 @@ export function fromTrackingStart(range: DateRange): DateRange {
   return { from: TRACKING_START, to: range.to < TRACKING_START ? TRACKING_START : range.to };
 }
 
-/** The dates a preset covers, up to today and from TRACKING_START. Null for "custom". */
-export function presetRange(preset: RangePreset, today: string): DateRange | null {
-  const range = presetDates(preset, today);
-  return range && fromTrackingStart(range);
+/** The dates a preset covers, up to today and from TRACKING_START. Null for
+ *  "custom", and for a preset wholly before TRACKING_START. */
+export function presetRange(preset: DatePresetId, today: string): DateRange | null {
+  const range = presetDays(preset, today);
+  return range && clampToMin(range, TRACKING_START);
 }
 
-function presetDates(preset: RangePreset, today: string): DateRange | null {
-  switch (preset) {
-    case "last7":
-      return { from: addDays(today, -6), to: today };
-    case "last30":
-      return { from: addDays(today, -29), to: today };
-    case "last3Months":
-      return { from: monthsBefore(today, 3), to: today };
-    case "thisMonth":
-      return { from: monthStart(today), to: today };
-    case "lastMonth": {
-      const end = addDays(monthStart(today), -1);
-      return { from: monthStart(end), to: end };
-    }
-    case "thisQuarter":
-      return { from: quarterStart(today), to: today };
-    case "thisYear":
-      return { from: `${today.slice(0, 4)}-01-01`, to: today };
-    case "last12Months":
-      return { from: addDays(today, -364), to: today };
+// ---------------------------------------------------------------------------
+// Comparison
+// ---------------------------------------------------------------------------
+
+/** The period figures are compared with; null when compare is switched off. */
+export type BoardComparison = { preset: ComparePresetId; range: DateRange } | null;
+
+export const DEFAULT_COMPARE_PRESET: ComparePresetId = "previous";
+
+/** The comparison for a preset, or null for "custom" (which brings its own dates). */
+export function comparisonFor(preset: ComparePresetId, range: DateRange): BoardComparison {
+  const dates = comparePresetRange(range, preset);
+  return dates ? { preset, range: dates } : null;
+}
+
+/** compare / cfrom / cto for admin-analytics. previous and year are worked
+ *  out there, so those keep working with an older deployment too. */
+export function comparisonQuery(compare: BoardComparison): Record<string, string> {
+  if (!compare || compare.preset === "previous") return { compare: "previous" };
+  if (compare.preset === "previousYear") return { compare: "year" };
+  return { compare: "custom", cfrom: compare.range.from, cto: compare.range.to };
+}
+
+/** "previous period", "same period last year", "1 Sep – 30 Sep 2026"… for
+ *  the "+5 vs …" lines. Null when compare is off. */
+export function comparisonLabel(compare: BoardComparison): string | null {
+  if (!compare) return null;
+  switch (compare.preset) {
+    case "previous":
+      return "previous period";
+    case "previousWeekday":
+      return "previous period (same weekdays)";
+    case "previousYear":
+      return "same period last year";
+    case "previousYearWeekday":
+      return "last year (same weekdays)";
     case "custom":
-      return null;
+      return formatRange(compare.range);
   }
 }
 
@@ -167,6 +185,7 @@ function presetDates(preset: RangePreset, today: string): DateRange | null {
 export const BOARDS = [
   { id: "progression", label: "Progression" },
   { id: "customers", label: "Customers" },
+  { id: "consultations", label: "Free consultations" },
   { id: "funnel", label: "Booking funnel" },
   { id: "marketing", label: "Marketing" },
 ] as const;
@@ -176,39 +195,62 @@ export type Board = (typeof BOARDS)[number]["id"];
 export interface BoardSettings {
   /** The tab on show. */
   board: Board;
-  preset: RangePreset;
+  preset: DatePresetId;
   range: DateRange;
   groupBy: GroupBy;
   /** True when the grouping was picked rather than defaulted from the range. */
   groupByChosen: boolean;
-  compareTo: CompareTo;
+  compare: BoardComparison;
   windowDays: number;
   basis: Basis;
   returning: ReturningMode;
   filters: SessionFilters;
 }
 
-const isPreset = (value: string | null): value is RangePreset =>
-  RANGE_PRESETS.some((preset) => preset.id === value);
+const isOverviewPreset = (value: string | null): value is DatePresetId =>
+  value === "custom" || OVERVIEW_PRESETS.includes(value as DatePresetId);
+
+/** A from/to pair from the URL, if valid. */
+function customRange(from: string | null, to: string | null): DateRange | null {
+  if (!isDate(from) || !isDate(to) || from > to) return null;
+  return daysInRange({ from, to }) <= MAX_RANGE_DAYS ? { from, to } : null;
+}
+
+// compare in the URL: left out = previous period; "off"; "year" (same period
+// last year, as in older links); another picker preset id; or "custom" with
+// cfrom / cto.
+function readComparison(search: URLSearchParams, range: DateRange): BoardComparison {
+  const value = search.get("compare");
+  if (value === "off") return null;
+  if (value === "year") return comparisonFor("previousYear", range);
+  if (value === "custom") {
+    const dates = customRange(search.get("cfrom"), search.get("cto"));
+    if (dates) return { preset: "custom", range: dates };
+  }
+  const preset = COMPARE_PRESETS.find((option) => option.id === value && option.id !== "custom");
+  return comparisonFor(preset?.id ?? DEFAULT_COMPARE_PRESET, range);
+}
 
 /** Reads the settings from the URL, falling back to defaults for anything missing or invalid. */
 export function readBoardSettings(search: URLSearchParams, today: string): BoardSettings {
   const requested = search.get("range");
-  let preset: RangePreset = isPreset(requested) ? requested : DEFAULT_PRESET;
-  let range = presetRange(preset, today);
+  const asked = requested !== null && LEGACY_PRESETS[requested] ? LEGACY_PRESETS[requested] : requested;
+  let preset: DatePresetId = isOverviewPreset(asked) ? asked : DEFAULT_PRESET;
+  let range: DateRange | null = null;
   if (preset === "custom") {
-    const from = search.get("from");
-    const to = search.get("to");
-    const custom = isDate(from) && isDate(to) && from <= to ? fromTrackingStart({ from, to }) : null;
-    if (custom && daysInRange(custom) <= MAX_RANGE_DAYS) range = custom;
-    else preset = DEFAULT_PRESET;
+    const custom = customRange(search.get("from"), search.get("to"));
+    if (custom) range = fromTrackingStart(custom);
+  } else {
+    range = presetRange(preset, today);
   }
-  range ??= presetRange(DEFAULT_PRESET, today)!;
+  if (!range) {
+    preset = DEFAULT_PRESET;
+    range = presetRange(DEFAULT_PRESET, today)!;
+  }
 
   const board = search.get("board");
   const group = search.get("group");
   const groupByChosen = group === "week" || group === "month";
-  const compare = search.get("compare");
   const window = Number(search.get("window"));
   const basis = search.get("basis");
   const category = search.get("type");
@@ -220,7 +262,7 @@ export function readBoardSettings(search: URLSearchParams, today: string): Board
     range,
     groupBy: groupByChosen ? (group as GroupBy) : defaultGroupBy(range),
     groupByChosen,
-    compareTo: compare === "year" ? "year" : "previous",
+    compare: readComparison(search, range),
     windowDays: (CONVERSION_WINDOWS as readonly number[]).includes(window) ? window : DEFAULT_CONVERSION_WINDOW,
     basis: basis === "booking" ? "booking" : "session",
     returning: search.get("returning") === "lapsed" ? "lapsed" : "all",
@@ -246,7 +288,14 @@ export function boardSettingsToSearch(settings: BoardSettings): URLSearchParams 
     search.set("to", settings.range.to);
   }
   if (settings.groupByChosen) search.set("group", settings.groupBy);
-  if (settings.compareTo !== "previous") search.set("compare", settings.compareTo);
+  const { compare } = settings;
+  if (!compare) search.set("compare", "off");
+  else if (compare.preset === "previousYear") search.set("compare", "year");
+  else if (compare.preset !== DEFAULT_COMPARE_PRESET) search.set("compare", compare.preset);
+  if (compare?.preset === "custom") {
+    search.set("cfrom", compare.range.from);
+    search.set("cto", compare.range.to);
+  }
   if (settings.windowDays !== DEFAULT_CONVERSION_WINDOW) search.set("window", String(settings.windowDays));
   if (settings.basis !== "session") search.set("basis", settings.basis);
   if (settings.returning !== "all") search.set("returning", settings.returning);
@@ -260,7 +309,7 @@ export function analyticsQuery(settings: BoardSettings): string {
     from: settings.range.from,
     to: settings.range.to,
     group: settings.groupBy,
-    compare: settings.compareTo,
+    ...comparisonQuery(settings.compare),
     window: String(settings.windowDays),
     basis: settings.basis,
   });
@@ -334,6 +383,11 @@ export function pointsChange(current: number | null, previous: number | null): n
 
 export function formatPoints(points: number): string {
   return `${points > 0 ? "+" : points < 0 ? "−" : "±"}${Math.abs(points).toFixed(1)} pts`;
+}
+
+/** "+5 (+12%) vs previous period", or null with no comparison. */
+export function countChangeHint(current: number, previous: number | null | undefined, label: string | null): string | null {
+  return previous === null || previous === undefined || !label ? null : `${formatCountChange(current, previous)} vs ${label}`;
 }
 
 /** Count change, "+5 (+12%)". */

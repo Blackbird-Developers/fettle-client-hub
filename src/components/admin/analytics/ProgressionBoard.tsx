@@ -82,9 +82,12 @@ function ProgressionTooltip({
 
 export function ProgressionBoard({
   data,
+  compareLabel,
   onWindowChange,
 }: {
   data: AnalyticsResponse;
+  /** What the figures are compared with ("previous period"); null when compare is off. */
+  compareLabel: string | null;
   onWindowChange: (days: number) => void;
 }) {
   const { totals, compare, series } = data.progression;
@@ -107,7 +110,6 @@ export function ProgressionBoard({
   const firstChange = pointsChange(firstStage.rate, stageResult(compare.stages, 1).rate);
   const best = totals.best ? stageResult(totals.stages, totals.best) : null;
   const worst = totals.worst ? stageResult(totals.stages, totals.worst) : null;
-  const compareLabel = data.params.compareTo === "year" ? "same period last year" : "previous period";
   const funnelMax = Math.max(...totals.funnel.map((f) => f.customers), 1);
 
   return (
@@ -149,14 +151,14 @@ export function ProgressionBoard({
           <MetricTile
             label="Overall progression"
             value={formatRate(totals.overall.rate)}
-            change={overallChange === null ? null : `${formatPoints(overallChange)} vs ${compareLabel}`}
+            change={overallChange === null || !compareLabel ? null : `${formatPoints(overallChange)} vs ${compareLabel}`}
             tone={toneOf(overallChange)}
             detail={`${totals.overall.progressed} of ${totals.overall.cohort} across all stages`}
           />
           <MetricTile
             label="Session 1→2"
             value={formatRate(firstStage.rate)}
-            change={firstChange === null ? null : `${formatPoints(firstChange)} vs ${compareLabel}`}
+            change={firstChange === null || !compareLabel ? null : `${formatPoints(firstChange)} vs ${compareLabel}`}
             tone={toneOf(firstChange)}
             detail={`${firstStage.progressed} of ${firstStage.cohort} clients`}
           />

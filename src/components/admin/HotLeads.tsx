@@ -38,7 +38,11 @@ import {
   scoreLead,
 } from "@/lib/hotLeads";
 import type { LeadRow, LeadSource } from "../../../supabase/functions/admin-leads/logic.ts";
+import { LIST_PRESETS, dayInRange, localDay, presetValue } from "@/lib/datePresets";
+import { liveWindowStart } from "@/lib/adminWorklists";
 import { BulkActionBar } from "./BulkActionBar";
+import { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
+import { PeriodFigures } from "./PeriodFigures";
 import { FollowupActions } from "./FollowupActions";
 import {
   CustomerCell,
@@ -198,9 +202,12 @@ export function HotLeads() {
     key: "score",
     direction: "asc",
   });
+  // Leads whose latest missed call or quote is in this period; null = the whole live window.
+  const [dates, setDates] = useState<DateRangeValue | null>(null);
 
   const scored = useMemo((): ScoredLead[] => {
-    const rows = data?.leads.rows ?? [];
+    const all = data?.leads.rows ?? [];
+    const rows = dates ? all.filter((row) => dayInRange(localDay(row.leadAt), dates.range)) : all;
     const contactByKey = contactSinceLead(rows, attempts.data ?? []);
     const now = new Date();
     return rows.map((row) => {
@@ -212,7 +219,7 @@ export function HotLeads() {
         score: scoreLead(row, contact, now),
       };
     });
-  }, [data, attempts.data, followupsByKey]);
+  }, [data, attempts.data, followupsByKey, dates]);
 
   const tabCounts = useMemo(() => {
     const counts: Record<LeadTab, number> = { open: 0, call_rebooked: 0, closed: 0, converted: 0 };
@@ -277,21 +284,58 @@ export function HotLeads() {
   const noShowOpen = open.filter((lead) => lead.row.source !== "quoted").length;
   const issues = data.dataIssues;
   const headerState = headerCheckboxState(visibleKeys, selected);
+  const today = localDay(new Date().toISOString());
+  const windowStart = liveWindowStart(today, data.lookbackDays);
+  const picked = dates ?? presetValue("last90", today, windowStart);
 
   return (
     <div className={`space-y-6 animate-fade-in ${selectedKeys.length > 0 ? "pb-24" : ""}`}>
       <InsightsHeader data={data} isFetching={isFetching} onRefresh={() => refetch()} />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <DateRangePicker
+          id="hot-leads-dates"
+          value={picked}
+          onChange={setDates}
+          today={today}
+          min={windowStart}
+          compareMin="2010-01-01"
+          presets={LIST_PRESETS}
+        />
+        <p className="text-xs text-muted-foreground">
+          The list covers the last {data.lookbackDays} days, live from Acuity. The figures for the period below can be
+          compared with any earlier one.
+        </p>
+      </div>
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <StatTile label="Open leads" value={String(open.length)} hint={`${newThisWeek} new in the last 7 days`} />
         <StatTile label="Quoted, not booked" value={String(quotedOpen)} />
         <StatTile label="Missed a call, not booked" value={String(noShowOpen)} />
         <StatTile
-          label={`Converted (last ${data.lookbackDays} days)`}
+          label={dates ? "Converted" : `Converted (last ${data.lookbackDays} days)`}
           value={String(tabCounts.converted)}
           hint="Booked a session since"
         />
       </div>
+
+      <PeriodFigures
+        list="leads"
+        range={picked.range}
+        compare={picked.compare}
+        figures={(t, before) => [
+          { label: "People with a lead", current: t.leads, previous: before?.leads ?? null, kind: "count", detail: "Missed a Let's Talk call or were quoted" },
+          { label: "Missed a call", current: t.missedCalls, previous: before?.missedCalls ?? null, kind: "count" },
+          { label: "Quoted", current: t.quoted, previous: before?.quoted ?? null, kind: "count" },
+          {
+            label: "Converted",
+            current: t.conversionRate,
+            previous: before?.conversionRate ?? null,
+            kind: "rate",
+            detail: `${t.converted} of ${t.leads} booked a session since`,
+          },
+        ]}
+      />
 
       {(issues.incompleteDates.length > 0 || issues.leadsWithoutEmail > 0) && (
         <Alert className="border-amber-200 bg-amber-50/50">

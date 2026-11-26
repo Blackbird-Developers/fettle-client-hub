@@ -180,4 +180,25 @@ describe("Bundles page", () => {
     renderPage();
     expect(screen.getByText(/Not shown: 2 discount or gift codes, 5 bundles used up/)).toBeInTheDocument();
   });
+
+  it("narrows to bundles bought in a period, and compares with the period before", async () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+    state.data = response([
+      bundle("Ann Archer", "expiring", { purchasedAt: daysAgo(3) }),
+      bundle("Bo Byrne", "expiring", { purchasedAt: daysAgo(40) }),
+      bundle("Cy Cole", "stalled", { purchasedAt: daysAgo(10) }),
+    ]);
+    const { user } = renderPage();
+    expect(screen.getByRole("radio", { name: "Expiring soon (2)" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /all time/i }));
+    await user.click(screen.getByRole("button", { name: "Last 30 days" }));
+    await user.click(screen.getByRole("switch"));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(screen.getByRole("radio", { name: "Expiring soon (1)" })).toBeInTheDocument();
+    expect(screen.getByText("Ann Archer")).toBeInTheDocument();
+    expect(screen.queryByText("Bo Byrne")).toBeNull();
+    expect(screen.getByText(/^2 bundles bought .* · \+1 \(\+100%\) vs previous period\./)).toBeInTheDocument();
+  });
 });

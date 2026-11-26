@@ -11,8 +11,12 @@ import {
 
 describe("marketingQuery", () => {
   it("asks admin-analytics for the marketing action with the shared settings", () => {
-    expect(marketingQuery({ from: "2026-11-01", to: "2026-11-25" }, "week", "year")).toBe(
+    const range = { from: "2026-11-01", to: "2026-11-25" };
+    expect(marketingQuery(range, "week", { preset: "previousYear", range: { from: "2025-11-01", to: "2025-11-25" } })).toBe(
       "action=marketing&from=2026-11-01&to=2026-11-25&group=week&compare=year"
+    );
+    expect(marketingQuery(range, "week", { preset: "custom", range: { from: "2026-09-01", to: "2026-09-25" } })).toBe(
+      "action=marketing&from=2026-11-01&to=2026-11-25&group=week&compare=custom&cfrom=2026-09-01&cto=2026-09-25"
     );
   });
 });

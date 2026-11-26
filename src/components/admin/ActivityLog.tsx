@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { format } from "date-fns";
 import { Loader2, Search } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   useActivityActors,
   useActivityPage,
@@ -13,25 +13,45 @@ import {
 import {
   ACTIVITY_ACTIONS,
   ACTIVITY_PAGE_SIZE,
-  type ActivityRangePreset,
-  RANGE_PRESETS,
+  ACTIVITY_PRESETS,
+  DEFAULT_ACTIVITY_PRESET,
+  LOG_START_DAY,
+  activityBounds,
   activityCustomer,
-  activityRange,
   describeActivity,
 } from "@/lib/adminActivity";
+import type { ActivitySummaryRow } from "@/hooks/useAdminActivity";
+import { comparisonLabel, formatRange } from "@/lib/adminAnalytics";
+import { presetRange } from "@/lib/datePresets";
 import { formatDateTime } from "@/lib/customerInsights";
-import { DateRangeFilter } from "./DateRangeFilter";
+import { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
 import { TablePagination } from "./TablePagination";
 
 const ALL = "all";
 const SEARCH_DELAY_MS = 300;
 
+type Counts = Pick<ActivitySummaryRow, "total" | "tasks_completed" | "outcomes_logged" | "notes_edited">;
+const NO_COUNTS: Counts = { total: 0, tasks_completed: 0, outcomes_logged: 0, notes_edited: 0 };
+
+/** A count, with the comparison period's underneath when compare is on. */
+function CountCell({ value, previous }: { value: number; previous: number | null }) {
+  return (
+    <TableCell className="text-right tabular-nums">
+      {value}
+      {previous !== null && <span className="block text-xs text-muted-foreground">vs {previous}</span>}
+    </TableCell>
+  );
+}
+
 // Staff activity log: who completed or edited tasks, logged outcomes, edited
 // notes and so on, newest first. Every admin can see it.
 export function ActivityLog() {
-  const [preset, setPreset] = useState<ActivityRangePreset>("7d");
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
+  const today = format(new Date(), "yyyy-MM-dd");
+  const [dates, setDates] = useState<DateRangeValue>(() => ({
+    preset: DEFAULT_ACTIVITY_PRESET,
+    range: presetRange(DEFAULT_ACTIVITY_PRESET, today)!,
+    compare: null,
+  }));
   const [actor, setActor] = useState("");
   const [action, setAction] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -46,15 +66,26 @@ export function ActivityLog() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  const custom = Boolean(customFrom || customTo);
-  // Recomputed when the filters change, not every render, so the query key is stable.
-  const { from, to } = useMemo(
-    () => activityRange(preset, customFrom, customTo),
-    [preset, customFrom, customTo]
-  );
+  // Recomputed when the dates change, not every render, so the query key is stable.
+  const { from, to } = useMemo(() => activityBounds(dates.range), [dates.range]);
+  // Comparing "All time" with an earlier period means nothing, so it's off then.
+  const compare = dates.preset === "allTime" ? null : dates.compare;
+  const compareBounds = useMemo(() => (compare ? activityBounds(compare.range) : null), [compare]);
+  const compareLabel = comparisonLabel(compare);
 
   const actors = useActivityActors(true);
   const summary = useActivitySummary(from, to, true);
+  const previous = useActivitySummary(compareBounds?.from ?? from, compareBounds?.to ?? to, compareBounds !== null);
+  const previousByActor = new Map((compare ? previous.data ?? [] : []).map((row) => [row.actor_email, row]));
+  // Staff active only in the comparison period still get a row, with 0 now.
+  const summaryRows: (Counts & { actor_email: string; last_active: string | null })[] = [
+    ...(summary.data ?? []),
+    ...[...previousByActor.values()]
+      .filter((row) => !summary.data?.some((s) => s.actor_email === row.actor_email))
+      .map((row) => ({ ...NO_COUNTS, actor_email: row.actor_email, last_active: null })),
+  ];
+  const before = (email: string, key: keyof Counts): number | null =>
+    compare && previous.data ? (previousByActor.get(email)?.[key] ?? 0) : null;
   const activity = useActivityPage({ page, from, to, actor, action, search }, true);
   const rows = activity.data?.rows ?? [];
   const total = activity.data?.total ?? 0;
@@ -63,46 +94,36 @@ export function ActivityLog() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
-        <ToggleGroup
-          type="single"
-          value={custom ? "" : preset}
-          onValueChange={(value) => {
-            if (!value) return;
-            setPreset(value as ActivityRangePreset);
-            setCustomFrom("");
-            setCustomTo("");
-            setPage(1);
-          }}
-        >
-          {RANGE_PRESETS.map((p) => (
-            <ToggleGroupItem key={p.id} value={p.id} variant="outline" size="sm">
-              {p.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        <DateRangeFilter
+        <DateRangePicker
           id="activity-dates"
-          from={customFrom}
-          to={customTo}
-          onChange={(nextFrom, nextTo) => {
-            setCustomFrom(nextFrom);
-            setCustomTo(nextTo);
+          value={dates}
+          onChange={(value) => {
+            setDates(value);
             setPage(1);
           }}
+          today={today}
+          min={LOG_START_DAY}
+          presets={ACTIVITY_PRESETS}
+          clampPresets
         />
       </div>
 
       <Card className="border-border/50">
         <CardHeader>
           <CardTitle className="text-lg font-heading">By staff member</CardTitle>
-          <CardDescription>For the dates chosen above. Click a row to see only their activity.</CardDescription>
+          <CardDescription>
+            For the dates chosen above. Click a row to see only their activity.
+            {compare && (
+              <> The small numbers are the {compareLabel} ({formatRange(compare.range)}).</>
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {summary.isLoading ? (
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           ) : summary.error ? (
             <p className="text-sm text-muted-foreground">Couldn't load the summary. Try again in a moment.</p>
-          ) : !summary.data?.length ? (
+          ) : summaryRows.length === 0 ? (
             <p className="text-sm text-muted-foreground">No activity in this period.</p>
           ) : (
             <Table>
@@ -117,7 +138,7 @@ export function ActivityLog() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {summary.data.map((s) => (
+                {summaryRows.map((s) => (
                   <TableRow
                     key={s.actor_email}
                     className="cursor-pointer"
@@ -128,11 +149,13 @@ export function ActivityLog() {
                     }}
                   >
                     <TableCell className="font-medium whitespace-nowrap">{s.actor_email}</TableCell>
-                    <TableCell className="text-right">{s.total}</TableCell>
-                    <TableCell className="text-right">{s.tasks_completed}</TableCell>
-                    <TableCell className="text-right">{s.outcomes_logged}</TableCell>
-                    <TableCell className="text-right">{s.notes_edited}</TableCell>
-                    <TableCell className="text-muted-foreground">{formatDateTime(s.last_active)}</TableCell>
+                    <CountCell value={s.total} previous={before(s.actor_email, "total")} />
+                    <CountCell value={s.tasks_completed} previous={before(s.actor_email, "tasks_completed")} />
+                    <CountCell value={s.outcomes_logged} previous={before(s.actor_email, "outcomes_logged")} />
+                    <CountCell value={s.notes_edited} previous={before(s.actor_email, "notes_edited")} />
+                    <TableCell className="text-muted-foreground">
+                      {s.last_active ? formatDateTime(s.last_active) : "Not in this period"}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

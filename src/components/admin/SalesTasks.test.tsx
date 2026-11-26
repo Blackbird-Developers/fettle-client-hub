@@ -32,7 +32,18 @@ vi.mock("@/hooks/useSalesTasks", () => ({
     isPending: false,
     isError: Boolean(state.error),
   }),
-  useSalesTaskHistory: () => ({ data: state.history, isPending: false, isError: false }),
+  // Like the real query: tasks finished on the period's local days.
+  useSalesTaskHistory: (range: { from: string; to: string } | null) => ({
+    data: range
+      ? state.history.filter((task) => {
+          const at = new Date(task.completed_at ?? 0);
+          const day = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+          return day >= range.from && day <= range.to;
+        })
+      : undefined,
+    isPending: false,
+    isError: false,
+  }),
   useSalesTaskRun: () => ({ data: null }),
   useCompleteSalesTask: () => mutation(state.complete),
   useReopenSalesTask: () => mutation(state.reopen),
@@ -298,5 +309,24 @@ describe("SalesTasks", () => {
     state.error = { code: "PGRST205", message: "missing" };
     renderPage();
     expect(screen.getByText(/once the Sales Tasks database update is deployed/)).toBeInTheDocument();
+  });
+
+  it("counts tasks completed in the chosen period, and compares with the period before", async () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+    state.open = [];
+    state.history = [
+      salesTask({ id: "a", status: "completed", completed_at: daysAgo(2) }),
+      salesTask({ id: "b", status: "auto_closed", completed_at: daysAgo(3) }),
+      salesTask({ id: "c", status: "completed", completed_at: daysAgo(40) }),
+    ];
+    const user = renderPage();
+    const tile = screen.getByText("Completed in this period").parentElement!;
+    expect(tile).toHaveTextContent("2");
+    expect(tile).toHaveTextContent("1 by staff · 1 closed when the client booked");
+
+    await user.click(screen.getByRole("button", { name: /last 30 days/i }));
+    await user.click(screen.getByRole("switch"));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    expect(tile).toHaveTextContent("+1 (+100%) vs previous period");
   });
 });

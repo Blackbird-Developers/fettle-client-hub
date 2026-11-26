@@ -16,6 +16,8 @@ const state = vi.hoisted(() => ({
   leads: null as unknown as HotLeadsResponse,
   followups: [] as CustomerFollowup[],
   attempts: [] as RecentAttempt[],
+  periods: undefined as unknown,
+  periodQueries: [] as string[],
 }));
 
 vi.mock("@/hooks/useAdmin", () => ({
@@ -30,6 +32,10 @@ vi.mock("@/hooks/useAdmin", () => ({
   useRecentContactAttempts: () => ({ data: state.attempts }),
   useContactOutcomesAvailable: () => ({ data: true, isPending: false, isError: false }),
   useBulkUpdateFollowups: () => ({ run: vi.fn(), isPending: false, progress: null }),
+  useWorklistPeriods: (query: string) => {
+    state.periodQueries.push(query);
+    return { data: state.periods, isPending: state.periods === undefined, error: null };
+  },
 }));
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
@@ -93,6 +99,8 @@ const tableNames = () =>
 beforeEach(() => {
   state.followups = [];
   state.attempts = [];
+  state.periods = undefined;
+  state.periodQueries = [];
 });
 
 describe("Hot leads", () => {
@@ -164,5 +172,39 @@ describe("Hot leads", () => {
     await user.click(screen.getByRole("combobox", { name: "Filter by source" }));
     await user.click(screen.getByRole("option", { name: "Quoted" }));
     expect(screen.getByText("No leads match your search or filters.")).toBeInTheDocument();
+  });
+
+  it("narrows the list to a period and shows its figures, compared with the period before", async () => {
+    state.leads = response([lead("Ann", { daysSinceLead: 3 }), lead("Bo", { daysSinceLead: 40 })]);
+    const totals = { leads: 4, missedCalls: 3, quoted: 2, converted: 2, conversionRate: 0.5 };
+    state.periods = {
+      generatedAt: new Date(NOW).toISOString(),
+      data: { lastRefreshedAt: new Date(NOW).toISOString() },
+      params: { list: "leads" },
+      totals,
+      compare: { ...totals, leads: 2, converted: 0, conversionRate: 0 },
+    };
+    const user = userEvent.setup();
+    renderPage();
+    expect(tableNames()).toEqual(["Ann", "Bo"]);
+    expect(state.periodQueries.at(-1)).toContain("action=periods&list=leads");
+
+    await user.click(screen.getByRole("button", { name: /last 90 days/i }));
+    await user.click(screen.getByRole("button", { name: "Last 30 days" }));
+    await user.click(screen.getByRole("switch"));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(tableNames()).toEqual(["Ann"]);
+    const people = screen.getByText("People with a lead").parentElement!;
+    expect(people).toHaveTextContent("+2 (+100%) vs previous period");
+    const converted = screen.getAllByText("Converted").map((el) => el.parentElement!).find((el) => el.textContent?.includes("50%"))!;
+    expect(converted).toHaveTextContent("+50.0 pts vs previous period");
+  });
+
+  it("says when the period figures need the server update", () => {
+    state.leads = response([lead("Ann")]);
+    state.periods = { generatedAt: "", data: {}, params: { range: {} }, progression: {} };
+    renderPage();
+    expect(screen.getByText(/appear once the latest admin-analytics function is deployed/)).toBeInTheDocument();
   });
 });

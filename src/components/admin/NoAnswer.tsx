@@ -81,7 +81,6 @@ import { initialSearchFromUrl } from "@/lib/salesTasks";
 import {
   type NoAnswerSequence,
   type SequenceStatus,
-  CLOSED_LIST_DAYS,
   MAX_ATTEMPTS,
   METHODS,
   METHOD_LABELS,
@@ -91,11 +90,16 @@ import {
   dueTiming,
   emailDraft,
   firstNameOf,
+  firstSequenceDay,
   groupSequences,
   isContactMethod,
   nextAttemptNumber,
+  periodCounts,
   plannedAttempt,
 } from "@/lib/noAnswer";
+import { comparisonLabel, countChangeHint } from "@/lib/adminAnalytics";
+import { LIST_PRESETS, formatDayRange, localDay, presetValue } from "@/lib/datePresets";
+import { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
 import { ContactHistoryDialog } from "./ContactOutcomes";
 import { CustomerCell, StatTile } from "./CustomerInsightsShared";
 
@@ -130,6 +134,8 @@ export function NoAnswer() {
   const insights = useCustomerInsights();
   const [tab, setTab] = useState<TabId>("due");
   const [search, setSearch] = useState(initialSearchFromUrl);
+  // The period for the Finished and Ended lists; null = the last 30 days.
+  const [dates, setDates] = useState<DateRangeValue | null>(null);
 
   const detailsByKey = useMemo(() => {
     const map = new Map<string, { name: string | null; email: string | null; phone: string | null; booked: boolean }>();
@@ -190,16 +196,44 @@ export function NoAnswer() {
     };
   };
 
-  const groups = groupSequences(sequences.data);
+  const today = localDay(new Date().toISOString());
+  const firstDay = firstSequenceDay(sequences.data, today);
+  const picked = dates ?? presetValue("last30", today, firstDay);
+  const groups = groupSequences(sequences.data, new Date(), picked.range);
+  const counts = periodCounts(sequences.data, picked.range);
+  const before = picked.compare ? periodCounts(sequences.data, picked.compare.range) : null;
+  const compareLabel = comparisonLabel(picked.compare);
+  const periodHint = (current: number, previous: number | undefined) =>
+    countChangeHint(current, previous, compareLabel) ?? "In this period";
   const rowsOf = (list: NoAnswerSequence[]) => list.map(toRow).filter((row) => matchesSearch(row, search));
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <DateRangePicker
+          id="no-answer-dates"
+          value={picked}
+          onChange={setDates}
+          today={today}
+          min={firstDay}
+          presets={LIST_PRESETS}
+          clampPresets
+        />
+        <p className="text-xs text-muted-foreground">
+          The dates set the Started, Finished and Ended figures. To call today and Coming up are always as of now.
+        </p>
+      </div>
+
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
         <StatTile label="To call today" value={String(groups.due.length)} hint="Due today or overdue" />
         <StatTile label="Coming up" value={String(groups.upcoming.length)} />
-        <StatTile label="No answer after 6 attempts" value={String(groups.exhausted.length)} />
-        <StatTile label={`Ended (last ${CLOSED_LIST_DAYS} days)`} value={String(groups.closed.length)} />
+        <StatTile label="Started" value={String(counts.started)} hint={periodHint(counts.started, before?.started)} />
+        <StatTile
+          label="No answer after 6 attempts"
+          value={String(counts.exhausted)}
+          hint={periodHint(counts.exhausted, before?.exhausted)}
+        />
+        <StatTile label="Ended" value={String(counts.ended)} hint={periodHint(counts.ended, before?.ended)} />
       </div>
 
       <div className="relative max-w-sm">
@@ -241,20 +275,20 @@ export function NoAnswer() {
         </TabsContent>
         <TabsContent value="exhausted">
           <SequenceCard
-            title="No answer after 6 attempts"
+            title={`No answer after 6 attempts, ${formatDayRange(picked.range)}`}
             description="A new No answer won't restart these for 60 days. Use Start again from the menu to restart sooner."
             rows={rowsOf(groups.exhausted)}
-            empty={search ? "No customers match your search." : "Nobody has reached 6 attempts."}
+            empty={search ? "No customers match your search." : "Nobody reached 6 attempts in this period."}
             followupsByKey={followupsByKey}
             ended
           />
         </TabsContent>
         <TabsContent value="closed">
           <SequenceCard
-            title={`Ended in the last ${CLOSED_LIST_DAYS} days`}
+            title={`Ended ${formatDayRange(picked.range)}`}
             description="Booked, not continuing, continuing later, or closed by staff."
             rows={rowsOf(groups.closed)}
-            empty={search ? "No customers match your search." : "No sequences ended recently."}
+            empty={search ? "No customers match your search." : "No sequences ended in this period."}
             followupsByKey={followupsByKey}
             ended
           />

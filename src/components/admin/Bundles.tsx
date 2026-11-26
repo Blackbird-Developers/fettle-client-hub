@@ -24,6 +24,9 @@ import {
   SEGMENT_ORDER,
 } from "../../../supabase/functions/admin-bundles/logic.ts";
 import { FollowupActions } from "./FollowupActions";
+import { comparisonLabel, countChangeHint } from "@/lib/adminAnalytics";
+import { LIST_PRESETS, type DayRange, dayInRange, formatDayRange, localDay, presetValue } from "@/lib/datePresets";
+import { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
 import {
   InsightsError,
   InsightsHeader,
@@ -69,13 +72,23 @@ export function Bundles() {
 
   const [segment, setSegment] = useState<BundleSegment>("expiring");
   const [search, setSearch] = useState(initialSearchFromUrl);
+  // Bundles bought in this period; null = every bundle.
+  const [dates, setDates] = useState<DateRangeValue | null>(null);
+  const today = localDay(new Date().toISOString());
 
+  const allRows = useMemo(() => data?.bundles.rows ?? [], [data]);
+  const boughtIn = (range: DayRange) =>
+    allRows.filter((row) => dayInRange(row.purchasedAt && localDay(row.purchasedAt), range));
+  const periodRows = useMemo(
+    () => (dates ? allRows.filter((row) => dayInRange(row.purchasedAt && localDay(row.purchasedAt), dates.range)) : allRows),
+    [allRows, dates]
+  );
   const rows = useMemo(
     () =>
-      (data?.bundles.rows ?? [])
+      periodRows
         .filter((row) => row.segment === segment)
         .filter((row) => matchesSearch(row, search) || row.code.toLowerCase().includes(search.trim().toLowerCase())),
-    [data, segment, search]
+    [periodRows, segment, search]
   );
 
   if (isLoading) return <InsightsLoading source="admin-bundles" />;
@@ -83,7 +96,17 @@ export function Bundles() {
     return error ? <InsightsError error={error} onRetry={() => refetch()} /> : null;
   }
 
-  const { totals, counts, skipped } = data.bundles;
+  const { totals, skipped } = data.bundles;
+  // Segment counts follow the period when one is picked.
+  const counts = dates
+    ? Object.fromEntries(SEGMENT_ORDER.map((id) => [id, periodRows.filter((row) => row.segment === id).length]))
+    : data.bundles.counts;
+  const firstDay = allRows.reduce((first, row) => {
+    const day = row.purchasedAt ? localDay(row.purchasedAt) : first;
+    return day < first ? day : first;
+  }, today);
+  const compareLabel = comparisonLabel(dates?.compare ?? null);
+  const boughtBefore = dates?.compare ? boughtIn(dates.compare.range).length : null;
   const issues = data.dataIssues;
   const notes: string[] = [];
   if (issues.incompleteDates.length > 0) {
@@ -110,6 +133,28 @@ export function Bundles() {
   return (
     <div className="space-y-6 animate-fade-in">
       <InsightsHeader data={data} isFetching={isFetching} onRefresh={() => refetch()} />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <DateRangePicker
+          id="bundles-dates"
+          value={dates ?? presetValue("allTime", today, firstDay)}
+          // "All time" clears the dates (and any comparison).
+          onChange={(value) => setDates(value.preset === "allTime" ? null : value)}
+          today={today}
+          min={firstDay}
+          presets={LIST_PRESETS}
+          clampPresets
+        />
+        <p className="text-xs text-muted-foreground" aria-live="polite">
+          {dates
+            ? `${periodRows.length} bundle${periodRows.length === 1 ? "" : "s"} bought ${formatDayRange(dates.range)}${
+                countChangeHint(periodRows.length, boughtBefore, compareLabel)
+                  ? ` · ${countChangeHint(periodRows.length, boughtBefore, compareLabel)}`
+                  : ""
+              }. The list below shows only these. Bundles used up over 90 days ago or expired over 180 days ago aren't kept, so older periods count fewer.`
+            : "The dates pick bundles by when they were bought. The figures below are always as of now."}
+        </p>
+      </div>
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
         <StatTile label="Active bundles" value={String(totals.activeBundles)} hint="Credits left, not expired" />

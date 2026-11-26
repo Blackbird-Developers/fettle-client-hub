@@ -1,42 +1,38 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AlertCircle, Info, Loader2, RefreshCw } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAdminAnalytics } from "@/hooks/useAdmin";
+import { type DateRangeValue, DateRangePicker } from "@/components/admin/DateRangePicker";
 import {
   type Board,
   type BoardSettings,
-  type RangePreset,
   BOARDS,
   CATEGORY_LABELS,
-  RANGE_PRESETS,
+  OVERVIEW_PRESETS,
+  comparisonLabel,
   describeFilters,
   analyticsQuery,
   boardSettingsToSearch,
   formatFullDay,
   formatRange,
-  presetRange,
   readBoardSettings,
   todayInDublin,
 } from "@/lib/adminAnalytics";
 import {
-  type DateRange,
   type SessionCategory,
-  MAX_RANGE_DAYS,
   SESSION_CATEGORIES,
   TRACKING_START,
-  daysInRange,
   defaultGroupBy,
-  isDate,
 } from "../../../../supabase/functions/admin-analytics/logic.ts";
+import { ConsultationsBoard } from "./ConsultationsBoard";
 import { CustomersBoard } from "./CustomersBoard";
 import { FunnelBoard } from "./FunnelBoard";
 import { MarketingBoard } from "./MarketingBoard";
@@ -49,6 +45,8 @@ const SETTINGS_KEYS = [
   "to",
   "group",
   "compare",
+  "cfrom",
+  "cto",
   "window",
   "basis",
   "returning",
@@ -56,6 +54,8 @@ const SETTINGS_KEYS = [
   "calendar",
 ];
 const ALL = "all";
+/** Comparisons can reach back before TRACKING_START: the copy holds every appointment. */
+const COMPARE_MIN = "2010-01-01";
 
 function formatUpdated(iso: string): string {
   return new Date(iso).toLocaleString("en-IE", {
@@ -65,48 +65,6 @@ function formatUpdated(iso: string): string {
     day: "numeric",
     month: "short",
   });
-}
-
-/** Custom from/to dates; applied once both are valid. */
-function CustomRange({ range, onApply }: { range: DateRange; onApply: (range: DateRange) => void }) {
-  const [from, setFrom] = useState(range.from);
-  const [to, setTo] = useState(range.to);
-  const valid =
-    isDate(from) && isDate(to) && from >= TRACKING_START && from <= to && daysInRange({ from, to }) <= MAX_RANGE_DAYS;
-  const changed = from !== range.from || to !== range.to;
-
-  return (
-    <div className="flex flex-wrap items-end gap-2">
-      <div className="space-y-1">
-        <Label htmlFor="analytics-from" className="text-xs">
-          From
-        </Label>
-        <Input
-          id="analytics-from"
-          type="date"
-          value={from}
-          min={TRACKING_START}
-          max={to}
-          onChange={(e) => setFrom(e.target.value)}
-          className="h-9 w-40"
-        />
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor="analytics-to" className="text-xs">
-          To
-        </Label>
-        <Input id="analytics-to" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
-      </div>
-      <Button size="sm" className="h-9" disabled={!valid || !changed} onClick={() => onApply({ from, to })}>
-        Apply
-      </Button>
-      {!valid && (
-        <p className="w-full text-xs text-destructive">
-          Pick a start on or after {formatFullDay(TRACKING_START)} and before the end.
-        </p>
-      )}
-    </div>
-  );
 }
 
 function BoardsSkeleton() {
@@ -125,7 +83,7 @@ function BoardsSkeleton() {
   );
 }
 
-/** The Overview's analytics: shared controls, then the Progression, Customers, Booking funnel and Marketing boards. */
+/** The Overview's analytics: shared controls, then the Progression, Customers, Free consultations, Booking funnel and Marketing boards. */
 export function AnalyticsBoards() {
   const [searchParams, setSearchParams] = useSearchParams();
   const today = todayInDublin();
@@ -135,9 +93,12 @@ export function AnalyticsBoards() {
   // The marketing tab has its own data too, and shares the range, grouping
   // and comparison, but not the session filters.
   const isMarketing = settings.board === "marketing";
+  // Free consultations: own data, own Day / Week / Month choice; shares the
+  // range, comparison and conversion window.
+  const isConsultations = settings.board === "consultations";
   const { data, error, isPending, isFetching, refetch } = useAdminAnalytics(
     analyticsQuery(settings),
-    !isFunnel && !isMarketing
+    !isFunnel && !isMarketing && !isConsultations
   );
   const calendars = [...(data?.data.calendars ?? [])];
   // A calendar from a shared link that the list no longer has still shows.
@@ -154,10 +115,8 @@ export function AnalyticsBoards() {
     setSearchParams(search, { replace: true });
   };
 
-  const choosePreset = (preset: RangePreset) => {
-    // Custom starts from the dates on screen.
-    update({ preset, range: presetRange(preset, today) ?? settings.range });
-  };
+  const pickerValue: DateRangeValue = { preset: settings.preset, range: settings.range, compare: settings.compare };
+  const compareLabel = comparisonLabel(settings.compare);
 
   return (
     <section aria-labelledby="analytics-title" className="space-y-4">
@@ -173,23 +132,21 @@ export function AnalyticsBoards() {
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
-            <Label htmlFor="analytics-range" className="text-xs">
-              Date range
+            <Label htmlFor="analytics-dates" className="text-xs">
+              Dates
             </Label>
-            <Select value={settings.preset} onValueChange={(value) => choosePreset(value as RangePreset)}>
-              <SelectTrigger id="analytics-range" className="h-9 w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {RANGE_PRESETS.map((preset) => (
-                  <SelectItem key={preset.id} value={preset.id}>
-                    {preset.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <DateRangePicker
+              id="analytics-dates"
+              value={pickerValue}
+              onChange={(value) => update({ preset: value.preset, range: value.range, compare: value.compare })}
+              today={today}
+              min={TRACKING_START}
+              compareMin={COMPARE_MIN}
+              presets={OVERVIEW_PRESETS}
+              clampPresets
+            />
           </div>
-          {!isFunnel && (
+          {!isFunnel && !isConsultations && (
             <>
               <div className="space-y-1">
                 <span id="analytics-group" className="block text-xs font-medium">
@@ -264,31 +221,10 @@ export function AnalyticsBoards() {
                   </div>
                 </>
               )}
-              <div className="space-y-1">
-                <Label htmlFor="analytics-compare" className="text-xs">
-                  Compare to
-                </Label>
-                <Select
-                  value={settings.compareTo}
-                  onValueChange={(value) => update({ compareTo: value as BoardSettings["compareTo"] })}
-                >
-                  <SelectTrigger id="analytics-compare" className="h-9 w-48">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="previous">Previous period</SelectItem>
-                    <SelectItem value="year">Same period last year</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
             </>
           )}
         </div>
       </div>
-
-      {settings.preset === "custom" && (
-        <CustomRange key={`${settings.range.from}-${settings.range.to}`} range={settings.range} onApply={(range) => update({ range })} />
-      )}
 
       <Tabs value={settings.board} onValueChange={(value) => update({ board: value as Board })} className="space-y-4">
         <TabsList>
@@ -299,13 +235,22 @@ export function AnalyticsBoards() {
           ))}
         </TabsList>
 
-        {isFunnel ? (
+        {isConsultations ? (
+          <TabsContent value="consultations" className="mt-0">
+            <ConsultationsBoard
+              range={settings.range}
+              compare={settings.compare}
+              windowDays={settings.windowDays}
+              onWindowChange={(windowDays) => update({ windowDays })}
+            />
+          </TabsContent>
+        ) : isFunnel ? (
           <TabsContent value="funnel" className="mt-0">
-            <FunnelBoard range={settings.range} />
+            <FunnelBoard range={settings.range} compare={settings.compare} />
           </TabsContent>
         ) : isMarketing ? (
           <TabsContent value="marketing" className="mt-0">
-            <MarketingBoard range={settings.range} groupBy={settings.groupBy} compareTo={settings.compareTo} />
+            <MarketingBoard range={settings.range} groupBy={settings.groupBy} compare={settings.compare} />
           </TabsContent>
         ) : isPending ? (
           <BoardsSkeleton />
@@ -327,9 +272,7 @@ export function AnalyticsBoards() {
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-live="polite">
               <span>Data last updated: {formatUpdated(data.data.lastRefreshedAt)}</span>
-              <span>
-                Compared with {formatRange(data.params.compareRange)}
-              </span>
+              {settings.compare && <span>Compared with {formatRange(data.params.compareRange)}</span>}
               {describeFilters(data.params.filters, calendars) && (
                 <span>Only {describeFilters(data.params.filters, calendars)} sessions</span>
               )}
@@ -359,11 +302,12 @@ export function AnalyticsBoards() {
               </Alert>
             )}
             <TabsContent value="progression" className="mt-0">
-              <ProgressionBoard data={data} onWindowChange={(windowDays) => update({ windowDays })} />
+              <ProgressionBoard data={data} compareLabel={compareLabel} onWindowChange={(windowDays) => update({ windowDays })} />
             </TabsContent>
             <TabsContent value="customers" className="mt-0">
               <CustomersBoard
                 data={data}
+                compareLabel={compareLabel}
                 onBasisChange={(basis) => update({ basis })}
                 onReturningChange={(returning) => update({ returning })}
               />

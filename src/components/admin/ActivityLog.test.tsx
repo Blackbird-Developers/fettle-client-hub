@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@/test/setupDom";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActivityRow } from "@/lib/adminActivity";
 import { ActivityLog } from "./ActivityLog";
@@ -62,5 +63,20 @@ describe("ActivityLog", () => {
     expect(screen.getByText("Call Friday")).toBeTruthy();
     expect(screen.getByText("amy@x.ie")).toBeTruthy();
     expect(screen.getByText("1–2 of 2")).toBeTruthy();
+  });
+
+  it("shows the comparison period's counts under each staff member's", async () => {
+    const user = userEvent.setup();
+    render(<ActivityLog />);
+    expect(screen.queryByText("vs 3")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /last 7 days/i }));
+    await user.click(screen.getByRole("switch"));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    // The mock answers both periods with the same counts.
+    // The By staff member table comes before the activity list.
+    const row = screen.getAllByText("courtney@fettle.ie", { selector: "td" })[0].closest("tr")!;
+    expect(within(row).getByText("vs 3")).toBeTruthy();
+    expect(within(row).getByText("vs 2")).toBeTruthy();
+    expect(screen.getByText(/The small numbers are the previous period/)).toBeTruthy();
   });
 });
