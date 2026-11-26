@@ -64,6 +64,9 @@ import {
   useSetSalesTaskDue,
   useUpdateSalesTaskNote,
 } from "@/hooks/useSalesTasks";
+import { comparisonLabel, countChangeHint } from "@/lib/adminAnalytics";
+import { LIST_PRESETS, formatDayRange, presetValue } from "@/lib/datePresets";
+import { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
 import { NOTE_MAX_LENGTH, followupErrorMessage, isMissingTableError } from "@/lib/customerFollowups";
 import { formatDate, formatDateTime } from "@/lib/customerInsights";
 import {
@@ -71,8 +74,8 @@ import {
   type SalesTask,
   type SalesTaskKind,
   type TaskSection,
-  HISTORY_DAYS,
   KIND_LABELS,
+  SALES_TASKS_START,
   PRIORITY_LABELS,
   SECTION_LABELS,
   SECTION_ORDER,
@@ -113,11 +116,15 @@ export function SalesTasks() {
   const tasks = useSalesTasks();
   const run = useSalesTaskRun();
   const [tab, setTab] = useState<TabId>("today");
-  const history = useSalesTaskHistory(true);
   const followups = useCustomerFollowups();
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState<KindFilter>("all");
   const today = todayInIreland();
+  // The period for the Completed tab and tile.
+  const [dates, setDates] = useState<DateRangeValue>(() => presetValue("last30", today, SALES_TASKS_START));
+  const history = useSalesTaskHistory(dates.range, true);
+  const previous = useSalesTaskHistory(dates.compare?.range ?? null, dates.compare !== null);
+  const finishedToday = useSalesTaskHistory({ from: today, to: today }, true);
 
   const notesByKey = useMemo(
     () => new Map((followups.data ?? []).map((f) => [f.customer_key, f.note])),
@@ -155,20 +162,40 @@ export function SalesTasks() {
     list.filter((task) => (kind === "all" || sectionFor(task) === kind) && matchesTaskSearch(task, search));
   const overdue = groups.today.filter((task) => task.due_on < today).length;
   const high = groups.today.filter((task) => task.priority === "high").length;
-  const completedToday = (history.data ?? []).filter(
-    (task) => task.status === "completed" && task.completed_at && todayInIreland(Date.parse(task.completed_at)) === today
-  ).length;
+  const completedToday = (finishedToday.data ?? []).filter((task) => task.status === "completed").length;
+  const finished = history.data ?? [];
+  const byStaff = finished.filter((task) => task.status === "completed").length;
+  const compareLabel = comparisonLabel(dates.compare);
+  const finishedHint =
+    countChangeHint(finished.length, previous.data?.length, compareLabel) ??
+    `${byStaff} by staff · ${finished.length - byStaff} closed when the client booked`;
   const filtered = search.trim() !== "" || kind !== "all";
 
   return (
     <div className="space-y-6 animate-fade-in">
       <RunBar run={run.data ?? null} today={today} />
 
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <DateRangePicker
+          id="sales-tasks-dates"
+          value={dates}
+          onChange={setDates}
+          today={today}
+          min={SALES_TASKS_START}
+          presets={LIST_PRESETS}
+          clampPresets
+        />
+        <p className="text-xs text-muted-foreground">
+          The dates set the Completed tab and figure. Today's list is always as of now.
+        </p>
+      </div>
+
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
         <StatTile label="To do today" value={String(groups.today.length)} hint="Due today or carried over" />
         <StatTile label="Overdue" value={String(overdue)} hint="From earlier days" />
         <StatTile label="High priority" value={String(high)} />
         <StatTile label="Completed today" value={String(completedToday)} />
+        <StatTile label="Completed in this period" value={history.data ? String(finished.length) : "–"} hint={finishedHint} />
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -226,7 +253,7 @@ export function SalesTasks() {
           />
         </TabsContent>
         <TabsContent value="history">
-          <HistoryCard history={history} visible={visible} />
+          <HistoryCard history={history} visible={visible} range={dates.range} />
         </TabsContent>
       </Tabs>
 
@@ -886,9 +913,11 @@ function durationLabel(seconds: number | null): string {
 function HistoryCard({
   history,
   visible,
+  range,
 }: {
   history: ReturnType<typeof useSalesTaskHistory>;
   visible: (list: SalesTask[]) => SalesTask[];
+  range: { from: string; to: string };
 }) {
   const reopen = useReopenSalesTask();
   const { toast } = useToast();
@@ -907,7 +936,7 @@ function HistoryCard({
   return (
     <Card className="border-border/50">
       <CardHeader>
-        <CardTitle className="text-lg font-heading">Completed in the last {HISTORY_DAYS} days</CardTitle>
+        <CardTitle className="text-lg font-heading">Completed {formatDayRange(range)}</CardTitle>
         <CardDescription>
           Done by staff, or closed automatically because the client booked. These never return to Today.
         </CardDescription>
@@ -920,7 +949,7 @@ function HistoryCard({
         ) : rows.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
             <CheckCircle2 className="h-8 w-8" />
-            <p className="text-sm">No completed tasks yet.</p>
+            <p className="text-sm">No tasks completed in this period.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">

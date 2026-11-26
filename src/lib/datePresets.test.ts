@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  clampToMin,
   compareRange,
   formatDayRange,
   isDay,
@@ -24,11 +25,14 @@ describe("presetRange", () => {
     ["last28", "2026-10-23", "2026-11-19"],
     ["last30", "2026-10-21", "2026-11-19"],
     ["last90", "2026-08-22", "2026-11-19"],
+    ["last3Months", "2026-08-19", "2026-11-19"],
     ["thisMonth", "2026-11-01", "2026-11-19"],
     ["lastMonth", "2026-10-01", "2026-10-31"],
     ["quarterToDate", "2026-10-01", "2026-11-19"],
     ["thisYear", "2026-01-01", "2026-11-19"],
+    ["last12Months", "2025-11-20", "2026-11-19"],
     ["lastYear", "2025-01-01", "2025-12-31"],
+    ["allTime", "2010-01-01", "2026-11-19"],
   ] as const)("%s", (preset, from, to) => {
     expect(presetRange(preset, TODAY)).toEqual({ from, to });
   });
@@ -40,6 +44,10 @@ describe("presetRange", () => {
 
   it("has no dates for custom", () => {
     expect(presetRange("custom", TODAY)).toBeNull();
+  });
+
+  it("last 3 months ends a short month on its last day", () => {
+    expect(presetRange("last3Months", "2026-05-31")).toEqual({ from: "2026-02-28", to: "2026-05-31" });
   });
 });
 
@@ -98,6 +106,13 @@ describe("helpers", () => {
     expect(rangeWithin({ from: "2026-11-01", to: "2026-11-05" }, "2026-11-01", TODAY)).toBe(true);
     expect(rangeWithin({ from: "2026-10-31", to: "2026-11-05" }, "2026-11-01")).toBe(false);
     expect(rangeWithin({ from: "2026-11-01", to: "2026-11-20" }, undefined, TODAY)).toBe(false);
+  });
+
+  it("clampToMin moves the start up, or drops a range before the minimum", () => {
+    const range = { from: "2026-07-01", to: "2026-11-19" };
+    expect(clampToMin(range, "2026-07-29")).toEqual({ from: "2026-07-29", to: "2026-11-19" });
+    expect(clampToMin(range)).toBe(range);
+    expect(clampToMin({ from: "2025-01-01", to: "2025-12-31" }, "2026-07-29")).toBeNull();
   });
 
   it("isDay only accepts real dates", () => {

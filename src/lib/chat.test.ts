@@ -4,6 +4,8 @@ import {
   type ChatMessage,
   DEFAULT_CHAT_FILTERS,
   countByStatus,
+  periodChatCounts,
+  startedIn,
   dayLabel,
   describeDevice,
   filterConversations,
@@ -116,6 +118,17 @@ describe("counts", () => {
     ];
     expect(countByStatus(list)).toEqual({ all: 3, open: 2, closed: 1 });
     expect(unreadConversationCount(list)).toBe(1);
+  });
+
+  it("counts conversations started and closed in a period", () => {
+    const list = [
+      conversation({ created_at: "2026-11-20T10:00:00.000Z" }),
+      conversation({ created_at: "2026-11-19T10:00:00.000Z", status: "closed", closed_at: "2026-11-21T10:00:00.000Z" }),
+      conversation({ created_at: "2026-11-25T10:00:00.000Z" }),
+    ];
+    const range = { from: "2026-11-20", to: "2026-11-22" };
+    expect(startedIn(list, range)).toEqual([list[0]]);
+    expect(periodChatCounts(list, range)).toEqual({ started: 1, closed: 1 });
   });
 });
 

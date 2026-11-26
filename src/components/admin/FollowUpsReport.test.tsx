@@ -182,4 +182,26 @@ describe("Follow-ups report", () => {
     const price = screen.getByText("Price").closest("li")!;
     expect(price).toHaveTextContent("1 of 1 customers(100%)");
   });
+
+  it("limits Not continuing to a period, and compares it with the one before", async () => {
+    const at = (offset: number) => addDays(new Date(), offset).toISOString();
+    seed("email:di@x.ie", { outcome: "not_continuing", not_continuing_reasons: ["price"], customer_name: "Di Doyle", outcome_at: at(-2) });
+    seed("email:fi@x.ie", { outcome: "not_continuing", not_continuing_reasons: ["timing"], customer_name: "Fi Flynn", outcome_at: at(-40) });
+    const { user } = renderWith(<FollowUpsReport />);
+    expect(screen.getByRole("tab", { name: "Not continuing (2)" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /all time/i }));
+    await user.click(screen.getByRole("button", { name: "Last 30 days" }));
+    await user.click(screen.getByRole("switch"));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(screen.getByRole("tab", { name: "Not continuing (1)" })).toBeInTheDocument();
+    const tile = screen.getByText("Not continuing", { selector: "p" }).parentElement!;
+    expect(tile).toHaveTextContent("±0 (±0%) vs previous period");
+    await user.click(screen.getByRole("tab", { name: "Not continuing (1)" }));
+    expect(screen.getByText("Di Doyle")).toBeInTheDocument();
+    expect(screen.queryByText("Fi Flynn")).toBeNull();
+    // Fi said "timing" in the previous period.
+    expect(screen.getByText("Timing").closest("li")!).toHaveTextContent("vs 1");
+  });
 });

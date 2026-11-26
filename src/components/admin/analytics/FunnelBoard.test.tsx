@@ -4,6 +4,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { BoardComparison } from "@/lib/adminAnalytics";
 import type { FunnelResponse } from "@/lib/adminFunnel";
 import { type FunnelSession, funnelReport } from "../../../../supabase/functions/admin-analytics/funnel.ts";
 import { FunnelBoard } from "./FunnelBoard";
@@ -51,10 +52,10 @@ function LocationProbe() {
   return null;
 }
 
-function renderBoard(initial = "/admin") {
+function renderBoard(initial = "/admin", compare: BoardComparison = null) {
   return render(
     <MemoryRouter initialEntries={[initial]}>
-      <FunnelBoard range={range} />
+      <FunnelBoard range={range} compare={compare} />
       <LocationProbe />
     </MemoryRouter>
   );
@@ -100,6 +101,25 @@ describe("FunnelBoard", () => {
     expect(location).not.toContain("ftherapist");
   });
 
+  it("compares with a second request for the other period, same filters", () => {
+    state.data = response([s({}), s({ markers: ["booking_page_redirect", "booking_page_view"] })]);
+    renderBoard("/admin?fdevice=mobile", { preset: "previous", range: { from: "2026-10-02", to: "2026-10-31" } });
+    const compareQuery = state.queries.find((q) => q.includes("from=2026-10-02"));
+    expect(compareQuery).toContain("to=2026-10-31");
+    expect(compareQuery).toContain("device=mobile");
+    expect(screen.getByText("Compared with 2 Oct – 31 Oct 2026")).toBeTruthy();
+    // The mock answers both periods with the same visits.
+    expect(screen.getAllByText(/^±0( \(±0%\))? vs previous period$/).length).toBe(3);
+    expect(screen.getByText("±0.0 pts vs previous period")).toBeTruthy();
+  });
+
+  it("shows no changes with compare off", () => {
+    state.data = response([s({})]);
+    renderBoard();
+    expect(screen.queryByText(/vs previous period/)).toBeNull();
+    expect(state.queries.every((q) => q.includes("from=2026-11-01"))).toBe(true);
+  });
+
   it("explains when nothing has been recorded yet", () => {
     state.data = response([], null);
     renderBoard();
@@ -110,7 +130,7 @@ describe("FunnelBoard", () => {
     state.data = response([]);
     render(
       <MemoryRouter>
-        <FunnelBoard range={{ from: "2024-01-01", to: "2026-11-30" }} />
+        <FunnelBoard range={{ from: "2024-01-01", to: "2026-11-30" }} compare={null} />
       </MemoryRouter>
     );
     expect(state.queries.at(-1)).toContain("from=2025-11-30");

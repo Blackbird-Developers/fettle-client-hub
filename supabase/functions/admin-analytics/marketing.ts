@@ -12,18 +12,25 @@
 //   - CTR = clicks / impressions. Outbound CTR = outbound clicks /
 //     impressions, only where the platform reports outbound clicks (Meta).
 //   - Cost per conversion = a channel's spend / its own reported conversions.
-//   - Cost per new customer (blended CAC) = spend across every channel / new
-//     customers in the hub (first-ever session booked in the range, booking
+//   - Spend inc. VAT = spend × (1 + VAT_RATE): the platforms report spend
+//     before Irish VAT (23%), which Fettle pays on top (Art, 26 Nov 2026).
+//   - Cost per new customer (blended CAC) = spend inc. VAT across every
+//     channel / new customers in the hub (first-ever session booked in the range, booking
 //     date basis, same count as the Customers board). Customers with no email
 //     are left out of that count, as on the board.
 //   - Only spend in REPORTING_CURRENCY is added up. Any other currency is
 //     kept apart and shown as a warning, never converted.
 
-import { type CompareTo, type DateRange, type GroupBy, type Period, MAX_RANGE_DAYS, daysInRange, defaultGroupBy, isDate, periodStart, periodsInRange } from "./logic.ts";
+import { type Comparison, type DateRange, type GroupBy, type Period, MAX_RANGE_DAYS, daysInRange, defaultGroupBy, isDate, parseComparison, periodStart, periodsInRange } from "./logic.ts";
 
 // ---------------------------------------------------------------------------
 // Channels
 // ---------------------------------------------------------------------------
+
+/** Irish VAT, added on top of the platforms' spend for cost per new customer. */
+export const VAT_RATE = 0.23;
+
+const withVat = (spend: number) => spend * (1 + VAT_RATE);
 
 export const CHANNELS = ["google", "meta", "tiktok"] as const;
 export type Channel = (typeof CHANNELS)[number];
@@ -183,16 +190,19 @@ function inRange(day: string, range: DateRange): boolean {
 // ---------------------------------------------------------------------------
 
 export interface MarketingTotals {
+  /** As the platforms report it, before VAT. */
   spend: number;
+  /** spend × (1 + VAT_RATE). */
+  spendIncVat: number;
   impressions: number;
   clicks: number;
   /** Sum of each channel's own count (channels overlap, see above). */
   conversions: number;
   /** New customers in the hub over the range (Customers board count). */
   newCustomers: number;
-  /** spend / newCustomers. */
+  /** spendIncVat / newCustomers. */
   costPerNewCustomer: number | null;
-  /** spend / conversions. */
+  /** spend (before VAT) / conversions. */
   costPerConversion: number | null;
   /** Every channel, in CHANNELS order, zeros where there's no data. */
   channels: ChannelTotals[];
@@ -219,11 +229,12 @@ export function marketingTotals(days: MarketingDay[], range: DateRange, newCusto
 
   return {
     spend: cents(total.spend),
+    spendIncVat: cents(withVat(total.spend)),
     impressions: total.impressions,
     clicks: total.clicks,
     conversions: cents(total.conversions),
     newCustomers,
-    costPerNewCustomer: ratio(total.spend, newCustomers),
+    costPerNewCustomer: ratio(withVat(total.spend), newCustomers),
     costPerConversion: ratio(total.spend, total.conversions),
     channels: CHANNELS.map((c) => channelTotals(c, byChannel.get(c)!)),
     otherCurrencies: [...other.values()]
@@ -242,7 +253,10 @@ export interface MarketingPoint {
   spendByChannel: Record<Channel, number>;
   conversionsByChannel: Record<Channel, number>;
   spend: number;
+  /** spend × (1 + VAT_RATE). */
+  spendIncVat: number;
   newCustomers: number;
+  /** spendIncVat / newCustomers. */
   costPerNewCustomer: number | null;
 }
 
@@ -269,6 +283,7 @@ export function marketingSeries(
         spendByChannel: zeroByChannel(),
         conversionsByChannel: zeroByChannel(),
         spend: 0,
+        spendIncVat: 0,
         newCustomers: newCustomersByPeriod.get(period.key) ?? 0,
         costPerNewCustomer: null,
       },
@@ -296,7 +311,8 @@ export function marketingSeries(
       spendByChannel,
       conversionsByChannel,
       spend: cents(point.spend),
-      costPerNewCustomer: ratio(point.spend, point.newCustomers),
+      spendIncVat: cents(withVat(point.spend)),
+      costPerNewCustomer: ratio(withVat(point.spend), point.newCustomers),
     };
   });
 }
@@ -404,10 +420,9 @@ export function spanningRange(a: DateRange, b: DateRange): DateRange {
 // Query string
 // ---------------------------------------------------------------------------
 
-export interface MarketingParams {
+export interface MarketingParams extends Comparison {
   range: DateRange;
   groupBy: GroupBy;
-  compareTo: CompareTo;
 }
 
 /** Reads and checks ?action=marketing's query string. Returns an error message when invalid. */
@@ -419,7 +434,7 @@ export function parseMarketingParams(search: URLSearchParams): MarketingParams |
   if (daysInRange(range) > MAX_RANGE_DAYS) return "The date range can be at most three years";
   const groupBy = search.get("group") ?? defaultGroupBy(range);
   if (groupBy !== "week" && groupBy !== "month") return "group must be week or month";
-  const compareTo = search.get("compare") ?? "previous";
-  if (compareTo !== "previous" && compareTo !== "year") return "compare must be previous or year";
-  return { range, groupBy, compareTo };
+  const comparison = parseComparison(search, range);
+  if (typeof comparison === "string") return comparison;
+  return { range, groupBy, ...comparison };
 }

@@ -33,7 +33,10 @@ import {
 import { formatDate, matchesSearch } from "@/lib/customerInsights";
 import { initialSearchFromUrl } from "@/lib/salesTasks";
 import type { NextSessionStatus } from "../../../supabase/functions/admin-customer-insights/logic.ts";
+import { comparisonLabel, countChangeHint } from "@/lib/adminAnalytics";
+import { LIST_PRESETS, type DayRange, dayInRange, formatDayRange, localDay, presetValue } from "@/lib/datePresets";
 import { CustomerCell, StatTile } from "./CustomerInsightsShared";
+import { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
 import { FollowupActions } from "./FollowupActions";
 
 type DueFilter = "now" | "week" | "all";
@@ -66,6 +69,8 @@ export function FollowUpsReport() {
   const insights = useCustomerInsights();
   const [dueFilter, setDueFilter] = useState<DueFilter>("all");
   const [search, setSearch] = useState(initialSearchFromUrl);
+  // The period for Not continuing (by when it was recorded); null = all time.
+  const [dates, setDates] = useState<DateRangeValue | null>(null);
 
   // Contact details from the most recent Progression view each customer is in.
   const detailsByKey = useMemo(() => {
@@ -103,8 +108,19 @@ export function FollowUpsReport() {
 
   const rows = followups.data ?? [];
   const later = followUpLater(rows).map(toCustomer);
-  const notContinuing = rows
-    .filter((row) => row.outcome === "not_continuing")
+  const today = localDay(new Date().toISOString());
+  const notContinuingRows = rows.filter((row) => row.outcome === "not_continuing");
+  const firstDay = notContinuingRows.reduce((first, row) => {
+    const day = row.outcome_at ? localDay(row.outcome_at) : first;
+    return day < first ? day : first;
+  }, today);
+  const picked = dates ?? presetValue("allTime", today, firstDay);
+  const recordedIn = (range: DayRange | null) =>
+    notContinuingRows.filter((row) => !range || dayInRange(row.outcome_at && localDay(row.outcome_at), range));
+  const periodRows = recordedIn(dates?.range ?? null);
+  const compareRows = dates?.compare ? recordedIn(dates.compare.range) : null;
+  const compareLabel = comparisonLabel(dates?.compare ?? null);
+  const notContinuing = [...periodRows]
     .sort((a, b) => (b.outcome_at ?? "").localeCompare(a.outcome_at ?? ""))
     .map(toCustomer);
 
@@ -116,7 +132,8 @@ export function FollowUpsReport() {
     dueFilter === "now" ? dueNow : dueFilter === "week" ? [...dueNow, ...dueWeek] : later
   ).filter((c) => matchesSearch(c, search));
   const shownNotContinuing = notContinuing.filter((c) => matchesSearch(c, search));
-  const counts = reasonCounts(rows);
+  const counts = reasonCounts(periodRows);
+  const previousCounts = compareRows ? reasonCounts(compareRows) : null;
 
   const unavailable = followups.isError
     ? isMissingTableError(followups.error)
@@ -168,11 +185,34 @@ export function FollowUpsReport() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <div className="flex flex-wrap items-center gap-3">
+        <DateRangePicker
+          id="followups-dates"
+          value={picked}
+          // "All time" clears the dates (and any comparison).
+          onChange={(value) => setDates(value.preset === "allTime" ? null : value)}
+          today={today}
+          min={firstDay}
+          presets={LIST_PRESETS}
+          clampPresets
+        />
+        <p className="text-xs text-muted-foreground">
+          The dates set Not continuing, by when it was recorded. Continue later is always as of now.
+        </p>
+      </div>
+
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <StatTile label="To call now" value={String(dueNow.length)} hint="Due today or overdue" />
         <StatTile label="Due in the next 7 days" value={String(dueWeek.length)} />
         <StatTile label="Continue later (all)" value={String(later.length)} />
-        <StatTile label="Not continuing" value={String(notContinuing.length)} />
+        <StatTile
+          label="Not continuing"
+          value={String(notContinuing.length)}
+          hint={
+            countChangeHint(notContinuing.length, compareRows?.length, compareLabel) ??
+            (dates ? `Recorded ${formatDayRange(dates.range)}` : undefined)
+          }
+        />
       </div>
 
       <div className="relative max-w-sm">
@@ -286,12 +326,14 @@ export function FollowUpsReport() {
             <CardHeader>
               <CardTitle className="text-lg font-heading">Reasons for not continuing</CardTitle>
               <CardDescription>
-                From customers currently marked as not continuing. One customer can give several
+                From customers currently marked as not continuing
+                {dates ? `, recorded ${formatDayRange(dates.range)}` : ""}. One customer can give several
                 reasons.
+                {compareLabel && ` The small numbers are the ${compareLabel}.`}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <ReasonBreakdown counts={counts} total={notContinuing.length} />
+              <ReasonBreakdown counts={counts} total={notContinuing.length} previous={previousCounts} />
             </CardContent>
           </Card>
 
@@ -302,7 +344,9 @@ export function FollowUpsReport() {
                   text={
                     search
                       ? "No customers match your search."
-                      : "No one is marked as not continuing."
+                      : dates
+                        ? "No one was marked as not continuing in this period."
+                        : "No one is marked as not continuing."
                   }
                 />
               ) : (
@@ -370,19 +414,28 @@ function NoteSnippet({ note }: { note: string | null }) {
   );
 }
 
-function ReasonBreakdown({ counts, total }: { counts: Record<string, number>; total: number }) {
-  if (total === 0) {
+function ReasonBreakdown({
+  counts,
+  total,
+  previous = null,
+}: {
+  counts: Record<string, number>;
+  total: number;
+  /** The comparison period's counts, when compare is on. */
+  previous?: Record<string, number> | null;
+}) {
+  if (total === 0 && !previous) {
     return <p className="text-sm text-muted-foreground">No reasons recorded yet.</p>;
   }
   return (
     <ul className="space-y-2">
       {NOT_CONTINUING_REASONS.map((reason) => {
         const count = counts[reason.id] ?? 0;
-        const percent = Math.round((count / total) * 100);
+        const percent = total > 0 ? Math.round((count / total) * 100) : 0;
         return (
           <li
             key={reason.id}
-            className="grid grid-cols-[140px_1fr_60px] items-center gap-3 text-sm"
+            className="grid grid-cols-[140px_1fr_72px] items-center gap-3 text-sm"
           >
             <span>{reason.label}</span>
             <span className="h-2 rounded-full bg-muted" aria-hidden>
@@ -393,6 +446,7 @@ function ReasonBreakdown({ counts, total }: { counts: Record<string, number>; to
             </span>
             <span className="text-right tabular-nums text-muted-foreground">
               {count} <span className="sr-only">of {total} customers</span>({percent}%)
+              {previous && <span className="block text-xs">vs {previous[reason.id] ?? 0}</span>}
             </span>
           </li>
         );

@@ -8,11 +8,13 @@ import { Switch } from "@/components/ui/switch";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import {
+  type DateRangeValue,
   COMPARE_PRESETS,
   type ComparePresetId,
   DATE_PRESETS,
   type DatePresetId,
   type DayRange,
+  clampToMin,
   compareRange,
   formatDay,
   formatDayRange,
@@ -26,12 +28,7 @@ import {
 // on the right, and an optional second period to compare against.
 // Changes are only passed on when Apply is pressed.
 
-export interface DateRangeValue {
-  preset: DatePresetId;
-  range: DayRange;
-  /** The period to compare against; null when compare is off. */
-  compare: { preset: ComparePresetId; range: DayRange } | null;
-}
+export type { DateRangeValue };
 
 type Target = "range" | "compare";
 
@@ -199,6 +196,7 @@ export function DateRangePicker({
   compareMin,
   max = today,
   presets = ALL_PRESETS,
+  clampPresets = false,
   allowCompare = true,
   className,
 }: {
@@ -215,6 +213,9 @@ export function DateRangePicker({
   max?: string;
   /** The presets on offer, in DATE_PRESETS order. */
   presets?: readonly DatePresetId[];
+  /** Start presets that reach back before `min` on `min` instead of hiding
+   *  them ("This year" from the first day with figures). */
+  clampPresets?: boolean;
   allowCompare?: boolean;
   className?: string;
 }) {
@@ -240,12 +241,17 @@ export function DateRangePicker({
     setOpen(next);
   };
 
-  const offeredPresets = DATE_PRESETS.filter(
-    (preset) => presets.includes(preset.id) && rangeWithin(presetRange(preset.id, today)!, min, max)
-  );
+  /** A preset's days, or null when it can't be offered. */
+  const presetDays = (preset: DatePresetId): DayRange | null => {
+    const range = presetRange(preset, today);
+    const days = range && clampPresets ? clampToMin(range, min) : range;
+    return days && rangeWithin(days, min, max) ? days : null;
+  };
+
+  const offeredPresets = DATE_PRESETS.filter((preset) => presets.includes(preset.id) && presetDays(preset.id));
 
   const choosePreset = (preset: DatePresetId) => {
-    const range = presetRange(preset, today)!;
+    const range = presetDays(preset)!;
     setDraft((current) => withCompare({ ...current, preset, range, target: "range", anchor: null }));
     showMonthsFor(range);
   };
@@ -294,7 +300,9 @@ export function DateRangePicker({
     setOpen(false);
   };
 
-  const compareBeforeMin = draft.compareOn && !!min && draft.compareRange.from < min;
+  // Comparisons may reach back further than the main period (compareMin).
+  const compareStart = compareMin ?? min;
+  const compareBeforeMin = draft.compareOn && !!compareStart && draft.compareRange.from < compareStart;
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -427,7 +435,7 @@ export function DateRangePicker({
             />
             <div className="flex items-center justify-between gap-3 border-t p-3">
               <p className="text-xs text-muted-foreground">
-                {compareBeforeMin ? `Figures start on ${formatDay(min!)}, so part of the compare period is empty.` : ""}
+                {compareBeforeMin ? `Figures start on ${formatDay(compareStart!)}, so part of the compare period is empty.` : ""}
               </p>
               <div className="flex gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>

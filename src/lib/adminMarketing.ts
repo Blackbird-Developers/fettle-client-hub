@@ -3,14 +3,21 @@
 // numbers themselves come from supabase/functions/admin-analytics/marketing.ts.
 
 import type { MarketingReport } from "../../supabase/functions/admin-analytics/marketing.ts";
-import type { CompareTo, DateRange, GroupBy } from "../../supabase/functions/admin-analytics/logic.ts";
+import type { DateRange, GroupBy } from "../../supabase/functions/admin-analytics/logic.ts";
+import { type BoardComparison, comparisonQuery } from "./adminAnalytics";
 import type { Tone } from "@/components/admin/analytics/chartStyle";
 
 export type MarketingResponse = MarketingReport & { generatedAt: string };
 
 /** The admin-analytics query for the tab. */
-export function marketingQuery(range: DateRange, groupBy: GroupBy, compareTo: CompareTo): string {
-  return new URLSearchParams({ action: "marketing", from: range.from, to: range.to, group: groupBy, compare: compareTo }).toString();
+export function marketingQuery(range: DateRange, groupBy: GroupBy, compare: BoardComparison): string {
+  return new URLSearchParams({
+    action: "marketing",
+    from: range.from,
+    to: range.to,
+    group: groupBy,
+    ...comparisonQuery(compare),
+  }).toString();
 }
 
 const EURO_CENTS = new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });

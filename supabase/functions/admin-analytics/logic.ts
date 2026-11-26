@@ -58,7 +58,9 @@ export const TIME_ZONE = "Europe/Dublin";
 export type GroupBy = "week" | "month";
 /** Count by when the session takes place, or when the booking was made. */
 export type Basis = "session" | "booking";
-export type CompareTo = "previous" | "year";
+/** previous and year are worked out here; custom comes with its own dates
+ *  (the admin date picker's other comparisons, e.g. matching weekdays). */
+export type CompareTo = "previous" | "year" | "custom";
 
 /** Inclusive Dublin dates, YYYY-MM-DD. */
 export interface DateRange {
@@ -147,10 +149,30 @@ function shiftYears(date: string, years: number): string {
 }
 
 /** The range numbers are compared against. */
-export function comparisonRange(range: DateRange, compareTo: CompareTo): DateRange {
+export function comparisonRange(range: DateRange, compareTo: Exclude<CompareTo, "custom">): DateRange {
   if (compareTo === "year") return { from: shiftYears(range.from, -1), to: shiftYears(range.to, -1) };
   const length = daysInRange(range);
   return { from: addDays(range.from, -length), to: addDays(range.from, -1) };
+}
+
+export interface Comparison {
+  compareTo: CompareTo;
+  compareRange: DateRange;
+}
+
+/** Reads compare (plus cfrom / cto for custom) for a range. Returns an error message when invalid. */
+export function parseComparison(search: URLSearchParams, range: DateRange): Comparison | string {
+  const compareTo = search.get("compare") ?? "previous";
+  if (compareTo === "previous" || compareTo === "year") {
+    return { compareTo, compareRange: comparisonRange(range, compareTo) };
+  }
+  if (compareTo !== "custom") return "compare must be previous, year or custom";
+  const from = search.get("cfrom");
+  const to = search.get("cto");
+  if (!isDate(from) || !isDate(to) || from > to) return "compare=custom needs cfrom and cto dates, cfrom first";
+  const compareRange = { from, to };
+  if (daysInRange(compareRange) > MAX_RANGE_DAYS) return "The comparison period can be at most three years";
+  return { compareTo, compareRange };
 }
 
 // ---------------------------------------------------------------------------
@@ -786,10 +808,9 @@ export function progressionPage(history: CustomerHistory, now: number): Stage | 
 // Request parameters
 // ---------------------------------------------------------------------------
 
-export interface AnalyticsParams {
+export interface AnalyticsParams extends Comparison {
   range: DateRange;
   groupBy: GroupBy;
-  compareTo: CompareTo;
   windowDays: number;
   basis: Basis;
   returning: ReturningMode;
@@ -806,8 +827,8 @@ export function parseAnalyticsParams(search: URLSearchParams): AnalyticsParams |
 
   const groupBy = search.get("group") ?? defaultGroupBy(range);
   if (groupBy !== "week" && groupBy !== "month") return "group must be week or month";
-  const compareTo = search.get("compare") ?? "previous";
-  if (compareTo !== "previous" && compareTo !== "year") return "compare must be previous or year";
+  const comparison = parseComparison(search, range);
+  if (typeof comparison === "string") return comparison;
   const windowDays = Number(search.get("window") ?? DEFAULT_CONVERSION_WINDOW);
   if (!(CONVERSION_WINDOWS as readonly number[]).includes(windowDays)) return "window must be 14, 30 or 60";
   const basis = search.get("basis") ?? "session";
@@ -823,7 +844,7 @@ export function parseAnalyticsParams(search: URLSearchParams): AnalyticsParams |
   return {
     range,
     groupBy,
-    compareTo,
+    ...comparison,
     windowDays,
     basis,
     returning: returning as ReturningMode,

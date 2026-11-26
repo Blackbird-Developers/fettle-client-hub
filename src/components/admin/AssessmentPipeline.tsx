@@ -19,7 +19,11 @@ import {
   type AssessmentStep,
   NEXT_STEP_LABELS,
 } from "../../../supabase/functions/admin-clinical/logic.ts";
+import { LIST_PRESETS, dayInRange, localDay, presetValue } from "@/lib/datePresets";
+import { liveWindowStart } from "@/lib/adminWorklists";
+import { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
 import { FollowupActions } from "./FollowupActions";
+import { PeriodFigures } from "./PeriodFigures";
 import {
   CustomerCell,
   InsightsError,
@@ -106,8 +110,17 @@ export function AssessmentPipeline() {
   const [calendar, setCalendar] = useState("all");
   // Opened from a sales task: start searched for that customer.
   const [search, setSearch] = useState(initialSearchFromUrl);
+  // Clients whose last assessment step is in this period (first assessments
+  // still to come always show); null = the whole live window.
+  const [dates, setDates] = useState<DateRangeValue | null>(null);
 
-  const allRows = useMemo(() => data?.assessments.rows ?? [], [data]);
+  const allRows = useMemo(
+    () =>
+      (data?.assessments.rows ?? []).filter(
+        (row) => !dates || row.lastAt === null || dayInRange(localDay(row.lastAt), dates.range)
+      ),
+    [data, dates]
+  );
   const calendars = useMemo(() => uniqueCalendars(allRows.map((row) => row.clinician)), [allRows]);
 
   const rows = useMemo(
@@ -126,12 +139,35 @@ export function AssessmentPipeline() {
 
   const { totals } = data.assessments;
   const issues = data.dataIssues;
-  const needsFull = allRows.filter((row) => row.status === "needs_booking" && row.nextStep === "full").length;
+  // The figures at the top are as of now: the whole live list, not the period.
+  const needsFull = data.assessments.rows.filter((row) => row.status === "needs_booking" && row.nextStep === "full").length;
+  const tabCounts = Object.fromEntries(
+    Object.keys(totals).map((status) => [status, allRows.filter((row) => row.status === status).length])
+  ) as typeof totals;
   const needsTherapy = totals.needs_booking - needsFull;
+  const today = localDay(new Date().toISOString());
+  const windowStart = liveWindowStart(today, data.lookbackDays);
+  const picked = dates ?? presetValue("last90", today, windowStart);
 
   return (
     <div className="space-y-6 animate-fade-in">
       <InsightsHeader data={data} isFetching={isFetching} onRefresh={() => refetch()} />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <DateRangePicker
+          id="assessments-dates"
+          value={picked}
+          onChange={setDates}
+          today={today}
+          min={windowStart}
+          compareMin="2010-01-01"
+          presets={LIST_PRESETS}
+        />
+        <p className="text-xs text-muted-foreground">
+          The dates narrow the list (last {data.lookbackDays} days, live from Acuity) by each client's latest step.
+          The figures at the top are always as of now.
+        </p>
+      </div>
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <StatTile label="Need a full assessment booked" value={String(needsFull)} hint="Screening done" />
@@ -139,6 +175,18 @@ export function AssessmentPipeline() {
         <StatTile label="Next step booked" value={String(totals.booked)} />
         <StatTile label="Assessment booked" value={String(totals.upcoming)} hint="First assessment coming up" />
       </div>
+
+      <PeriodFigures
+        list="clinical"
+        range={picked.range}
+        compare={picked.compare}
+        figures={(t, before) => [
+          { label: "Screenings", current: t.screenings, previous: before?.screenings ?? null, kind: "count", detail: "Consultation + screening, completed" },
+          { label: "Full assessments", current: t.fullAssessments, previous: before?.fullAssessments ?? null, kind: "count", detail: "Completed" },
+          { label: "Other assessments", current: t.otherAssessments, previous: before?.otherAssessments ?? null, kind: "count", detail: "E.g. addiction, completed" },
+          { label: "Clients assessed", current: t.assessmentClients, previous: before?.assessmentClients ?? null, kind: "count" },
+        ]}
+      />
 
       <DataIssues
         items={[
@@ -160,7 +208,7 @@ export function AssessmentPipeline() {
               ADHD and Autism run through partners, so they aren't in Acuity.
             </CardDescription>
           </div>
-          <TabToggle tabs={TABS} value={tab} counts={totals} onChange={setTab} label="Assessment status" />
+          <TabToggle tabs={TABS} value={tab} counts={tabCounts} onChange={setTab} label="Assessment status" />
           <SearchAndCalendarFilter
             search={search}
             onSearch={setSearch}

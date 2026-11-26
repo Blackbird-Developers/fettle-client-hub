@@ -137,10 +137,13 @@ function SelfBookedNote({ totals }: { totals: CustomerTotals }) {
 
 export function CustomersBoard({
   data,
+  compareLabel,
   onBasisChange,
   onReturningChange,
 }: {
   data: AnalyticsResponse;
+  /** What the figures are compared with; null when compare is off. */
+  compareLabel: string | null;
   onBasisChange: (basis: Basis) => void;
   onReturningChange: (returning: ReturningMode) => void;
 }) {
@@ -167,7 +170,6 @@ export function CustomersBoard({
   const hasPartial = partial.some(Boolean);
   const hasCustomers = series.some((p) => p.active > 0);
   const hasBookings = series.some((p) => p.checkedBookings > 0);
-  const compareLabel = data.params.compareTo === "year" ? "same period last year" : "previous period";
 
   const open = (segment: CustomerSegment, from = range.from, to = range.to) =>
     setList({
@@ -183,7 +185,7 @@ export function CustomersBoard({
     <MetricTile
       label={label}
       value={String(current)}
-      change={`${formatCountChange(current, previous)} vs ${compareLabel}`}
+      change={compareLabel ? `${formatCountChange(current, previous)} vs ${compareLabel}` : null}
       tone={toneOf(current - previous)}
       detail={detail}
       onClick={() => open(segment)}

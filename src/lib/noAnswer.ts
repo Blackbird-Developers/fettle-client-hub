@@ -1,6 +1,7 @@
 import { differenceInCalendarDays, format, isSameDay, parseISO, subDays } from "date-fns";
 import type { Tables } from "@/integrations/supabase/types";
 import type { AttemptSource, ContactMethod } from "./contactOutcomes";
+import { type DayRange, dayInRange, localDay } from "./datePresets";
 import { type FollowUpTiming, followUpTiming } from "./contactOutcomes";
 
 // The No answer page: six-attempt follow-up sequences for customers who
@@ -20,7 +21,7 @@ export type SequenceStatus =
 
 export const MAX_ATTEMPTS = 6;
 
-/** Closed sequences stay on the page this many days. */
+/** Without a chosen period, ended sequences stay on the page this many days. */
 export const CLOSED_LIST_DAYS = 30;
 
 export interface PlannedAttempt {
@@ -103,15 +104,23 @@ export interface SequenceGroups {
   due: NoAnswerSequence[];
   /** Active and due later, soonest first. */
   upcoming: NoAnswerSequence[];
-  /** Six unanswered attempts, newest first. */
+  /** Six unanswered attempts (in the period, if one is given), newest first. */
   exhausted: NoAnswerSequence[];
-  /** Ended any other way in the last CLOSED_LIST_DAYS days, newest first. */
+  /** Ended any other way in the period (else the last CLOSED_LIST_DAYS days), newest first. */
   closed: NoAnswerSequence[];
 }
 
-export function groupSequences(rows: readonly NoAnswerSequence[], today: Date = new Date()): SequenceGroups {
+/** Due and Coming up are always as of today; the period only limits the
+ *  finished and ended lists, by the day they ended. */
+export function groupSequences(
+  rows: readonly NoAnswerSequence[],
+  today: Date = new Date(),
+  period: DayRange | null = null
+): SequenceGroups {
   const todayIso = format(today, "yyyy-MM-dd");
   const closedSince = subDays(today, CLOSED_LIST_DAYS).toISOString();
+  const endedInPeriod = (row: NoAnswerSequence) =>
+    period ? dayInRange(row.closed_at && localDay(row.closed_at), period) : (row.closed_at ?? "") >= closedSince;
   const byDue = (a: NoAnswerSequence, b: NoAnswerSequence) =>
     (a.next_due_on ?? "").localeCompare(b.next_due_on ?? "") ||
     (a.last_attempt_at ?? "").localeCompare(b.last_attempt_at ?? "");
@@ -122,11 +131,38 @@ export function groupSequences(rows: readonly NoAnswerSequence[], today: Date = 
   return {
     due: active.filter((row) => !row.next_due_on || row.next_due_on <= todayIso).sort(byDue),
     upcoming: active.filter((row) => row.next_due_on && row.next_due_on > todayIso).sort(byDue),
-    exhausted: rows.filter((row) => row.status === "exhausted").sort(byClosedDesc),
-    closed: rows
-      .filter((row) => !["active", "exhausted"].includes(row.status) && (row.closed_at ?? "") >= closedSince)
+    exhausted: rows
+      .filter((row) => row.status === "exhausted" && (!period || endedInPeriod(row)))
       .sort(byClosedDesc),
+    closed: rows.filter((row) => !["active", "exhausted"].includes(row.status) && endedInPeriod(row)).sort(byClosedDesc),
   };
+}
+
+export interface PeriodCounts {
+  /** Sequences started in the period. */
+  started: number;
+  /** Reached six unanswered attempts in the period. */
+  exhausted: number;
+  /** Ended any other way (booked, not continuing, later, closed) in the period. */
+  ended: number;
+}
+
+/** What happened in a period, for the tiles and their comparison. */
+export function periodCounts(rows: readonly NoAnswerSequence[], period: DayRange): PeriodCounts {
+  const endedIn = (row: NoAnswerSequence) => dayInRange(row.closed_at && localDay(row.closed_at), period);
+  return {
+    started: rows.filter((row) => dayInRange(localDay(row.started_at), period)).length,
+    exhausted: rows.filter((row) => row.status === "exhausted" && endedIn(row)).length,
+    ended: rows.filter((row) => !["active", "exhausted"].includes(row.status) && endedIn(row)).length,
+  };
+}
+
+/** The first day a sequence started, for "All time"; today when there are none. */
+export function firstSequenceDay(rows: readonly NoAnswerSequence[], today: string): string {
+  return rows.reduce((first, row) => {
+    const day = localDay(row.started_at);
+    return day < first ? day : first;
+  }, today);
 }
 
 /** Active sequences due today or overdue (the sidebar badge). */

@@ -10,6 +10,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAdminMarketing } from "@/hooks/useAdmin";
 import {
+  type BoardComparison,
+  comparisonLabel,
   describePeriod,
   formatCountChange,
   formatFullDay,
@@ -34,8 +36,16 @@ import {
   type MarketingPoint,
   CHANNELS,
   CHANNEL_LABELS,
+  VAT_RATE,
 } from "../../../../supabase/functions/admin-analytics/marketing.ts";
-import type { CompareTo, DateRange, GroupBy } from "../../../../supabase/functions/admin-analytics/logic.ts";
+import type { DateRange, GroupBy } from "../../../../supabase/functions/admin-analytics/logic.ts";
+
+const VAT_PERCENT = Math.round(VAT_RATE * 100);
+
+/** Spend inc. VAT; worked out here too while admin-analytics predates the field. */
+function spendIncVat(figures: { spend: number; spendIncVat?: number }): number {
+  return figures.spendIncVat ?? Math.round(figures.spend * (1 + VAT_RATE) * 100) / 100;
+}
 import { SERIES_COLORS, toneOf } from "./chartStyle";
 import { MetricTile, StaticLegend, TooltipBox } from "./parts";
 
@@ -271,6 +281,7 @@ function SpendChart({ data }: { data: MarketingResponse }) {
                   </TableHead>
                 ))}
                 <TableHead className="text-right">Total spend</TableHead>
+                <TableHead className="text-right">Spend inc. VAT</TableHead>
                 <TableHead className="text-right">New customers</TableHead>
                 <TableHead className="text-right">Cost per new customer</TableHead>
               </TableRow>
@@ -285,6 +296,7 @@ function SpendChart({ data }: { data: MarketingResponse }) {
                     </TableCell>
                   ))}
                   <TableCell className="text-right tabular-nums">{formatMoney(p.spend)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatMoney(spendIncVat(p))}</TableCell>
                   <TableCell className="text-right tabular-nums">{p.newCustomers}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatMoney(p.costPerNewCustomer)}</TableCell>
                 </TableRow>
@@ -297,9 +309,9 @@ function SpendChart({ data }: { data: MarketingResponse }) {
   );
 }
 
-function MarketingContent({ data }: { data: MarketingResponse }) {
+function MarketingContent({ data, compareLabel }: { data: MarketingResponse; compareLabel: string | null }) {
   const { totals, compare } = data;
-  const compareLabel = data.params.compareTo === "year" ? "same period last year" : "previous period";
+  const vs = (change: string | null) => (change && compareLabel ? `${change} vs ${compareLabel}` : null);
   const connected = data.channels.filter((s) => s.connected);
 
   if (connected.length === 0) {
@@ -348,39 +360,42 @@ function MarketingContent({ data }: { data: MarketingResponse }) {
         </Alert>
       )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         <MetricTile
           label="Ad spend"
           value={formatMoney(totals.spend)}
-          change={`${formatMoneyChange(totals.spend, compare.spend)} vs ${compareLabel}`}
-          detail={`Across ${listChannels(connected.map((s) => s.channel))}`}
+          change={vs(formatMoneyChange(totals.spend, compare.spend))}
+          detail={`Across ${listChannels(connected.map((s) => s.channel))}, before VAT`}
+        />
+        <MetricTile
+          label="Ad spend (inc. VAT)"
+          value={formatMoney(spendIncVat(totals))}
+          change={vs(formatMoneyChange(spendIncVat(totals), spendIncVat(compare)))}
+          detail={`Ad spend + ${VAT_PERCENT}% VAT`}
         />
         <MetricTile
           label="Cost per new customer"
           value={formatMoney(totals.costPerNewCustomer)}
-          change={
-            formatMoneyChange(totals.costPerNewCustomer, compare.costPerNewCustomer) &&
-            `${formatMoneyChange(totals.costPerNewCustomer, compare.costPerNewCustomer)} vs ${compareLabel}`
-          }
+          change={vs(formatMoneyChange(totals.costPerNewCustomer, compare.costPerNewCustomer))}
           tone={costTone(totals.costPerNewCustomer, compare.costPerNewCustomer)}
-          detail="All ad spend ÷ new customers"
+          detail="Ad spend inc. VAT ÷ new customers"
         />
         <MetricTile
           label="New customers"
           value={String(totals.newCustomers)}
-          change={`${formatCountChange(totals.newCustomers, compare.newCustomers)} vs ${compareLabel}`}
+          change={vs(formatCountChange(totals.newCustomers, compare.newCustomers))}
           tone={toneOf(totals.newCustomers - compare.newCustomers)}
           detail="First-ever session booked in the range, from any source"
         />
         <MetricTile
           label="Conversions (reported by channels)"
           value={formatConversions(totals.conversions)}
-          change={`${formatCountChange(Math.round(totals.conversions), Math.round(compare.conversions))} vs ${compareLabel}`}
+          change={vs(formatCountChange(Math.round(totals.conversions), Math.round(compare.conversions)))}
           tone={toneOf(totals.conversions - compare.conversions)}
           detail={`${formatMoney(totals.costPerConversion)} per conversion`}
         />
       </div>
-      {data.compareMissingStart.length > 0 && (
+      {compareLabel && data.compareMissingStart.length > 0 && (
         <p className="text-xs text-muted-foreground">
           {listChannels(data.compareMissingStart)} figures don't go back to the whole comparison period, so the changes
           above are bigger than they really are.
@@ -392,16 +407,27 @@ function MarketingContent({ data }: { data: MarketingResponse }) {
 
       <p className="text-xs text-muted-foreground">
         Spend, clicks and conversions are what each platform reports, updated every few hours; the platforms keep
-        adjusting the last few weeks, so recent days can still change. Cost per new customer sets all ad spend against
-        every new customer in the hub, including those who came through word of mouth or search.
+        adjusting the last few weeks, so recent days can still change. Cost per new customer sets all ad spend, plus
+        {VAT_PERCENT}% VAT, against every new customer in the hub, including those who came through word of mouth or
+        search. Cost per conversion uses spend before VAT, as the platforms show it.
       </p>
     </div>
   );
 }
 
 /** The Overview's Marketing tab: ad spend and results from Google Ads, Meta and TikTok. */
-export function MarketingBoard({ range, groupBy, compareTo }: { range: DateRange; groupBy: GroupBy; compareTo: CompareTo }) {
-  const query = useAdminMarketing(marketingQuery(range, groupBy, compareTo));
+export function MarketingBoard({
+  range,
+  groupBy,
+  compare,
+}: {
+  range: DateRange;
+  groupBy: GroupBy;
+  /** The comparison period; null when compare is off. */
+  compare: BoardComparison;
+}) {
+  const query = useAdminMarketing(marketingQuery(range, groupBy, compare));
+  const compareLabel = comparisonLabel(compare);
   const { error, isPending, isFetching, refetch } = query;
   // An admin-analytics deployed before this tab ignores action=marketing and
   // answers with the other boards' numbers; show that instead of crashing.
@@ -421,7 +447,7 @@ export function MarketingBoard({ range, groupBy, compareTo }: { range: DateRange
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-live="polite">
-          {data && <span>Compared with {formatRange(data.params.compareRange)}</span>}
+          {data && compare && <span>Compared with {formatRange(data.params.compareRange)}</span>}
           {isFetching && !isPending && (
             <span className="flex items-center gap-1">
               <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
@@ -464,7 +490,7 @@ export function MarketingBoard({ range, groupBy, compareTo }: { range: DateRange
                 </AlertDescription>
               </Alert>
             )}
-            <MarketingContent data={data} />
+            <MarketingContent data={data} compareLabel={compareLabel} />
           </>
         ) : null}
       </CardContent>

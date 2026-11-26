@@ -29,7 +29,6 @@ import {
   type CustomerSegment,
   CUSTOMER_SEGMENTS,
   buildHistories,
-  comparisonRange,
   customerSeries,
   customerTotals,
   parseAnalyticsParams,
@@ -41,6 +40,15 @@ import {
   returningMinGapDays,
   segmentMembers,
 } from "./logic.ts";
+import { consultationReport, parseConsultationParams, parseConsultationRows } from "./consultations.ts";
+import {
+  adoptionPeriodTotals,
+  clinicalPeriodTotals,
+  leadPeriodTotals,
+  parseClinicalRows,
+  parseLeadCustomers,
+  parsePeriodsParams,
+} from "./worklists.ts";
 import { funnelReport, parseFunnelParams, parseFunnelRows, queryBounds } from "./funnel.ts";
 import { marketingReport, parseMarketingParams, parseMarketingRows, parseSyncState, spanningRange } from "./marketing.ts";
 
@@ -193,7 +201,7 @@ serve(async (req) => {
       if (typeof marketingParams === "string") return json({ error: marketingParams }, 400);
       const startedAt = Date.now();
       const db = createClient(supabaseUrl, supabaseServiceKey);
-      const compare = comparisonRange(marketingParams.range, marketingParams.compareTo);
+      const compare = marketingParams.compareRange;
       const span = spanningRange(marketingParams.range, compare);
 
       const [
@@ -230,6 +238,102 @@ serve(async (req) => {
 
       console.log("admin-analytics marketing", { days: days.length, durationMs: Date.now() - startedAt });
       return json({ generatedAt: new Date().toISOString(), ...report });
+    }
+
+    // Free consultations tab: Let's Talk / Introduction Chat calls from the
+    // Acuity copy, against each person's paid sessions (no session filters).
+    if (search.get("action") === "consultations") {
+      const consultationParams = parseConsultationParams(search);
+      if (typeof consultationParams === "string") return json({ error: consultationParams }, 400);
+      const startedAt = Date.now();
+      const db = createClient(supabaseUrl, supabaseServiceKey);
+      const [
+        { data: acuityState, error: acuityStateError },
+        { data: rawSessions, error: sessionsError },
+        { data: rawCalls, error: callsError },
+      ] = await Promise.all([
+        db
+          .from("acuity_sync_state")
+          .select("last_refreshed_at, backfilled_from, backfill_complete")
+          .eq("id", true)
+          .maybeSingle(),
+        db.rpc("admin_analytics_sessions"),
+        db.rpc("admin_analytics_consultations"),
+      ]);
+      if (acuityStateError) throw new Error(`Failed to read sync state: ${acuityStateError.code}`);
+      if (!acuityState?.last_refreshed_at) return json({ error: NOT_BUILT_MESSAGE });
+      if (sessionsError) throw new Error(`Failed to read sessions: ${sessionsError.code}`);
+      if (callsError) throw new Error(`Failed to read free consultations: ${callsError.code}`);
+
+      const calls = parseConsultationRows(rawCalls);
+      const report = consultationReport({
+        calls,
+        histories: buildHistories(parseSessionRows(rawSessions)),
+        params: consultationParams,
+        now: startedAt,
+      });
+      console.log("admin-analytics consultations", { calls: calls.length, durationMs: Date.now() - startedAt });
+      return json({
+        generatedAt: new Date(startedAt).toISOString(),
+        data: {
+          lastRefreshedAt: acuityState.last_refreshed_at,
+          historyComplete: acuityState.backfill_complete,
+          historyFrom: acuityState.backfilled_from,
+        },
+        params: consultationParams,
+        ...report,
+      });
+    }
+
+    // Period figures for the work-list pages (Hot leads, Psychiatry,
+    // Assessments, Portal adoption), from the Acuity copy, for the date
+    // picker's period and comparison.
+    if (search.get("action") === "periods") {
+      const periodsParams = parsePeriodsParams(search);
+      if (typeof periodsParams === "string") return json({ error: periodsParams }, 400);
+      const startedAt = Date.now();
+      const db = createClient(supabaseUrl, supabaseServiceKey);
+      const { data: acuityState, error: acuityStateError } = await db
+        .from("acuity_sync_state")
+        .select("last_refreshed_at")
+        .eq("id", true)
+        .maybeSingle();
+      if (acuityStateError) throw new Error(`Failed to read sync state: ${acuityStateError.code}`);
+      if (!acuityState?.last_refreshed_at) return json({ error: NOT_BUILT_MESSAGE });
+
+      const { range, compareRange } = periodsParams;
+      let totals: unknown;
+      let compare: unknown;
+      if (periodsParams.list === "leads") {
+        const { data: raw, error } = await db.rpc("admin_analytics_lead_rows");
+        if (error) throw new Error(`Failed to read lead rows: ${error.code}`);
+        const customers = parseLeadCustomers(raw);
+        totals = leadPeriodTotals(customers, range, startedAt);
+        compare = leadPeriodTotals(customers, compareRange, startedAt);
+      } else if (periodsParams.list === "clinical") {
+        const { data: raw, error } = await db.rpc("admin_analytics_clinical_rows");
+        if (error) throw new Error(`Failed to read clinical rows: ${error.code}`);
+        const rows = parseClinicalRows(raw);
+        totals = clinicalPeriodTotals(rows, range, startedAt);
+        compare = clinicalPeriodTotals(rows, compareRange, startedAt);
+      } else {
+        const [{ data: raw, error }, portalEmails] = await Promise.all([
+          db.rpc("admin_analytics_sessions"),
+          fetchPortalEmails(db),
+        ]);
+        if (error) throw new Error(`Failed to read sessions: ${error.code}`);
+        const histories = buildHistories(parseSessionRows(raw));
+        totals = adoptionPeriodTotals(histories, portalEmails, range, startedAt);
+        compare = adoptionPeriodTotals(histories, portalEmails, compareRange, startedAt);
+      }
+      console.log("admin-analytics periods", { list: periodsParams.list, durationMs: Date.now() - startedAt });
+      return json({
+        generatedAt: new Date(startedAt).toISOString(),
+        data: { lastRefreshedAt: acuityState.last_refreshed_at },
+        params: periodsParams,
+        totals,
+        compare,
+      });
     }
 
     const params = parseAnalyticsParams(search);
@@ -284,7 +388,7 @@ serve(async (req) => {
       return json({ generatedAt: new Date(now).toISOString(), segment, range: params.range, customers });
     }
 
-    const compare = comparisonRange(params.range, params.compareTo);
+    const compare = params.compareRange;
     const [{ count: pendingChecks, error: pendingError }, { data: rawCalendars, error: calendarsError }] =
       await Promise.all([
         db

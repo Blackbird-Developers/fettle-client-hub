@@ -54,8 +54,8 @@ export function completionLabel(
   return channels.length ? `No answer · ${channels.join(" and ")}` : "No answer";
 }
 
-/** Completed and auto-closed tasks shown in the history tab. */
-export const HISTORY_DAYS = 30;
+/** The first day of sales tasks (the feature went live), where "All time" starts. */
+export const SALES_TASKS_START = "2026-10-16";
 
 export const PRIORITY_LABELS: Record<SalesPriority, string> = {
   high: "High",

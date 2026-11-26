@@ -356,6 +356,7 @@ describe("parseAnalyticsParams", () => {
       range: OCTOBER,
       groupBy: "week",
       compareTo: "previous",
+      compareRange: { from: "2026-08-31", to: "2026-09-30" },
       windowDays: 30,
       basis: "session",
       returning: "all",
@@ -364,6 +365,24 @@ describe("parseAnalyticsParams", () => {
     expect(
       parseAnalyticsParams(new URLSearchParams("from=2026-10-01&to=2026-10-31&type=couples&calendar=42"))
     ).toMatchObject({ filters: { category: "couples", calendarId: 42 } });
+  });
+
+  it("takes a comparison period's own dates for compare=custom", () => {
+    expect(
+      parseAnalyticsParams(new URLSearchParams("from=2026-10-01&to=2026-10-31&compare=custom&cfrom=2026-09-03&cto=2026-10-03"))
+    ).toMatchObject({ compareTo: "custom", compareRange: { from: "2026-09-03", to: "2026-10-03" } });
+    expect(parseAnalyticsParams(new URLSearchParams("from=2026-10-01&to=2026-10-31&compare=year"))).toMatchObject({
+      compareTo: "year",
+      compareRange: { from: "2025-10-01", to: "2025-10-31" },
+    });
+  });
+
+  it("rejects a bad comparison", () => {
+    const parse = (query: string) => parseAnalyticsParams(new URLSearchParams(`from=2026-10-01&to=2026-10-31&${query}`));
+    expect(parse("compare=custom")).toMatch(/cfrom and cto/);
+    expect(parse("compare=custom&cfrom=2026-09-30&cto=2026-09-01")).toMatch(/cfrom first/);
+    expect(parse("compare=custom&cfrom=2020-01-01&cto=2026-09-01")).toMatch(/three years/);
+    expect(parse("compare=week")).toMatch(/previous, year or custom/);
   });
 
   it("reads who counts as returning", () => {

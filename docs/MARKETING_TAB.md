@@ -25,8 +25,9 @@ A channel whose secrets aren't set is skipped, so everything can be deployed bef
 
 | Figure | Definition |
 |---|---|
-| Ad spend | What each platform reports, in EUR. Spend in any other currency is left out and shown as a warning; nothing is converted. |
-| Cost per new customer | All ad spend ÷ new customers in the hub (first-ever session booked in the range, booking-date basis). It's the same count as the Customers board, so it includes customers who didn't come from ads. Customers with no email are left out, as on the board. |
+| Ad spend | What each platform reports, in EUR, before VAT. Spend in any other currency is left out and shown as a warning; nothing is converted. |
+| Ad spend (inc. VAT) | Ad spend × 1.23 (Irish VAT at 23%, which Fettle pays on top of the platforms' figures). |
+| Cost per new customer | All ad spend **inc. VAT** ÷ new customers in the hub (first-ever session booked in the range, booking-date basis). It's the same count as the Customers board, so it includes customers who didn't come from ads. Customers with no email are left out, as on the board. |
 | Conversions | Each channel's own count (agreed with Fettle, Nov 2026). **Meta:** purchases + leads. **Google Ads:** the standard Conversions column, across all its accounts. **TikTok:** Complete Payment + Complete Registration. Channels overlap, so the total can be higher than the real number of new customers. |
 | Cost per conversion | A channel's spend ÷ its own reported conversions. |
 | CTR | Clicks ÷ impressions. |
@@ -173,3 +174,4 @@ The workflow starts running on its own once it's on `main`.
 | Which channels? | Google Ads and Meta, through CreativeHub's existing access. TikTok on hold. |
 | What counts as a conversion? | **Meta:** purchases + leads (`purchase`, `offsite_conversion.fb_pixel_purchase`, `lead`, `offsite_conversion.fb_pixel_lead`, each group counted once, §3). **Google Ads:** the standard Conversions column across all three accounts. **TikTok:** Complete Payment + Complete Registration. |
 | Currency | EUR. Any other currency is left out of totals and flagged on the tab. |
+| VAT (Art, 26 Nov 2026) | Add an "Ad spend (inc. VAT)" figure (spend × 1.23) and use it for cost per new customer. Cost per conversion stays on spend before VAT, as the platforms show it. |

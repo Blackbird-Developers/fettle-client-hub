@@ -9,6 +9,8 @@ import { normalizeProgression } from "@/lib/customerInsights";
 import type { AnalyticsCustomersResponse, AnalyticsResponse } from "@/lib/adminAnalytics";
 import type { FunnelResponse } from "@/lib/adminFunnel";
 import type { MarketingResponse } from "@/lib/adminMarketing";
+import type { ConsultationsResponse } from "@/lib/adminConsultations";
+import type { PeriodsResponse } from "@/lib/adminWorklists";
 import {
   type CustomerFollowup,
   type FollowupPatch,
@@ -645,6 +647,36 @@ export function useAdminMarketing(query: string, enabled = true) {
   const { data: isAdmin } = useIsAdmin();
   return useQuery<MarketingResponse, ApiError>({
     queryKey: ["admin-analytics-marketing", query],
+    queryFn: () => fetchAdminFunction("admin-analytics", query),
+    enabled: isAdmin === true && enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+    retry: ACUITY_QUERY_OPTIONS.retry,
+  });
+}
+
+// "In this period" figures on the work-list pages (admin-analytics?action=periods).
+// From the Acuity copy, so the period and its comparison can reach past the
+// pages' live window. null query = not wanted yet.
+export function useWorklistPeriods(query: string | null) {
+  const { data: isAdmin } = useIsAdmin();
+  return useQuery<PeriodsResponse, ApiError>({
+    queryKey: ["admin-analytics-periods", query],
+    queryFn: () => fetchAdminFunction("admin-analytics", query!),
+    enabled: isAdmin === true && query !== null,
+    placeholderData: keepPreviousData,
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+    retry: ACUITY_QUERY_OPTIONS.retry,
+  });
+}
+
+// The Free consultations tab (admin-analytics?action=consultations).
+export function useAdminConsultations(query: string, enabled = true) {
+  const { data: isAdmin } = useIsAdmin();
+  return useQuery<ConsultationsResponse, ApiError>({
+    queryKey: ["admin-analytics-consultations", query],
     queryFn: () => fetchAdminFunction("admin-analytics", query),
     enabled: isAdmin === true && enabled,
     placeholderData: keepPreviousData,

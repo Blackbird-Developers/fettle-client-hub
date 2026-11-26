@@ -17,7 +17,11 @@ import type {
   PsychiatryRow,
   PsychiatryStatus,
 } from "../../../supabase/functions/admin-clinical/logic.ts";
+import { LIST_PRESETS, dayInRange, localDay, presetValue } from "@/lib/datePresets";
+import { liveWindowStart } from "@/lib/adminWorklists";
+import { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
 import { FollowupActions } from "./FollowupActions";
+import { PeriodFigures } from "./PeriodFigures";
 import {
   CustomerCell,
   InsightsError,
@@ -111,8 +115,17 @@ export function PsychiatryFollowUps() {
   const [calendar, setCalendar] = useState("all");
   // Opened from a sales task: start searched for that customer.
   const [search, setSearch] = useState(initialSearchFromUrl);
+  // Clients whose last psychiatry appointment is in this period (first
+  // consultations still to come always show); null = the whole live window.
+  const [dates, setDates] = useState<DateRangeValue | null>(null);
 
-  const allRows = useMemo(() => data?.psychiatry.rows ?? [], [data]);
+  const allRows = useMemo(
+    () =>
+      (data?.psychiatry.rows ?? []).filter(
+        (row) => !dates || row.lastAt === null || dayInRange(localDay(row.lastAt), dates.range)
+      ),
+    [data, dates]
+  );
   const tabCounts = useMemo(() => {
     const counts: Record<Tab, number> = { due: 0, not_due: 0, booked: 0, upcoming: 0 };
     for (const row of allRows) counts[TAB_OF[row.status]]++;
@@ -137,10 +150,29 @@ export function PsychiatryFollowUps() {
   const { totals } = data.psychiatry;
   const { contactAfterDays, followUpByDays } = data.psychiatryRule;
   const issues = data.dataIssues;
+  const today = localDay(new Date().toISOString());
+  const windowStart = liveWindowStart(today, data.lookbackDays);
+  const picked = dates ?? presetValue("last90", today, windowStart);
 
   return (
     <div className="space-y-6 animate-fade-in">
       <InsightsHeader data={data} isFetching={isFetching} onRefresh={() => refetch()} />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <DateRangePicker
+          id="psychiatry-dates"
+          value={picked}
+          onChange={setDates}
+          today={today}
+          min={windowStart}
+          compareMin="2010-01-01"
+          presets={LIST_PRESETS}
+        />
+        <p className="text-xs text-muted-foreground">
+          The dates narrow the list (last {data.lookbackDays} days, live from Acuity) by each client's latest appointment.
+          The figures at the top are always as of now.
+        </p>
+      </div>
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <StatTile label="Overdue" value={String(totals.overdue)} hint={`Past week ${followUpByDays / 7}, nothing booked`} />
@@ -148,6 +180,16 @@ export function PsychiatryFollowUps() {
         <StatTile label="Follow-up booked" value={String(totals.booked)} />
         <StatTile label="Consultation booked" value={String(totals.upcoming)} hint="First appointment coming up" />
       </div>
+
+      <PeriodFigures
+        list="clinical"
+        range={picked.range}
+        compare={picked.compare}
+        figures={(t, before) => [
+          { label: "Psychiatry appointments", current: t.psychiatryAppointments, previous: before?.psychiatryAppointments ?? null, kind: "count", detail: "Completed" },
+          { label: "Clients seen", current: t.psychiatryClients, previous: before?.psychiatryClients ?? null, kind: "count" },
+        ]}
+      />
 
       <DataIssues
         items={[

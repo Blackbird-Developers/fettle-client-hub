@@ -1,4 +1,5 @@
-import { addDays, format, parseISO, startOfDay, subDays } from "date-fns";
+import { addDays, format, parseISO, startOfDay } from "date-fns";
+import type { DatePresetId, DayRange } from "@/lib/datePresets";
 import type { Tables } from "@/integrations/supabase/types";
 import { KIND_LABELS } from "@/lib/salesTasks";
 import { OUTCOME_LABELS, contactFromKey, describeReasons, isContactOutcome } from "@/lib/contactOutcomes";
@@ -30,46 +31,34 @@ export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number]["id"];
 
 export const ACTIVITY_PAGE_SIZE = 25;
 
-export type ActivityRangePreset = "today" | "7d" | "30d" | "all";
-
-export const RANGE_PRESETS: { id: ActivityRangePreset; label: string }[] = [
-  { id: "today", label: "Today" },
-  { id: "7d", label: "7 days" },
-  { id: "30d", label: "30 days" },
-  { id: "all", label: "All time" },
+/** The date picker's presets on the Activity log. */
+export const ACTIVITY_PRESETS: readonly DatePresetId[] = [
+  "today",
+  "yesterday",
+  "thisWeek",
+  "lastWeek",
+  "last7",
+  "last14",
+  "last30",
+  "thisMonth",
+  "lastMonth",
+  "allTime",
 ];
 
-/** The earliest date the log can hold (history was copied from October 2026). */
-const LOG_START = "2026-01-01T00:00:00.000Z";
+export const DEFAULT_ACTIVITY_PRESET: DatePresetId = "last7";
+
+/** The earliest day the log can hold (history was copied from October 2026). */
+export const LOG_START_DAY = "2026-01-01";
 
 /**
- * Start (inclusive) and end (exclusive) of the chosen range, as ISO times.
- * A custom range (yyyy-MM-dd days, either may be "") wins over the preset.
- * Days are local days; staff are in Ireland.
+ * Start (inclusive) and end (exclusive) of a range of "yyyy-MM-dd" days, as
+ * ISO times. Days are local days; staff are in Ireland.
  */
-export function activityRange(
-  preset: ActivityRangePreset,
-  customFrom: string,
-  customTo: string,
-  now: Date = new Date()
-): { from: string; to: string } {
-  const tomorrow = startOfDay(addDays(now, 1)).toISOString();
-  if (customFrom || customTo) {
-    return {
-      from: customFrom ? startOfDay(parseISO(customFrom)).toISOString() : LOG_START,
-      to: customTo ? startOfDay(addDays(parseISO(customTo), 1)).toISOString() : tomorrow,
-    };
-  }
-  switch (preset) {
-    case "today":
-      return { from: startOfDay(now).toISOString(), to: tomorrow };
-    case "7d":
-      return { from: startOfDay(subDays(now, 6)).toISOString(), to: tomorrow };
-    case "30d":
-      return { from: startOfDay(subDays(now, 29)).toISOString(), to: tomorrow };
-    default:
-      return { from: LOG_START, to: tomorrow };
-  }
+export function activityBounds(range: DayRange): { from: string; to: string } {
+  return {
+    from: startOfDay(parseISO(range.from)).toISOString(),
+    to: startOfDay(addDays(parseISO(range.to), 1)).toISOString(),
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

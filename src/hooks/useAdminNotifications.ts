@@ -7,6 +7,7 @@ import {
   NOTIFICATIONS_PAGE_SIZE,
   notificationSearchTerm,
 } from "@/lib/adminNotifications";
+import { type DayRange, localDayBounds } from "@/lib/datePresets";
 
 // Every notifications query starts with this key, so one invalidate refreshes
 // the bell and the Notifications page together.
@@ -48,6 +49,8 @@ export interface NotificationsPageQuery {
   page: number;
   unreadOnly: boolean;
   search: string;
+  /** Only notifications from these local days; null = any date. */
+  range?: DayRange | null;
 }
 
 export interface NotificationsPage {
@@ -56,12 +59,12 @@ export interface NotificationsPage {
 }
 
 /** One page of the Notifications page, filtered in the database. */
-export function useAdminNotificationsPage({ page, unreadOnly, search }: NotificationsPageQuery) {
+export function useAdminNotificationsPage({ page, unreadOnly, search, range = null }: NotificationsPageQuery) {
   const { data: isAdmin } = useIsAdmin();
   const term = notificationSearchTerm(search);
 
   return useQuery<NotificationsPage, DbError>({
-    queryKey: [...ADMIN_NOTIFICATIONS_QUERY_KEY, "page", page, unreadOnly, term],
+    queryKey: [...ADMIN_NOTIFICATIONS_QUERY_KEY, "page", page, unreadOnly, term, range?.from, range?.to],
     queryFn: async () => {
       const from = (page - 1) * NOTIFICATIONS_PAGE_SIZE;
       let query = supabase
@@ -76,6 +79,10 @@ export function useAdminNotificationsPage({ page, unreadOnly, search }: Notifica
           `title.ilike.${like},client_email.ilike.${like},client_name.ilike.${like},body.ilike.${like}`
         );
       }
+      if (range) {
+        const bounds = localDayBounds(range);
+        query = query.gte("created_at", bounds.from).lt("created_at", bounds.to);
+      }
       const { data, error, count } = await query;
       if (error) throw error;
       return { rows: data, total: count ?? data.length };
@@ -83,6 +90,39 @@ export function useAdminNotificationsPage({ page, unreadOnly, search }: Notifica
     enabled: isAdmin === true,
     staleTime: 1000 * 60,
     placeholderData: keepPreviousData,
+    retry,
+  });
+}
+
+/** How many notifications match the filters in a period, for the comparison. */
+export function useAdminNotificationCount(
+  { unreadOnly, search, range }: Omit<NotificationsPageQuery, "page">,
+  enabled: boolean
+) {
+  const { data: isAdmin } = useIsAdmin();
+  const term = notificationSearchTerm(search);
+
+  return useQuery<number, DbError>({
+    queryKey: [...ADMIN_NOTIFICATIONS_QUERY_KEY, "count", unreadOnly, term, range?.from, range?.to],
+    queryFn: async () => {
+      let query = supabase.from("admin_notifications").select("id", { count: "exact", head: true });
+      if (unreadOnly) query = query.is("read_at", null);
+      if (term) {
+        const like = `%${term}%`;
+        query = query.or(
+          `title.ilike.${like},client_email.ilike.${like},client_name.ilike.${like},body.ilike.${like}`
+        );
+      }
+      if (range) {
+        const bounds = localDayBounds(range);
+        query = query.gte("created_at", bounds.from).lt("created_at", bounds.to);
+      }
+      const { error, count } = await query;
+      if (error) throw error;
+      return count ?? 0;
+    },
+    enabled: enabled && isAdmin === true,
+    staleTime: 1000 * 60,
     retry,
   });
 }

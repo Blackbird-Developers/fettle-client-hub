@@ -2,6 +2,7 @@
 import "@/test/setupDom";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { BoardComparison } from "@/lib/adminAnalytics";
 import type { MarketingResponse } from "@/lib/adminMarketing";
 import { type MarketingDay, marketingReport, parseSyncState } from "../../../../supabase/functions/admin-analytics/marketing.ts";
 import { MarketingBoard } from "./MarketingBoard";
@@ -40,7 +41,7 @@ function response(days: MarketingDay[], syncRows: unknown[], newCustomers = 10, 
   return {
     generatedAt: "2026-11-25T10:00:00Z",
     ...marketingReport({
-      params: { range, groupBy: "week", compareTo: "previous" },
+      params: { range, groupBy: "week", compareTo: "previous", compareRange },
       compareRange,
       days,
       statuses: parseSyncState(syncRows),
@@ -54,8 +55,8 @@ function response(days: MarketingDay[], syncRows: unknown[], newCustomers = 10, 
 const META_SYNCED = { channel: "meta", last_success_at: "2026-11-25T03:00:00Z", history_from: "2025-11-01" };
 const GOOGLE_SYNCED = { channel: "google", last_success_at: "2026-11-25T03:00:00Z", history_from: "2025-11-01" };
 
-function renderBoard() {
-  return render(<MarketingBoard range={range} groupBy="week" compareTo="previous" />);
+function renderBoard(compare: BoardComparison = { preset: "previous", range: compareRange }) {
+  return render(<MarketingBoard range={range} groupBy="week" compare={compare} />);
 }
 
 function tile(label: string) {
@@ -73,6 +74,20 @@ describe("MarketingBoard", () => {
     state.data = response([], []);
     renderBoard();
     expect(state.queries.at(-1)).toBe("action=marketing&from=2026-11-01&to=2026-11-30&group=week&compare=previous");
+  });
+
+  it("sends a weekday-matched comparison as custom dates, and hides changes with compare off", () => {
+    state.data = response([day({})], [META_SYNCED]);
+    renderBoard({ preset: "previousWeekday", range: { from: "2026-10-04", to: "2026-11-02" } });
+    expect(state.queries.at(-1)).toBe(
+      "action=marketing&from=2026-11-01&to=2026-11-30&group=week&compare=custom&cfrom=2026-10-04&cto=2026-11-02"
+    );
+    expect(within(tile("Ad spend")).getByText(/vs previous period .same weekdays./)).toBeTruthy();
+
+    cleanup();
+    renderBoard(null);
+    expect(within(tile("Ad spend")).queryByText(/ vs /)).toBeNull();
+    expect(screen.queryByText(/Compared with/)).toBeNull();
   });
 
   it("says nothing is connected yet instead of showing zeros", () => {
@@ -96,8 +111,11 @@ describe("MarketingBoard", () => {
 
     expect(within(tile("Ad spend")).getByText("€500")).toBeTruthy();
     expect(within(tile("Ad spend")).getByText(/\+€100 \(\+25%\) vs previous period/)).toBeTruthy();
-    // 500 / 10 now, 400 / 8 before: €50.00 both times.
-    expect(within(tile("Cost per new customer")).getByText("€50.00")).toBeTruthy();
+    // Spend + 23% VAT: €615 now, €492 before.
+    expect(within(tile("Ad spend (inc. VAT)")).getByText("€615")).toBeTruthy();
+    expect(within(tile("Ad spend (inc. VAT)")).getByText(/\+€123 \(\+25%\) vs previous period/)).toBeTruthy();
+    // 615 / 10 now, 492 / 8 before: €61.50 both times.
+    expect(within(tile("Cost per new customer")).getByText("€61.50")).toBeTruthy();
     expect(within(tile("New customers")).getByText("10")).toBeTruthy();
 
     const rows = screen.getAllByRole("row");

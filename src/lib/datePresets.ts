@@ -19,12 +19,35 @@ export const DATE_PRESETS = [
   { id: "thisMonth", label: "This month" },
   { id: "lastMonth", label: "Last month" },
   { id: "last90", label: "Last 90 days" },
+  { id: "last3Months", label: "Last 3 months" },
   { id: "quarterToDate", label: "Quarter to date" },
   { id: "thisYear", label: "This year (Jan – today)" },
+  { id: "last12Months", label: "Last 12 months" },
   { id: "lastYear", label: "Last calendar year" },
+  { id: "allTime", label: "All time" },
 ] as const;
 
+/** Where "All time" starts when the page gives no earlier limit; pages pass
+ *  their first day with data as `min` (and clampPresets) instead. */
+export const ALL_TIME_START = "2010-01-01";
+
 export type DatePresetId = (typeof DATE_PRESETS)[number]["id"] | "custom";
+
+/** The presets on the admin work-list pages (No answer, Sales tasks, Follow-ups…). */
+export const LIST_PRESETS: readonly DatePresetId[] = [
+  "today",
+  "yesterday",
+  "thisWeek",
+  "lastWeek",
+  "last7",
+  "last14",
+  "last30",
+  "thisMonth",
+  "lastMonth",
+  "last90",
+  "thisYear",
+  "allTime",
+];
 
 export const COMPARE_PRESETS = [
   { id: "previousWeekday", label: "Previous period (match day of week)" },
@@ -75,6 +98,13 @@ function shiftYears(day: string, years: number): string {
   return `${year}-${day.slice(5, 7)}-${String(Math.min(Number(day.slice(8, 10)), lastDay)).padStart(2, "0")}`;
 }
 
+/** The same day `months` earlier; the 31st becomes that month's last day. */
+function shiftMonths(day: string, months: number): string {
+  const target = new Date(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1 + months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  return `${target.toISOString().slice(0, 8)}${String(Math.min(Number(day.slice(8, 10)), lastDay)).padStart(2, "0")}`;
+}
+
 /** Puts two days in order as a range. */
 export const orderedRange = (a: string, b: string): DayRange => (a <= b ? { from: a, to: b } : { from: b, to: a });
 
@@ -107,6 +137,10 @@ export function presetRange(preset: DatePresetId, today: string): DayRange | nul
       return { from: addDays(today, -29), to: today };
     case "last90":
       return { from: addDays(today, -89), to: today };
+    case "last3Months":
+      return { from: shiftMonths(today, -3), to: today };
+    case "last12Months":
+      return { from: addDays(today, -364), to: today };
     case "thisMonth":
       return { from: monthStart(today), to: today };
     case "lastMonth": {
@@ -121,6 +155,8 @@ export function presetRange(preset: DatePresetId, today: string): DayRange | nul
       const year = Number(today.slice(0, 4)) - 1;
       return { from: `${year}-01-01`, to: `${year}-12-31` };
     }
+    case "allTime":
+      return { from: ALL_TIME_START, to: today };
     case "custom":
       return null;
   }
@@ -160,6 +196,44 @@ export function compareRange(range: DayRange, preset: ComparePresetId): DayRange
       return null;
   }
 }
+
+/** Moves a range's start up to `min`; null when the whole range is before it. */
+export function clampToMin(range: DayRange, min?: string): DayRange | null {
+  if (!min || range.from >= min) return range;
+  return range.to < min ? null : { from: min, to: range.to };
+}
+
+/** The admin date picker's value (DateRangePicker). */
+export interface DateRangeValue {
+  preset: DatePresetId;
+  range: DayRange;
+  /** The period to compare against; null when compare is off. */
+  compare: { preset: ComparePresetId; range: DayRange } | null;
+}
+
+/** A picker value for a preset (no comparison), starting no earlier than `min`. */
+export function presetValue(preset: Exclude<DatePresetId, "custom">, today: string, min?: string): DateRangeValue {
+  const range = presetRange(preset, today)!;
+  return { preset, range: clampToMin(range, min) ?? { from: today, to: today }, compare: null };
+}
+
+/** The local (browser) day of an ISO timestamp, "yyyy-MM-dd". */
+export function localDay(iso: string): string {
+  const date = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** Start (inclusive) and end (exclusive) of a range of local days, as ISO times, for database queries. */
+export function localDayBounds(range: DayRange): { from: string; to: string } {
+  const at = (day: string, plusDays = 0) =>
+    new Date(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)) + plusDays).toISOString();
+  return { from: at(range.from), to: at(range.to, 1) };
+}
+
+/** True when a "yyyy-MM-dd" day is inside the range. */
+export const dayInRange = (day: string | null | undefined, range: DayRange): boolean =>
+  !!day && day >= range.from && day <= range.to;
 
 /** True when the whole range sits inside min–max (either may be unset). */
 export function rangeWithin(range: DayRange, min?: string, max?: string): boolean {

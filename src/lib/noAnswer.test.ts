@@ -7,8 +7,10 @@ import {
   countDue,
   emailDraft,
   firstNameOf,
+  firstSequenceDay,
   groupSequences,
   nextAttemptNumber,
+  periodCounts,
   plannedAttempt,
 } from "./noAnswer";
 
@@ -74,6 +76,31 @@ describe("groupSequences", () => {
     expect(groups.exhausted).toEqual([exhausted]);
     expect(groups.closed).toEqual([booked, closed]);
     expect(groups.due).toEqual([]);
+  });
+
+  it("limits finished and ended lists to a chosen period, but never Due or Coming up", () => {
+    const exhausted = sequence({ status: "exhausted", next_due_on: null, closed_at: "2026-10-01T09:00:00Z" });
+    const old = sequence({ status: "booked", next_due_on: null, closed_at: "2026-08-01T09:00:00Z" });
+    const recent = sequence({ status: "booked", next_due_on: null, closed_at: "2026-10-13T09:00:00Z" });
+    const due = sequence({ next_due_on: "2026-10-12" });
+    const august = groupSequences([exhausted, old, recent, due], TODAY, { from: "2026-08-01", to: "2026-08-31" });
+    expect(august.closed).toEqual([old]);
+    expect(august.exhausted).toEqual([]);
+    expect(august.due).toEqual([due]);
+  });
+});
+
+describe("periodCounts", () => {
+  it("counts sequences started, finished and ended in the period", () => {
+    const rows = [
+      sequence({ started_at: "2026-10-02T09:00:00Z" }),
+      sequence({ started_at: "2026-09-20T09:00:00Z", status: "exhausted", closed_at: "2026-10-05T09:00:00Z" }),
+      sequence({ started_at: "2026-10-03T09:00:00Z", status: "not_continuing", closed_at: "2026-10-04T09:00:00Z" }),
+      sequence({ started_at: "2026-09-01T09:00:00Z", status: "booked", closed_at: "2026-09-10T09:00:00Z" }),
+    ];
+    expect(periodCounts(rows, { from: "2026-10-01", to: "2026-10-14" })).toEqual({ started: 2, exhausted: 1, ended: 1 });
+    expect(firstSequenceDay(rows, "2026-10-14")).toBe("2026-09-01");
+    expect(firstSequenceDay([], "2026-10-14")).toBe("2026-10-14");
   });
 });
 

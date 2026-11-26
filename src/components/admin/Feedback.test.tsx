@@ -101,14 +101,41 @@ describe("Feedback page", () => {
     expect(screen.queryByText("Cy Cole")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByRole("button", { name: "Date" })).toHaveTextContent("All time");
     await user.click(screen.getByRole("button", { name: "Date" }));
-    // The calendar also shows early November; the first "5" is 5 October.
-    await user.click(screen.getAllByRole("gridcell", { name: "5" })[0]);
-    await user.click(screen.getByRole("gridcell", { name: "10" }));
-    expect(screen.getByRole("button", { name: "Date" })).toHaveTextContent("5 Oct – 10 Oct 2026");
+    await user.click(screen.getByRole("button", { name: "Last 7 days" }));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    expect(screen.getByRole("button", { name: "Date" })).toHaveTextContent("7 Oct – 13 Oct 2026");
     expect(screen.getByText("Bo Byrne")).toBeInTheDocument();
+    expect(screen.getByText("Cy Cole")).toBeInTheDocument();
     expect(screen.queryByText("Ann Archer")).toBeNull();
-    expect(screen.queryByText("Cy Cole")).toBeNull();
+  });
+
+  it("compares the period's feedback count and rating with another period", async () => {
+    state.rows = [
+      feedback("Ann Archer", { rating: 3, created_at: "2026-10-01T12:00:00.000Z" }),
+      feedback("Bo Byrne", { rating: 4, created_at: "2026-10-08T12:00:00.000Z" }),
+      feedback("Cy Cole", { rating: 5, created_at: "2026-10-12T12:00:00.000Z" }),
+    ];
+    const { user } = renderPage();
+    expect(screen.getByText("All feedback")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Date" }));
+    await user.click(screen.getByRole("button", { name: "Last 7 days" }));
+    await user.click(screen.getByRole("switch"));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    // 7–13 Oct (Bo, Cy) against 30 Sep – 6 Oct (Ann).
+    const count = screen.getByText("Feedback in this period").parentElement!;
+    expect(within(count).getByText("2")).toBeInTheDocument();
+    expect(within(count).getByText("+1 (+100%) vs previous period")).toBeInTheDocument();
+    const rating = screen.getByText("Average rating").parentElement!;
+    expect(within(rating).getByText("4.5 / 5")).toBeInTheDocument();
+    expect(within(rating).getByText("From 2 rated · +1.5 vs previous period")).toBeInTheDocument();
+
+    // Unread still counts every date.
+    const unread = screen.getByText("Unread").parentElement!;
+    expect(within(unread).getByText("3")).toBeInTheDocument();
   });
 
   it("marks feedback as read or actioned", async () => {

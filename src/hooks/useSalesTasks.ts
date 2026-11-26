@@ -6,10 +6,10 @@ import { isMissingTableError } from "@/lib/customerFollowups";
 import {
   type CompletionOutcome,
   type SalesTask,
-  HISTORY_DAYS,
   countDueTasks,
   todayInIreland,
 } from "@/lib/salesTasks";
+import { type DayRange, localDayBounds } from "@/lib/datePresets";
 
 // Data for the admin Sales Tasks page. Tasks are read straight from the
 // database (admin-only RLS); every change goes through a database function
@@ -52,25 +52,37 @@ export function useSalesTasks() {
   });
 }
 
-/** Tasks finished in the last HISTORY_DAYS days, newest first. */
-export function useSalesTaskHistory(enabled: boolean) {
+const HISTORY_PAGE = 1000;
+/** Most finished tasks one period loads (a few years of tasks at today's pace). */
+const HISTORY_MAX = 10_000;
+
+/** Tasks finished in a period of local days, newest first. */
+export function useSalesTaskHistory(range: DayRange | null, enabled: boolean) {
   const { data: isAdmin } = useIsAdmin();
 
   return useQuery<SalesTask[], DbError>({
-    queryKey: [...TASKS_KEY, "history"],
+    queryKey: [...TASKS_KEY, "history", range?.from, range?.to],
     queryFn: async () => {
-      const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString();
-      const { data, error } = await supabase
-        .from("sales_tasks")
-        .select("*")
-        .neq("status", "pending")
-        .gte("completed_at", since)
-        .order("completed_at", { ascending: false })
-        .limit(500);
-      if (error) throw error;
-      return data;
+      const { from, to } = localDayBounds(range!);
+      const rows: SalesTask[] = [];
+      // Paged, since PostgREST returns at most 1000 rows per request.
+      for (let offset = 0; offset < HISTORY_MAX; offset += HISTORY_PAGE) {
+        const { data, error } = await supabase
+          .from("sales_tasks")
+          .select("*")
+          .neq("status", "pending")
+          .gte("completed_at", from)
+          .lt("completed_at", to)
+          .order("completed_at", { ascending: false })
+          .order("id")
+          .range(offset, offset + HISTORY_PAGE - 1);
+        if (error) throw error;
+        rows.push(...data);
+        if (data.length < HISTORY_PAGE) break;
+      }
+      return rows;
     },
-    enabled: enabled && isAdmin === true,
+    enabled: enabled && range !== null && isAdmin === true,
     staleTime: 1000 * 60,
     retry: noRetryIfMissing,
   });

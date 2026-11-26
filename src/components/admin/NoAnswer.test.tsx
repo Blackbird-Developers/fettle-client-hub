@@ -202,4 +202,25 @@ describe("No answer page", () => {
       customerPhone: "087 123 4567",
     });
   });
+
+  it("counts started, finished and ended in the chosen period, and compares with the one before", async () => {
+    state.sequences = [
+      sequence("Ann Archer", { started_at: subDays(today, 3).toISOString() }),
+      sequence("Bo Byrne", { status: "booked", next_due_on: null, started_at: subDays(today, 20).toISOString(), closed_at: subDays(today, 5).toISOString() }),
+      // Ended 35 days ago: before the default last 30 days, inside the previous period.
+      sequence("Cy Cole", { status: "booked", next_due_on: null, started_at: subDays(today, 40).toISOString(), closed_at: subDays(today, 35).toISOString() }),
+    ];
+    const { user } = renderPage();
+    const ended = screen.getByText("Ended", { selector: "p" }).parentElement!;
+    expect(within(ended).getByText("1")).toBeTruthy();
+    expect(within(ended).getByText("In this period")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /last 30 days/i }));
+    await user.click(screen.getByRole("switch"));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    expect(within(ended).getByText("±0 (±0%) vs previous period")).toBeTruthy();
+    const started = screen.getByText("Started", { selector: "p" }).parentElement!;
+    // Ann and Bo now; Cy before.
+    expect(within(started).getByText("+1 (+100%) vs previous period")).toBeTruthy();
+  });
 });
